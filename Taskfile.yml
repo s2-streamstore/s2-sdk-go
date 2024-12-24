@@ -1,0 +1,96 @@
+version: '3'
+
+tasks:
+  example:
+    aliases: [eg]
+    deps:
+      - gen
+    requires:
+      vars: [NAME]
+    cmds:
+      - go run ./examples/{{.NAME}}
+
+  gen:
+    deps:
+      - gen:proto
+      - gen:sync
+
+  gen:proto:
+    preconditions:
+      - sh: which protoc
+        msg: |
+         `protoc` command not found
+         Install the proto compiler: https://grpc.io/docs/protoc-installation/
+      - sh: which protoc-gen-go
+        msg: |
+          `protoc-gen-go` command not found
+          Install the Go extension using:
+          $ go install google.golang.org/grpc/cmd/protoc-gen-go@latest
+      - sh: which protoc-gen-go-grpc
+        msg: |
+          `protoc-gen-go-grpc` command not found
+          Install the gRPC extension using:
+          $ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+    sources:
+      - proto/s2/v1alpha/s2.proto
+    generates:
+      - pb/s2.pb.go
+      - pb/s2_grpc.pb.go
+    cmds:
+      - test -d pb || mkdir pb
+      - cmd: |
+          protoc --proto_path=proto/s2/v1alpha \
+            --go_opt=Ms2.proto=github.com/s2-streamstore/s2-sdk-go/pb \
+            --go-grpc_opt=Ms2.proto=github.com/s2-streamstore/s2-sdk-go/pb \
+            --go_opt=paths=source_relative \
+            --go-grpc_opt=paths=source_relative \
+            --go_out=pb \
+            --go-grpc_out=pb \
+            s2.proto
+
+  gen:sync:
+    deps:
+      - gen:sync:types
+      - gen:sync:client
+
+  gen:sync:types:
+    deps:
+      - gen:sync:_bin
+      - gen:proto
+    sources:
+      - .out/sync-docs
+      - pb/s2.pb.go
+      - syncgen/types.sync.tmpl
+    generates:
+      - s2/types.sync.go
+    cmds:
+      - cmd: |
+          .out/sync-docs \
+            -i pb/s2.pb.go \
+            -t syncgen/types.sync.tmpl \
+            -o s2/types.sync.go
+
+  gen:sync:client:
+    deps:
+      - gen:sync:_bin
+      - gen:proto
+    sources:
+      - .out/sync-docs
+      - pb/s2_grpc.pb.go
+      - syncgen/client.sync.tmpl
+    generates:
+      - s2/client.sync.go
+    cmds:
+      - cmd: |
+          .out/sync-docs \
+            -i pb/s2_grpc.pb.go \
+            -t syncgen/client.sync.tmpl \
+            -o s2/client.sync.go
+    
+  gen:sync:_bin:
+    sources:
+      - cmd/sync-docs/*.go
+    generates:
+      - .out/sync-docs
+    cmds:
+      - go build -o .out/sync-docs ./cmd/sync-docs/*.go

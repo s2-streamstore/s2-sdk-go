@@ -1,0 +1,10 @@
+package s2
+
+import (
+	"context"
+)
+
+// {{ syncDoc "AccountServiceClient.ListBasins" }}
+func (c *Client) ListBasins(ctx context.Context, req *ListBasinsRequest) (*ListBasinsResponse, error) {
+	return c.listBasins(ctx, req)
+}

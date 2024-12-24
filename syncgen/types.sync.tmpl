@@ -1,0 +1,45 @@
+package s2
+
+// {{ syncDoc "BasinState" }}
+type BasinState uint
+
+const (
+	// {{ syncDocIndent "BasinState_BASIN_STATE_UNSPECIFIED" }}
+	BasinStateUnspecified BasinState = iota
+	// {{ syncDocIndent "BasinState_BASIN_STATE_ACTIVE" }}
+	BasinStateActive
+	// {{ syncDocIndent "BasinState_BASIN_STATE_CREATING" }}
+	BasinStateCreating
+	// {{ syncDocIndent "BasinState_BASIN_STATE_DELETING" }}
+	BasinStateDeleting
+)
+
+// {{ syncDoc "BasinInfo" }}
+type BasinInfo struct {
+	// {{ syncDocIndent "BasinInfo.Name" }}
+	Name string
+	// {{ syncDocIndent "BasinInfo.Scope" }}
+	Scope string
+	// {{ syncDocIndent "BasinInfo.Cell" }}
+	Cell string
+	// {{ syncDocIndent "BasinInfo.State" }}
+	State BasinState
+}
+
+// {{ syncDoc "ListBasinsRequest" }}
+type ListBasinsRequest struct {
+	// {{ syncDocIndent "ListBasinsRequest.Prefix" }}
+	Prefix string
+	// {{ syncDocIndent "ListBasinsRequest.StartAfter" }}
+	StartAfter string
+	// {{ syncDocIndent "ListBasinsRequest.Limit" }}
+	Limit uint64
+}
+
+// {{ syncDoc "ListBasinsResponse" }}
+type ListBasinsResponse struct {
+	// {{ syncDocIndent "ListBasinsResponse.Basins" }}
+	Basins []BasinInfo
+	// {{ syncDocIndent "ListBasinsResponse.HasMore" }}
+	HasMore bool
+}
