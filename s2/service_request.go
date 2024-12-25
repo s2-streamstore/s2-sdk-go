@@ -15,6 +15,23 @@ const (
 	idempotencyLevelNoSideEffects
 )
 
+func (i idempotencyLevel) isIdempotent() bool {
+	return i == idempotencyLevelIdempotent || i == idempotencyLevelNoSideEffects
+}
+
+func (i idempotencyLevel) String() string {
+	switch i {
+	case idempotencyLevelUnknown:
+		return "unknown"
+	case idempotencyLevelIdempotent:
+		return "idempotent"
+	case idempotencyLevelNoSideEffects:
+		return "no-side-effects"
+	default:
+		return "<unknown idempotency level>"
+	}
+}
+
 type serviceRequest interface {
 	idempotencyLevel() idempotencyLevel
 	send(ctx context.Context) (any, error)

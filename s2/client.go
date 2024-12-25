@@ -5,19 +5,14 @@ import (
 	"crypto/tls"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/s2-streamstore/s2-sdk-go/pb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
-
-type Client struct {
-	inner *clientInner
-}
-
-type ConfigParam interface {
-	apply(*clientConfig) error
-}
 
 type Cloud uint
 
@@ -40,32 +35,61 @@ type Endpoints struct {
 	Basin   string
 }
 
-func WithCloud(cloud Cloud) *Endpoints {
+func EndpointsForCloud(cloud Cloud) *Endpoints {
 	return &Endpoints{
 		Account: fmt.Sprintf("%s.s2.dev", cloud),
 		Basin:   fmt.Sprintf("{basin}.b.%s.s2.dev", cloud),
 	}
 }
 
-func WithCloudAndCell(cloud Cloud, cellID string) *Endpoints {
+func EndpointsForCell(cloud Cloud, cellID string) *Endpoints {
 	panic("todo")
 }
 
-func WithEndpointsFromEnv() (*Endpoints, error) {
+func EndpointsFromEnv() (*Endpoints, error) {
 	panic("todo")
-}
-
-func WithRawEndpoints(account string, basin string) *Endpoints {
-	return &Endpoints{
-		Account: account,
-		Basin:   basin,
-	}
 }
 
 func (e *Endpoints) apply(config *clientConfig) error {
 	// TODO: Validate endpoints
 	config.endpoints = e
 	return nil
+}
+
+type ConfigParam interface {
+	apply(*clientConfig) error
+}
+
+type applyConfigParamFunc func(*clientConfig) error
+
+func (f applyConfigParamFunc) apply(cc *clientConfig) error {
+	return f(cc)
+}
+
+func WithEndpoints(e *Endpoints) ConfigParam {
+	return applyConfigParamFunc(func(cc *clientConfig) error {
+		// TODO: Validate endpoints
+		cc.endpoints = e
+		return nil
+	})
+}
+
+func WithRetryBackoffDuration(d time.Duration) ConfigParam {
+	return applyConfigParamFunc(func(cc *clientConfig) error {
+		cc.retryBackoffDuration = d
+		return nil
+	})
+}
+
+func WithMaxRetryAttempts(n uint) ConfigParam {
+	return applyConfigParamFunc(func(cc *clientConfig) error {
+		cc.maxRetryAttempts = n
+		return nil
+	})
+}
+
+type Client struct {
+	inner *clientInner
 }
 
 func NewClient(authToken string, params ...ConfigParam) (*Client, error) {
@@ -135,8 +159,10 @@ func (s *StreamClient) checkTail(ctx context.Context) (uint64, error) {
 }
 
 type clientConfig struct {
-	authToken string
-	endpoints *Endpoints
+	authToken            string
+	endpoints            *Endpoints
+	retryBackoffDuration time.Duration
+	maxRetryAttempts     uint
 }
 
 func newClientConfig(authToken string, params ...ConfigParam) (*clientConfig, error) {
@@ -146,8 +172,10 @@ func newClientConfig(authToken string, params ...ConfigParam) (*clientConfig, er
 
 	// Default configuration
 	config := &clientConfig{
-		authToken: authToken,
-		endpoints: WithCloud(CloudAWS),
+		authToken:            authToken,
+		endpoints:            EndpointsForCloud(CloudAWS),
+		retryBackoffDuration: 100 * time.Millisecond,
+		maxRetryAttempts:     3,
 	}
 
 	for _, param := range params {
@@ -181,7 +209,7 @@ func newClientInner(config *clientConfig, basin string) (*clientInner, error) {
 	}
 
 	conn, err := grpc.NewClient(
-		fmt.Sprintf("%s:443", endpoint),
+		endpoint,
 		grpc.WithTransportCredentials(creds),
 		grpc.WithUnaryInterceptor(authHeaderInterceptor(config.authToken)),
 	)
@@ -225,18 +253,55 @@ func (c *clientInner) streamServiceClient() pb.StreamServiceClient {
 }
 
 func sendRetryable[T any](ctx context.Context, inner *clientInner, r serviceRequest) (T, error) {
-	// Add required headers
-	if inner.basin != "" {
-		ctx = ctxWithHeader(ctx, "s2-basin", inner.basin)
-	}
-
-	// TODO: Retries
-	ret, err := r.send(ctx)
+	ret, err := sendRetryableInner(ctx, inner.basin, inner.config, r)
 	if err != nil {
 		var def T
 		return def, err
 	}
 	return assertType[T](ret), nil
+}
+
+func sendRetryableInner(ctx context.Context, basin string, config *clientConfig, r serviceRequest) (any, error) {
+	// Add required headers
+	if basin != "" {
+		ctx = ctxWithHeader(ctx, "s2-basin", basin)
+	}
+
+	var finalErr error
+
+	for i := uint(0); i < config.maxRetryAttempts; i++ {
+		ret, err := r.send(ctx)
+		if err == nil {
+			return ret, nil
+		}
+
+		// Figure out if need to retry
+		if !r.idempotencyLevel().isIdempotent() {
+			return nil, err
+		}
+
+		statusErr, ok := status.FromError(err)
+		if !ok {
+			return nil, err
+		}
+
+		switch statusErr.Code() {
+		case codes.Unavailable, codes.DeadlineExceeded, codes.Unknown:
+			// We should retry
+		default:
+			return nil, err
+		}
+
+		finalErr = err
+
+		select {
+		case <-time.After(config.retryBackoffDuration):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	return nil, finalErr
 }
 
 func authHeaderInterceptor(token string) grpc.UnaryClientInterceptor {
