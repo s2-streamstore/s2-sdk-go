@@ -75,3 +75,35 @@ type ListStreamsResponse struct {
 	// {{ syncDocIndent "ListStreamsResponse.HasMore" }}
 	HasMore bool
 }
+
+// {{ syncDoc "StorageClass" }}
+type StorageClass uint
+
+const (
+	// {{ syncDocIndent "StorageClass_STORAGE_CLASS_UNSPECIFIED" }}
+	StorageClassUnspecified StorageClass = iota
+	// {{ syncDocIndent "StorageClass_STORAGE_CLASS_STANDARD" }}
+	StorageClassStandard
+	// {{ syncDocIndent "StorageClass_STORAGE_CLASS_EXPRESS" }}
+	StorageClassExpress
+)
+
+// {{ syncDoc "StreamConfig_Age.Age" }}
+type RetentionPolicyAge time.Duration
+
+// {{ syncDoc "StreamConfig" }}
+type StreamConfig struct {
+	// {{ syncDocIndent "StreamConfig.StorageClass" }}
+	StorageClass StorageClass
+	// {{ syncDocIndent "StreamConfig.RetentionPolicy" }}
+	//
+	// Valid types for RetentionPolicy are:
+	// 	- `RetentionPolicyAge`
+	RetentionPolicy implRetentionPolicy
+}
+
+// {{ syncDoc "BasinConfig" }}
+type BasinConfig struct {
+	// {{ syncDocIndent "BasinConfig.DefaultStreamConfig" }}
+	DefaultStreamConfig *StreamConfig
+}

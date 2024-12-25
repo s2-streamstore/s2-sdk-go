@@ -18,11 +18,11 @@ type testRetryServiceRequest struct {
 	attempts uint
 }
 
-func (t *testRetryServiceRequest) idempotencyLevel() idempotencyLevel {
+func (t *testRetryServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return t.idLevel
 }
 
-func (t *testRetryServiceRequest) send(ctx context.Context) (any, error) {
+func (t *testRetryServiceRequest) Send(ctx context.Context) (any, error) {
 	t.attempts++
 	if t.attempts == 3 {
 		return nil, nil

@@ -7,22 +7,22 @@ import (
 )
 
 type listStreamsServiceRequest struct {
-	client pb.BasinServiceClient
-	req    *ListStreamsRequest
+	Client pb.BasinServiceClient
+	Req    *ListStreamsRequest
 }
 
-func (r *listStreamsServiceRequest) idempotencyLevel() idempotencyLevel {
+func (r *listStreamsServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
-func (r *listStreamsServiceRequest) send(ctx context.Context) (any, error) {
+func (r *listStreamsServiceRequest) Send(ctx context.Context) (any, error) {
 	req := &pb.ListStreamsRequest{
-		Prefix:     r.req.Prefix,
-		StartAfter: r.req.StartAfter,
-		Limit:      r.req.Limit,
+		Prefix:     r.Req.Prefix,
+		StartAfter: r.Req.StartAfter,
+		Limit:      r.Req.Limit,
 	}
 
-	pbResp, err := r.client.ListStreams(ctx, req)
+	pbResp, err := r.Client.ListStreams(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -37,4 +37,26 @@ func (r *listStreamsServiceRequest) send(ctx context.Context) (any, error) {
 		Streams: streamInfos,
 		HasMore: pbResp.GetHasMore(),
 	}, nil
+}
+
+type getStreamConfigServiceRequest struct {
+	Client pb.BasinServiceClient
+	Stream string
+}
+
+func (r *getStreamConfigServiceRequest) IdempotencyLevel() idempotencyLevel {
+	return idempotencyLevelNoSideEffects
+}
+
+func (r *getStreamConfigServiceRequest) Send(ctx context.Context) (any, error) {
+	req := &pb.GetStreamConfigRequest{
+		Stream: r.Stream,
+	}
+
+	pbResp, err := r.Client.GetStreamConfig(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return streamConfigFromProto(pbResp.GetConfig())
 }

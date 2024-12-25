@@ -15,7 +15,7 @@ const (
 	idempotencyLevelNoSideEffects
 )
 
-func (i idempotencyLevel) isIdempotent() bool {
+func (i idempotencyLevel) IsIdempotent() bool {
 	return i == idempotencyLevelIdempotent || i == idempotencyLevelNoSideEffects
 }
 
@@ -33,8 +33,8 @@ func (i idempotencyLevel) String() string {
 }
 
 type serviceRequest interface {
-	idempotencyLevel() idempotencyLevel
-	send(ctx context.Context) (any, error)
+	IdempotencyLevel() idempotencyLevel
+	Send(ctx context.Context) (any, error)
 }
 
 func assertType[T any](r any) T {

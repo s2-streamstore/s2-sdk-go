@@ -9,39 +9,19 @@ import (
 )
 
 func main() {
-	client, err := s2.NewClient(
+	client, err := s2.NewBasinClient(
+		"vrongmeal-basin",
 		os.Getenv("S2_AUTH_TOKEN"),
-		// s2.WithRawEndpoints("aws.s2.dev", "aws.s2.dev"),
+		s2.WithEndpoints(&s2.Endpoints{Account: "aws.s2.dev", Basin: "aws.s2.dev"}),
 	)
 	if err != nil {
 		panic(err)
 	}
 
-	basins, err := client.ListBasins(context.TODO(), &s2.ListBasinsRequest{})
+	conf, err := client.GetStreamConfig(context.TODO(), "starwars2")
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("%#v\n", basins)
-
-	basinClient, err := client.BasinClient("vrongmeal-basin")
-	if err != nil {
-		panic(err)
-	}
-
-	streams, err := basinClient.ListStreams(context.TODO(), &s2.ListStreamsRequest{})
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("%#v\n", streams)
-
-	streamClient := basinClient.StreamClient("starwars2")
-
-	tail, err := streamClient.CheckTail(context.TODO())
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println("Tail:", tail)
+	fmt.Printf("%#v\n", conf)
 }

@@ -7,22 +7,22 @@ import (
 )
 
 type listBasinsServiceRequest struct {
-	client pb.AccountServiceClient
-	req    *ListBasinsRequest
+	Client pb.AccountServiceClient
+	Req    *ListBasinsRequest
 }
 
-func (r *listBasinsServiceRequest) idempotencyLevel() idempotencyLevel {
+func (r *listBasinsServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
-func (r *listBasinsServiceRequest) send(ctx context.Context) (any, error) {
+func (r *listBasinsServiceRequest) Send(ctx context.Context) (any, error) {
 	req := &pb.ListBasinsRequest{
-		Prefix:     r.req.Prefix,
-		StartAfter: r.req.StartAfter,
-		Limit:      r.req.Limit,
+		Prefix:     r.Req.Prefix,
+		StartAfter: r.Req.StartAfter,
+		Limit:      r.Req.Limit,
 	}
 
-	pbResp, err := r.client.ListBasins(ctx, req)
+	pbResp, err := r.Client.ListBasins(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -41,4 +41,26 @@ func (r *listBasinsServiceRequest) send(ctx context.Context) (any, error) {
 		Basins:  basinInfos,
 		HasMore: pbResp.GetHasMore(),
 	}, nil
+}
+
+type getBasinConfigRequest struct {
+	Client pb.AccountServiceClient
+	Basin  string
+}
+
+func (r *getBasinConfigRequest) IdempotencyLevel() idempotencyLevel {
+	return idempotencyLevelNoSideEffects
+}
+
+func (r *getBasinConfigRequest) Send(ctx context.Context) (any, error) {
+	req := &pb.GetBasinConfigRequest{
+		Basin: r.Basin,
+	}
+
+	pbResp, err := r.Client.GetBasinConfig(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return basinConfigFromProto(pbResp.GetConfig())
 }

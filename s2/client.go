@@ -110,10 +110,18 @@ func NewClient(authToken string, params ...ConfigParam) (*Client, error) {
 
 func (c *Client) listBasins(ctx context.Context, req *ListBasinsRequest) (*ListBasinsResponse, error) {
 	r := &listBasinsServiceRequest{
-		client: c.inner.accountServiceClient(),
-		req:    req,
+		Client: c.inner.accountServiceClient(),
+		Req:    req,
 	}
 	return sendRetryable[*ListBasinsResponse](ctx, c.inner, r)
+}
+
+func (c *Client) getBasinConfig(ctx context.Context, basin string) (*BasinConfig, error) {
+	r := &getBasinConfigRequest{
+		Client: c.inner.accountServiceClient(),
+		Basin:  basin,
+	}
+	return sendRetryable[*BasinConfig](ctx, c.inner, r)
 }
 
 func (c *Client) BasinClient(basin string) (*BasinClient, error) {
@@ -130,12 +138,36 @@ type BasinClient struct {
 	inner *clientInner
 }
 
+func NewBasinClient(basin, authToken string, params ...ConfigParam) (*BasinClient, error) {
+	config, err := newClientConfig(authToken, params...)
+	if err != nil {
+		return nil, err
+	}
+
+	inner, err := newClientInner(config, basin)
+	if err != nil {
+		return nil, err
+	}
+
+	return &BasinClient{
+		inner: inner,
+	}, nil
+}
+
 func (b *BasinClient) listStreams(ctx context.Context, req *ListStreamsRequest) (*ListStreamsResponse, error) {
 	r := &listStreamsServiceRequest{
-		client: b.inner.basinServiceClient(),
-		req:    req,
+		Client: b.inner.basinServiceClient(),
+		Req:    req,
 	}
 	return sendRetryable[*ListStreamsResponse](ctx, b.inner, r)
+}
+
+func (b *BasinClient) getStreamConfig(ctx context.Context, stream string) (*StreamConfig, error) {
+	r := &getStreamConfigServiceRequest{
+		Client: b.inner.basinServiceClient(),
+		Stream: stream,
+	}
+	return sendRetryable[*StreamConfig](ctx, b.inner, r)
 }
 
 func (b *BasinClient) StreamClient(stream string) *StreamClient {
@@ -150,10 +182,18 @@ type StreamClient struct {
 	inner  *clientInner
 }
 
+func NewStreamClient(basin, stream, authToken string, params ...ConfigParam) (*StreamClient, error) {
+	basinClient, err := NewBasinClient(basin, authToken, params...)
+	if err != nil {
+		return nil, err
+	}
+	return basinClient.StreamClient(stream), nil
+}
+
 func (s *StreamClient) checkTail(ctx context.Context) (uint64, error) {
 	r := &checkTailServiceRequest{
-		client: s.inner.streamServiceClient(),
-		stream: s.stream,
+		Client: s.inner.streamServiceClient(),
+		Stream: s.stream,
 	}
 	return sendRetryable[uint64](ctx, s.inner, r)
 }
@@ -270,13 +310,13 @@ func sendRetryableInner(ctx context.Context, basin string, config *clientConfig,
 	var finalErr error
 
 	for i := uint(0); i < config.maxRetryAttempts; i++ {
-		ret, err := r.send(ctx)
+		ret, err := r.Send(ctx)
 		if err == nil {
 			return ret, nil
 		}
 
 		// Figure out if need to retry
-		if !r.idempotencyLevel().isIdempotent() {
+		if !r.IdempotencyLevel().IsIdempotent() {
 			return nil, err
 		}
 

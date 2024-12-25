@@ -7,20 +7,20 @@ import (
 )
 
 type checkTailServiceRequest struct {
-	client pb.StreamServiceClient
-	stream string
+	Client pb.StreamServiceClient
+	Stream string
 }
 
-func (r *checkTailServiceRequest) idempotencyLevel() idempotencyLevel {
+func (r *checkTailServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
-func (r *checkTailServiceRequest) send(ctx context.Context) (any, error) {
+func (r *checkTailServiceRequest) Send(ctx context.Context) (any, error) {
 	req := &pb.CheckTailRequest{
-		Stream: r.stream,
+		Stream: r.Stream,
 	}
 
-	pbResp, err := r.client.CheckTail(ctx, req)
+	pbResp, err := r.Client.CheckTail(ctx, req)
 	if err != nil {
 		return nil, err
 	}

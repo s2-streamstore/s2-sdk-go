@@ -14,18 +14,35 @@ import (
 
 func commentString(doc string, indent uint) string {
 	lines := strings.Split(doc, "\n")
+	sliceAt := len(lines)
+
 	for i, line := range lines {
 		if i == 0 {
 			// Because of pre-existing "//"
 			continue
 		}
+
+		if strings.HasPrefix(line, "Types that are valid to be assigned to") {
+			// Union type. We want this comment to be manually added.
+			sliceAt = i
+
+			for strings.TrimSpace(lines[sliceAt-1]) == "//" {
+				// Remove empty lines before this comment
+				sliceAt--
+			}
+
+			break
+		}
+
 		tab := ""
 		for i := uint(0); i < indent; i++ {
 			tab += "\t"
 		}
+
 		lines[i] = tab + "// " + strings.TrimSpace(line)
 	}
-	return strings.Join(lines, "\n")
+
+	return strings.Join(lines[:sliceAt], "\n")
 }
 
 func parseComments(src string) map[string]string {

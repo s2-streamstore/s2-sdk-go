@@ -81,3 +81,37 @@ type ListStreamsResponse struct {
 	// If set, indicates there are more results that can be listed with `start_after`.
 	HasMore bool
 }
+
+// Storage class for recent writes.
+type StorageClass uint
+
+const (
+	// Unspecified, which is currently overridden to `STORAGE_CLASS_EXPRESS`.
+	StorageClassUnspecified StorageClass = iota
+	// Standard, which offers end-to-end latencies under 500 ms.
+	StorageClassStandard
+	// Express, which offers end-to-end latencies under 50 ms.
+	StorageClassExpress
+)
+
+// Age in seconds for automatic trimming of records older than this threshold.
+// If set to 0, the stream will have infinite retention.
+type RetentionPolicyAge time.Duration
+
+// Stream configuration.
+type StreamConfig struct {
+	// Storage class for recent writes. This is the main cost:performance knob in S2.
+	StorageClass StorageClass
+	// Retention policy for the stream.
+	// If unspecified, the default is to retain records for 7 days.
+	//
+	// Valid types for RetentionPolicy are:
+	// 	- `RetentionPolicyAge`
+	RetentionPolicy implRetentionPolicy
+}
+
+// Basin configuration.
+type BasinConfig struct {
+	// Default stream configuration.
+	DefaultStreamConfig *StreamConfig
+}
