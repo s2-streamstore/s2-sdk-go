@@ -2270,15 +2270,10 @@ func (x *BasinInfo) GetState() BasinState {
 }
 
 // Headers add structured information to a record as name-value pairs.
-//
-// Header names cannot be empty, with the exception of "command messages" that are interpreted by S2. A command message is signalled by a sole header with empty name. The header value represents an operation, and the record body acts as a payload for the command. S2 client SDKs provide high-level APIs for command messages, and advanced users may also create them directly.
-//
-// Valid operations are as follows:
-// - `fence` with an upto 16 byte payload to set a fencing token. An empty payload clears the token. Fencing is strongly consistent, and subsequent appends that specify a fencing token will be rejected if it does not match.
-// - `trim` with exactly 8 big-endian bytes as payload representing the desired earliest sequence number. This sequence number is only allowed to advance, and any regression will be ignored. Trimming is eventually consistent, and trimmed records may be visible for a brief period.
 type Header struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Header name blob.
+	// The name cannot be empty, with the exception of an S2 command record.
 	Name []byte `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Header value blob.
 	Value         []byte `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
