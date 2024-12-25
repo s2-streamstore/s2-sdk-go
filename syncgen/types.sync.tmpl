@@ -1,5 +1,9 @@
 package s2
 
+import (
+	"time"
+)
+
 // {{ syncDoc "BasinState" }}
 type BasinState uint
 
@@ -41,5 +45,33 @@ type ListBasinsResponse struct {
 	// {{ syncDocIndent "ListBasinsResponse.Basins" }}
 	Basins []BasinInfo
 	// {{ syncDocIndent "ListBasinsResponse.HasMore" }}
+	HasMore bool
+}
+
+// {{ syncDoc "StreamInfo" }}
+type StreamInfo struct {
+	// {{ syncDocIndent "StreamInfo.Name" }}
+	Name string
+	// {{ syncDocIndent "StreamInfo.CreatedAt" }}
+	CreatedAt time.Time
+	// {{ syncDocIndent "StreamInfo.DeletedAt" }}
+	DeletedAt *time.Time
+}
+
+// {{ syncDoc "ListStreamsRequest" }}
+type ListStreamsRequest struct {
+	// {{ syncDocIndent "ListStreamsRequest.Prefix" }}
+	Prefix string
+	// {{ syncDocIndent "ListStreamsRequest.StartAfter" }}
+	StartAfter string
+	// {{ syncDocIndent "ListStreamsRequest.Limit" }}
+	Limit uint64
+}
+
+// {{ syncDoc "ListStreamsResponse" }}
+type ListStreamsResponse struct {
+	// {{ syncDocIndent "ListStreamsResponse.Streams" }}
+	Streams []StreamInfo
+	// {{ syncDocIndent "ListStreamsResponse.HasMore" }}
 	HasMore bool
 }

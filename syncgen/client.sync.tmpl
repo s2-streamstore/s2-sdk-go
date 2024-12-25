@@ -8,3 +8,13 @@ import (
 func (c *Client) ListBasins(ctx context.Context, req *ListBasinsRequest) (*ListBasinsResponse, error) {
 	return c.listBasins(ctx, req)
 }
+
+// {{ syncDoc "BasinServiceClient.ListStreams" }}
+func (b *BasinClient) ListStreams(ctx context.Context, req *ListStreamsRequest) (*ListStreamsResponse, error) {
+	return b.listStreams(ctx, req)
+}
+
+// {{ syncDoc "StreamServiceClient.CheckTail" }}
+func (s *StreamClient) CheckTail(ctx context.Context) (uint64, error) {
+	return s.checkTail(ctx)
+}

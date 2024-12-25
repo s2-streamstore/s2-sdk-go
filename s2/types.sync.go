@@ -2,6 +2,10 @@
 
 package s2
 
+import (
+	"time"
+)
+
 // Current state of the basin.
 type BasinState uint
 
@@ -44,6 +48,36 @@ type ListBasinsRequest struct {
 type ListBasinsResponse struct {
 	// Matching basins.
 	Basins []BasinInfo
+	// If set, indicates there are more results that can be listed with `start_after`.
+	HasMore bool
+}
+
+// Stream information.
+type StreamInfo struct {
+	// Stream name.
+	Name string
+	// Creation time in seconds since Unix epoch.
+	CreatedAt time.Time
+	// Deletion time in seconds since Unix epoch, if the stream is being deleted.
+	DeletedAt *time.Time
+}
+
+// List streams request.
+type ListStreamsRequest struct {
+	// List stream names that begin with this prefix.
+	Prefix string
+	// Only return stream names that lexicographically start after this name.
+	// This can be the last stream name seen in a previous listing, to continue from there.
+	// It must be greater than or equal to the prefix if specified.
+	StartAfter string
+	// Number of results, upto a maximum of 1000.
+	Limit uint64
+}
+
+// List streams response.
+type ListStreamsResponse struct {
+	// Matching streams.
+	Streams []StreamInfo
 	// If set, indicates there are more results that can be listed with `start_after`.
 	HasMore bool
 }

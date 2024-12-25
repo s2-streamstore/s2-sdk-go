@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/s2-streamstore/s2-sdk-go/pb"
+	"google.golang.org/grpc/metadata"
 )
 
 type idempotencyLevel uint
@@ -17,7 +17,7 @@ const (
 
 type serviceRequest interface {
 	idempotencyLevel() idempotencyLevel
-	send(ctx context.Context, resp any) error
+	send(ctx context.Context) (any, error)
 }
 
 func assertType[T any](r any) T {
@@ -29,54 +29,12 @@ func assertType[T any](r any) T {
 	}
 }
 
-type listBasinsServiceRequest struct {
-	client pb.AccountServiceClient
-	req    *ListBasinsRequest
-}
+func ctxWithHeader(ctx context.Context, key, val string) context.Context {
+	headers := metadata.Pairs(key, val)
 
-func (r *listBasinsServiceRequest) idempotencyLevel() idempotencyLevel {
-	return idempotencyLevelNoSideEffects
-}
-
-func (r *listBasinsServiceRequest) send(ctx context.Context) (any, error) {
-	req := &pb.ListBasinsRequest{
-		Prefix:     r.req.Prefix,
-		StartAfter: r.req.StartAfter,
-		Limit:      r.req.Limit,
+	if existing, ok := metadata.FromOutgoingContext(ctx); ok {
+		headers = metadata.Join(existing, headers)
 	}
 
-	pbResp, err := r.client.ListBasins(ctx, assertType[*pb.ListBasinsRequest](req))
-	if err != nil {
-		return nil, err
-	}
-
-	pbBasins := pbResp.GetBasins()
-	basinInfos := make([]BasinInfo, 0, len(pbBasins))
-	for _, info := range pbBasins {
-		var state BasinState
-		switch info.GetState() {
-		case pb.BasinState_BASIN_STATE_UNSPECIFIED:
-			state = BasinStateUnspecified
-		case pb.BasinState_BASIN_STATE_ACTIVE:
-			state = BasinStateActive
-		case pb.BasinState_BASIN_STATE_CREATING:
-			state = BasinStateCreating
-		case pb.BasinState_BASIN_STATE_DELETING:
-			state = BasinStateCreating
-		default:
-			return nil, fmt.Errorf("unknown basin state %d", info.GetState())
-		}
-
-		basinInfos = append(basinInfos, BasinInfo{
-			Name:  info.GetName(),
-			Scope: info.GetScope(),
-			Cell:  info.GetCell(),
-			State: state,
-		})
-	}
-
-	return &ListBasinsResponse{
-		Basins:  basinInfos,
-		HasMore: pbResp.GetHasMore(),
-	}, nil
+	return metadata.NewOutgoingContext(ctx, headers)
 }
