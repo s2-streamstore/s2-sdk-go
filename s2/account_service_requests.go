@@ -3,6 +3,7 @@ package s2
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/s2-streamstore/s2-sdk-go/pb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -49,6 +50,7 @@ func (r *listBasinsServiceRequest) Send(ctx context.Context) (any, error) {
 type createBasinServiceRequest struct {
 	Client pb.AccountServiceClient
 	Req    *CreateBasinRequest
+	ReqID  uuid.UUID
 }
 
 func (r *createBasinServiceRequest) IdempotencyLevel() idempotencyLevel {
@@ -69,6 +71,8 @@ func (r *createBasinServiceRequest) Send(ctx context.Context) (any, error) {
 		Basin:  r.Req.Basin,
 		Config: basinConfig,
 	}
+
+	ctx = ctxWithHeader(ctx, "s2-request-token", r.ReqID.String())
 
 	pbResp, err := r.Client.CreateBasin(ctx, req)
 	if err != nil {

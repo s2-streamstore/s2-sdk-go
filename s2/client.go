@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/s2-streamstore/s2-sdk-go/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -120,6 +121,7 @@ func (c *Client) createBasin(ctx context.Context, req *CreateBasinRequest) (*Bas
 	r := &createBasinServiceRequest{
 		Client: c.inner.accountServiceClient(),
 		Req:    req,
+		ReqID:  uuid.New(),
 	}
 	return sendRetryable[*BasinInfo](ctx, c.inner, r)
 }
