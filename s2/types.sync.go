@@ -115,3 +115,33 @@ type BasinConfig struct {
 	// Default stream configuration.
 	DefaultStreamConfig *StreamConfig
 }
+
+// Create basin request.
+type CreateBasinRequest struct {
+	// Basin name, which must be globally unique. It can be omitted to let the service assign a unique name.
+	// The name must be between 8 and 48 characters, comprising lowercase letters, numbers and hyphens.
+	// It cannot begin or end with a hyphen.
+	Basin string
+	// Basin configuration.
+	Config *BasinConfig
+	// TODO: Assignment when implemented
+}
+
+// Delete basin request.
+type DeleteBasinRequest struct {
+	// Name of the basin to delete.
+	Basin string
+	// Delete basin if it exists else do nothing.
+	IfExists bool
+}
+
+// Reconfigure basin request.
+type ReconfigureBasinRequest struct {
+	// Basin name.
+	Basin string
+	// Basin configuration.
+	Config *BasinConfig
+	// Specifies the pieces of configuration being updated.
+	// See https://protobuf.dev/reference/protobuf/google.protobuf/#field-mask
+	Mask []string
+}

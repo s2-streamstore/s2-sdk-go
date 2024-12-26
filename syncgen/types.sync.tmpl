@@ -107,3 +107,30 @@ type BasinConfig struct {
 	// {{ syncDocIndent "BasinConfig.DefaultStreamConfig" }}
 	DefaultStreamConfig *StreamConfig
 }
+
+// {{ syncDoc "CreateBasinRequest" }}
+type CreateBasinRequest struct {
+	// {{ syncDocIndent "CreateBasinRequest.Basin" }}
+	Basin string
+	// {{ syncDocIndent "CreateBasinRequest.Config" }}
+	Config *BasinConfig
+	// TODO: Assignment when implemented
+}
+
+// {{ syncDoc "DeleteBasinRequest" }}
+type DeleteBasinRequest struct {
+	// {{ syncDocIndent "DeleteBasinRequest.Basin" }}
+	Basin string
+	// Delete basin if it exists else do nothing.
+	IfExists bool
+}
+
+// {{ syncDoc "ReconfigureBasinRequest" }}
+type ReconfigureBasinRequest struct {
+	// {{ syncDocIndent "ReconfigureBasinRequest.Basin" }}
+	Basin string
+	// {{ syncDocIndent "ReconfigureBasinRequest.Config" }}
+	Config *BasinConfig
+	// {{ syncDocIndent "ReconfigureBasinRequest.Mask" }}
+	Mask []string
+}

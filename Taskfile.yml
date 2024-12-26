@@ -8,7 +8,8 @@ tasks:
     requires:
       vars: [NAME]
     cmds:
-      - go run ./examples/{{.NAME}}
+      - go build -o .out/examples/{{.NAME}} ./examples/{{.NAME}}
+      - .out/examples/{{.NAME}}
 
   gen:
     deps:

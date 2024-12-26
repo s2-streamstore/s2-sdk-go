@@ -9,6 +9,21 @@ func (c *Client) ListBasins(ctx context.Context, req *ListBasinsRequest) (*ListB
 	return c.listBasins(ctx, req)
 }
 
+// {{ syncDoc "AccountServiceClient.CreateBasin" }}
+func (c *Client) CreateBasin(ctx context.Context, req *CreateBasinRequest) (*BasinInfo, error) {
+	return c.createBasin(ctx, req)
+}
+
+// {{ syncDoc "AccountServiceClient.DeleteBasin" }}
+func (c *Client) DeleteBasin(ctx context.Context, req *DeleteBasinRequest) error {
+	return c.deleteBasin(ctx, req)
+}
+
+// {{ syncDoc "AccountServiceClient.ReconfigureBasin" }}
+func (c *Client) ReconfigureBasin(ctx context.Context, req *ReconfigureBasinRequest) (*BasinConfig, error) {
+	return c.reconfigureBasin(ctx, req)
+}
+
 // {{ syncDoc "AccountServiceClient.GetBasinConfig" }}
 func (c *Client) GetBasinConfig(ctx context.Context, basin string) (*BasinConfig, error) {
 	return c.getBasinConfig(ctx, basin)

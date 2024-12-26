@@ -11,6 +11,23 @@ func (c *Client) ListBasins(ctx context.Context, req *ListBasinsRequest) (*ListB
 	return c.listBasins(ctx, req)
 }
 
+// Create a new basin.
+// Provide a client request token with the `S2-Request-Token` header for idempotent retry behaviour.
+func (c *Client) CreateBasin(ctx context.Context, req *CreateBasinRequest) (*BasinInfo, error) {
+	return c.createBasin(ctx, req)
+}
+
+// Delete a basin.
+// Basin deletion is asynchronous, and may take a few minutes to complete.
+func (c *Client) DeleteBasin(ctx context.Context, req *DeleteBasinRequest) error {
+	return c.deleteBasin(ctx, req)
+}
+
+// Update basin configuration.
+func (c *Client) ReconfigureBasin(ctx context.Context, req *ReconfigureBasinRequest) (*BasinConfig, error) {
+	return c.reconfigureBasin(ctx, req)
+}
+
 // Get basin configuration.
 func (c *Client) GetBasinConfig(ctx context.Context, basin string) (*BasinConfig, error) {
 	return c.getBasinConfig(ctx, basin)

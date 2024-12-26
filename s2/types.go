@@ -13,6 +13,19 @@ type implRetentionPolicy interface {
 
 func (a RetentionPolicyAge) implRetentionPolicy() {}
 
+func (s StorageClass) String() string {
+	switch s {
+	case StorageClassUnspecified:
+		return "unspecified"
+	case StorageClassStandard:
+		return "standard"
+	case StorageClassExpress:
+		return "express"
+	default:
+		return "<unknown storage class>"
+	}
+}
+
 func (s BasinState) String() string {
 	switch s {
 	case BasinStateUnspecified:
@@ -93,12 +106,36 @@ func streamConfigFromProto(pbConfig *pb.StreamConfig) (*StreamConfig, error) {
 	}, nil
 }
 
+func streamConfigIntoProto(config *StreamConfig) (*pb.StreamConfig, error) {
+	pbConfig := new(pb.StreamConfig)
+
+	switch config.StorageClass {
+	case StorageClassUnspecified:
+		pbConfig.StorageClass = pb.StorageClass_STORAGE_CLASS_UNSPECIFIED
+	case StorageClassStandard:
+		pbConfig.StorageClass = pb.StorageClass_STORAGE_CLASS_STANDARD
+	case StorageClassExpress:
+		pbConfig.StorageClass = pb.StorageClass_STORAGE_CLASS_EXPRESS
+	default:
+		return nil, fmt.Errorf("unknown storage class %d", config.StorageClass)
+	}
+
+	switch r := config.RetentionPolicy.(type) {
+	case RetentionPolicyAge:
+		pbConfig.RetentionPolicy = &pb.StreamConfig_Age{Age: uint64(time.Duration(r) / time.Second)}
+	case nil:
+		pbConfig.RetentionPolicy = nil
+	default:
+		return nil, fmt.Errorf("unknown retention policy %T", r)
+	}
+
+	return pbConfig, nil
+}
+
 func basinConfigFromProto(pbConfig *pb.BasinConfig) (*BasinConfig, error) {
-	var (
-		defaultStreamConfig *StreamConfig
-		err                 error
-	)
+	var defaultStreamConfig *StreamConfig
 	if pbConfig.DefaultStreamConfig != nil {
+		var err error
 		defaultStreamConfig, err = streamConfigFromProto(pbConfig.GetDefaultStreamConfig())
 		if err != nil {
 			return nil, err
@@ -107,4 +144,18 @@ func basinConfigFromProto(pbConfig *pb.BasinConfig) (*BasinConfig, error) {
 	return &BasinConfig{
 		DefaultStreamConfig: defaultStreamConfig,
 	}, nil
+}
+
+func basinConfigIntoProto(config *BasinConfig) (*pb.BasinConfig, error) {
+	pbConfig := new(pb.BasinConfig)
+
+	if config.DefaultStreamConfig != nil {
+		var err error
+		pbConfig.DefaultStreamConfig, err = streamConfigIntoProto(config.DefaultStreamConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return pbConfig, nil
 }

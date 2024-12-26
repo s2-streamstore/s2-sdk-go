@@ -4,6 +4,9 @@ import (
 	"context"
 
 	"github.com/s2-streamstore/s2-sdk-go/pb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 type listBasinsServiceRequest struct {
@@ -41,6 +44,108 @@ func (r *listBasinsServiceRequest) Send(ctx context.Context) (any, error) {
 		Basins:  basinInfos,
 		HasMore: pbResp.GetHasMore(),
 	}, nil
+}
+
+type createBasinServiceRequest struct {
+	Client pb.AccountServiceClient
+	Req    *CreateBasinRequest
+}
+
+func (r *createBasinServiceRequest) IdempotencyLevel() idempotencyLevel {
+	return idempotencyLevelIdempotent
+}
+
+func (r *createBasinServiceRequest) Send(ctx context.Context) (any, error) {
+	var basinConfig *pb.BasinConfig
+	if r.Req.Config != nil {
+		var err error
+		basinConfig, err = basinConfigIntoProto(r.Req.Config)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	req := &pb.CreateBasinRequest{
+		Basin:  r.Req.Basin,
+		Config: basinConfig,
+	}
+
+	pbResp, err := r.Client.CreateBasin(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := basinInfoFromProto(pbResp.GetInfo())
+	if err != nil {
+		return nil, err
+	}
+
+	return &info, nil
+}
+
+type deleteBasinServiceRequest struct {
+	Client pb.AccountServiceClient
+	Req    *DeleteBasinRequest
+}
+
+func (r *deleteBasinServiceRequest) IdempotencyLevel() idempotencyLevel {
+	return idempotencyLevelIdempotent
+}
+
+func (r *deleteBasinServiceRequest) Send(ctx context.Context) (any, error) {
+	req := &pb.DeleteBasinRequest{
+		Basin: r.Req.Basin,
+	}
+
+	_, err := r.Client.DeleteBasin(ctx, req)
+	if err != nil {
+		statusErr, ok := status.FromError(err)
+		if ok && statusErr.Code() == codes.NotFound && r.Req.IfExists {
+			return struct{}{}, nil
+		}
+
+		return struct{}{}, err
+	}
+
+	return struct{}{}, nil
+}
+
+type reconfigureBasinServiceRequest struct {
+	Client pb.AccountServiceClient
+	Req    *ReconfigureBasinRequest
+}
+
+func (r *reconfigureBasinServiceRequest) IdempotencyLevel() idempotencyLevel {
+	return idempotencyLevelIdempotent
+}
+
+func (r *reconfigureBasinServiceRequest) Send(ctx context.Context) (any, error) {
+	var basinConfig *pb.BasinConfig
+	if r.Req.Config != nil {
+		var err error
+		basinConfig, err = basinConfigIntoProto(r.Req.Config)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var mask *fieldmaskpb.FieldMask
+	if r.Req.Mask != nil {
+		mask = &fieldmaskpb.FieldMask{Paths: r.Req.Mask}
+	}
+
+	req := &pb.ReconfigureBasinRequest{
+		Basin:  r.Req.Basin,
+		Config: basinConfig,
+		Mask:   mask,
+	}
+
+	pbResp, err := r.Client.ReconfigureBasin(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return basinConfigFromProto(pbResp.GetConfig())
 }
 
 type getBasinConfigRequest struct {

@@ -116,6 +116,31 @@ func (c *Client) listBasins(ctx context.Context, req *ListBasinsRequest) (*ListB
 	return sendRetryable[*ListBasinsResponse](ctx, c.inner, r)
 }
 
+func (c *Client) createBasin(ctx context.Context, req *CreateBasinRequest) (*BasinInfo, error) {
+	r := &createBasinServiceRequest{
+		Client: c.inner.accountServiceClient(),
+		Req:    req,
+	}
+	return sendRetryable[*BasinInfo](ctx, c.inner, r)
+}
+
+func (c *Client) deleteBasin(ctx context.Context, req *DeleteBasinRequest) error {
+	r := &deleteBasinServiceRequest{
+		Client: c.inner.accountServiceClient(),
+		Req:    req,
+	}
+	_, err := sendRetryable[struct{}](ctx, c.inner, r)
+	return err
+}
+
+func (c *Client) reconfigureBasin(ctx context.Context, req *ReconfigureBasinRequest) (*BasinConfig, error) {
+	r := &reconfigureBasinServiceRequest{
+		Client: c.inner.accountServiceClient(),
+		Req:    req,
+	}
+	return sendRetryable[*BasinConfig](ctx, c.inner, r)
+}
+
 func (c *Client) getBasinConfig(ctx context.Context, basin string) (*BasinConfig, error) {
 	r := &getBasinConfigRequest{
 		Client: c.inner.accountServiceClient(),
