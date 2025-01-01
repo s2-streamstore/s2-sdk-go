@@ -2,7 +2,6 @@ package s2
 
 import (
 	"context"
-	"fmt"
 
 	"google.golang.org/grpc/metadata"
 )
@@ -34,16 +33,7 @@ func (i idempotencyLevel) String() string {
 
 type serviceRequest interface {
 	IdempotencyLevel() idempotencyLevel
-	Send(ctx context.Context) (any, error)
-}
-
-func assertType[T any](r any) T {
-	if v, ok := r.(T); ok {
-		return v
-	} else {
-		var def T
-		panic(fmt.Sprintf("expected %T but got %T", def, r))
-	}
+	Send(ctx context.Context) error
 }
 
 func ctxWithHeader(ctx context.Context, key, val string) context.Context {

@@ -159,3 +159,94 @@ func basinConfigIntoProto(config *BasinConfig) (*pb.BasinConfig, error) {
 
 	return pbConfig, nil
 }
+
+func (b ReadOutputBatch) implReadOutput()       {}
+func (f ReadOutputFirstSeqNum) implReadOutput() {}
+func (n ReadOutputNextSeqNum) implReadOutput()  {}
+
+func headerFromProto(pbHeader *pb.Header) Header {
+	return Header{
+		Name:  pbHeader.GetName(),
+		Value: pbHeader.GetValue(),
+	}
+}
+
+func sequencedRecordFromProto(pbRecord *pb.SequencedRecord) SequencedRecord {
+	pbHeaders := pbRecord.GetHeaders()
+	headers := make([]Header, 0, len(pbHeaders))
+	for _, h := range pbHeaders {
+		headers = append(headers, headerFromProto(h))
+	}
+	return SequencedRecord{
+		SeqNum:  pbRecord.GetSeqNum(),
+		Headers: headers,
+		Body:    pbRecord.GetBody(),
+	}
+}
+
+func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) *SequencedRecordBatch {
+	pbRecords := pbBatch.GetRecords()
+	records := make([]SequencedRecord, 0, len(pbRecords))
+	for _, r := range pbRecords {
+		records = append(records, sequencedRecordFromProto(r))
+	}
+	return &SequencedRecordBatch{
+		Records: records,
+	}
+}
+
+func readOutputFromProto(pbOutput *pb.ReadOutput) (ReadOutput, error) {
+	var output ReadOutput
+	switch o := pbOutput.GetOutput().(type) {
+	case *pb.ReadOutput_Batch:
+		output = ReadOutputBatch{
+			SequencedRecordBatch: sequencedRecordBatchFromProto(o.Batch),
+		}
+	case *pb.ReadOutput_FirstSeqNum:
+		output = ReadOutputFirstSeqNum(o.FirstSeqNum)
+	case *pb.ReadOutput_NextSeqNum:
+		output = ReadOutputNextSeqNum(o.NextSeqNum)
+	default:
+		return nil, fmt.Errorf("unknown read output %T", o)
+	}
+	return output, nil
+}
+
+func headerIntoProto(header Header) *pb.Header {
+	return &pb.Header{
+		Name:  header.Name,
+		Value: header.Value,
+	}
+}
+
+func appendRecordIntoProto(record *AppendRecord) *pb.AppendRecord {
+	headers := make([]*pb.Header, 0, len(record.Headers))
+	for _, h := range record.Headers {
+		headers = append(headers, headerIntoProto(h))
+	}
+	return &pb.AppendRecord{
+		Headers: headers,
+		Body:    record.Body,
+	}
+}
+
+func appendInputIntoProto(stream string, input *AppendInput) *pb.AppendInput {
+	records := make([]*pb.AppendRecord, 0, len(input.Records))
+	for i := 0; i < len(input.Records); i++ {
+		records = append(records, appendRecordIntoProto(&input.Records[i]))
+	}
+	return &pb.AppendInput{
+		Stream:       stream,
+		Records:      records,
+		MatchSeqNum:  input.MatchSeqNum,
+		FencingToken: input.FencingToken,
+	}
+}
+
+func appendOutputFromProto(pbOutput *pb.AppendOutput) *AppendOutput {
+	return &AppendOutput{
+		StartSeqNum: pbOutput.GetStartSeqNum(),
+		NextSeqNum:  pbOutput.GetNextSeqNum(),
+		EndSeqNum:   pbOutput.GetEndSeqNum(),
+	}
+}

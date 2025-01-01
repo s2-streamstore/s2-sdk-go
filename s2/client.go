@@ -110,49 +110,52 @@ func NewClient(authToken string, params ...ConfigParam) (*Client, error) {
 }
 
 func (c *Client) listBasins(ctx context.Context, req *ListBasinsRequest) (*ListBasinsResponse, error) {
-	r := &listBasinsServiceRequest{
-		Client: c.inner.accountServiceClient(),
+	r := listBasinsServiceRequest{
+		Client: c.inner.AccountServiceClient(),
 		Req:    req,
 	}
-	return sendRetryable[*ListBasinsResponse](ctx, c.inner, r)
+	err := c.inner.SendRetryable(ctx, &r)
+	return r.Resp, err
 }
 
 func (c *Client) createBasin(ctx context.Context, req *CreateBasinRequest) (*BasinInfo, error) {
-	r := &createBasinServiceRequest{
-		Client: c.inner.accountServiceClient(),
+	r := createBasinServiceRequest{
+		Client: c.inner.AccountServiceClient(),
 		Req:    req,
 		ReqID:  uuid.New(),
 	}
-	return sendRetryable[*BasinInfo](ctx, c.inner, r)
+	err := c.inner.SendRetryable(ctx, &r)
+	return r.Info, err
 }
 
 func (c *Client) deleteBasin(ctx context.Context, req *DeleteBasinRequest) error {
-	r := &deleteBasinServiceRequest{
-		Client: c.inner.accountServiceClient(),
+	r := deleteBasinServiceRequest{
+		Client: c.inner.AccountServiceClient(),
 		Req:    req,
 	}
-	_, err := sendRetryable[struct{}](ctx, c.inner, r)
-	return err
+	return c.inner.SendRetryable(ctx, &r)
 }
 
 func (c *Client) reconfigureBasin(ctx context.Context, req *ReconfigureBasinRequest) (*BasinConfig, error) {
-	r := &reconfigureBasinServiceRequest{
-		Client: c.inner.accountServiceClient(),
+	r := reconfigureBasinServiceRequest{
+		Client: c.inner.AccountServiceClient(),
 		Req:    req,
 	}
-	return sendRetryable[*BasinConfig](ctx, c.inner, r)
+	err := c.inner.SendRetryable(ctx, &r)
+	return r.UpdatedConfig, err
 }
 
 func (c *Client) getBasinConfig(ctx context.Context, basin string) (*BasinConfig, error) {
-	r := &getBasinConfigRequest{
-		Client: c.inner.accountServiceClient(),
+	r := getBasinConfigRequest{
+		Client: c.inner.AccountServiceClient(),
 		Basin:  basin,
 	}
-	return sendRetryable[*BasinConfig](ctx, c.inner, r)
+	err := c.inner.SendRetryable(ctx, &r)
+	return r.Config, err
 }
 
 func (c *Client) BasinClient(basin string) (*BasinClient, error) {
-	inner, err := c.inner.basinClient(basin)
+	inner, err := c.inner.BasinClient(basin)
 	if err != nil {
 		return nil, err
 	}
@@ -182,19 +185,48 @@ func NewBasinClient(basin, authToken string, params ...ConfigParam) (*BasinClien
 }
 
 func (b *BasinClient) listStreams(ctx context.Context, req *ListStreamsRequest) (*ListStreamsResponse, error) {
-	r := &listStreamsServiceRequest{
-		Client: b.inner.basinServiceClient(),
+	r := listStreamsServiceRequest{
+		Client: b.inner.BasinServiceClient(),
 		Req:    req,
 	}
-	return sendRetryable[*ListStreamsResponse](ctx, b.inner, r)
+	err := b.inner.SendRetryable(ctx, &r)
+	return r.Resp, err
+}
+
+func (b *BasinClient) createStream(ctx context.Context, req *CreateStreamRequest) (*StreamInfo, error) {
+	r := createStreamServiceRequest{
+		Client: b.inner.BasinServiceClient(),
+		Req:    req,
+		ReqID:  uuid.New(),
+	}
+	err := b.inner.SendRetryable(ctx, &r)
+	return r.Info, err
+}
+
+func (b *BasinClient) deleteStream(ctx context.Context, req *DeleteStreamRequest) error {
+	r := deleteStreamServiceRequest{
+		Client: b.inner.BasinServiceClient(),
+		Req:    req,
+	}
+	return b.inner.SendRetryable(ctx, &r)
+}
+
+func (b *BasinClient) reconfigureStream(ctx context.Context, req *ReconfigureStreamRequest) (*StreamConfig, error) {
+	r := reconfigureStreamServiceRequest{
+		Client: b.inner.BasinServiceClient(),
+		Req:    req,
+	}
+	err := b.inner.SendRetryable(ctx, &r)
+	return r.UpdatedConfig, err
 }
 
 func (b *BasinClient) getStreamConfig(ctx context.Context, stream string) (*StreamConfig, error) {
-	r := &getStreamConfigServiceRequest{
-		Client: b.inner.basinServiceClient(),
+	r := getStreamConfigServiceRequest{
+		Client: b.inner.BasinServiceClient(),
 		Stream: stream,
 	}
-	return sendRetryable[*StreamConfig](ctx, b.inner, r)
+	err := b.inner.SendRetryable(ctx, &r)
+	return r.Config, err
 }
 
 func (b *BasinClient) StreamClient(stream string) *StreamClient {
@@ -218,11 +250,32 @@ func NewStreamClient(basin, stream, authToken string, params ...ConfigParam) (*S
 }
 
 func (s *StreamClient) checkTail(ctx context.Context) (uint64, error) {
-	r := &checkTailServiceRequest{
-		Client: s.inner.streamServiceClient(),
+	r := checkTailServiceRequest{
+		Client: s.inner.StreamServiceClient(),
 		Stream: s.stream,
 	}
-	return sendRetryable[uint64](ctx, s.inner, r)
+	err := s.inner.SendRetryable(ctx, &r)
+	return r.Tail, err
+}
+
+func (s *StreamClient) append(ctx context.Context, input *AppendInput) (*AppendOutput, error) {
+	r := appendServiceRequest{
+		Client: s.inner.StreamServiceClient(),
+		Stream: s.stream,
+		Input:  input,
+	}
+	err := s.inner.SendRetryable(ctx, &r)
+	return r.Output, err
+}
+
+func (s *StreamClient) read(ctx context.Context, req *ReadRequest) (ReadOutput, error) {
+	r := readServiceRequest{
+		Client: s.inner.StreamServiceClient(),
+		Stream: s.stream,
+		Req:    req,
+	}
+	err := s.inner.SendRetryable(ctx, &r)
+	return r.Output, err
 }
 
 type clientConfig struct {
@@ -291,7 +344,7 @@ func newClientInner(config *clientConfig, basin string) (*clientInner, error) {
 	}, nil
 }
 
-func (c *clientInner) basinClient(basin string) (*clientInner, error) {
+func (c *clientInner) BasinClient(basin string) (*clientInner, error) {
 	if c.config.endpoints.Account == c.config.endpoints.Basin {
 		// No need to reconnect
 		//
@@ -307,68 +360,68 @@ func (c *clientInner) basinClient(basin string) (*clientInner, error) {
 	return newClientInner(c.config, basin)
 }
 
-func (c *clientInner) accountServiceClient() pb.AccountServiceClient {
+func (c *clientInner) AccountServiceClient() pb.AccountServiceClient {
 	return pb.NewAccountServiceClient(c.conn)
 }
 
-func (c *clientInner) basinServiceClient() pb.BasinServiceClient {
+func (c *clientInner) BasinServiceClient() pb.BasinServiceClient {
 	return pb.NewBasinServiceClient(c.conn)
 }
 
-func (c *clientInner) streamServiceClient() pb.StreamServiceClient {
+func (c *clientInner) StreamServiceClient() pb.StreamServiceClient {
 	return pb.NewStreamServiceClient(c.conn)
 }
 
-func sendRetryable[T any](ctx context.Context, inner *clientInner, r serviceRequest) (T, error) {
-	ret, err := sendRetryableInner(ctx, inner.basin, inner.config, r)
-	if err != nil {
-		var def T
-		return def, err
+func (c *clientInner) SendRetryable(ctx context.Context, r serviceRequest) error {
+	// Add required headers
+	if c.basin != "" {
+		ctx = ctxWithHeader(ctx, "s2-basin", c.basin)
 	}
-	return assertType[T](ret), nil
+
+	return sendRetryableInner(ctx, r, c.config.retryBackoffDuration, c.config.maxRetryAttempts)
 }
 
-func sendRetryableInner(ctx context.Context, basin string, config *clientConfig, r serviceRequest) (any, error) {
-	// Add required headers
-	if basin != "" {
-		ctx = ctxWithHeader(ctx, "s2-basin", basin)
-	}
-
+func sendRetryableInner(
+	ctx context.Context,
+	r serviceRequest,
+	retryBackoffDuration time.Duration,
+	maxRetryAttempts uint,
+) error {
 	var finalErr error
 
-	for i := uint(0); i < config.maxRetryAttempts; i++ {
-		ret, err := r.Send(ctx)
+	for i := uint(0); i < maxRetryAttempts; i++ {
+		err := r.Send(ctx)
 		if err == nil {
-			return ret, nil
+			return nil
 		}
 
 		// Figure out if need to retry
 		if !r.IdempotencyLevel().IsIdempotent() {
-			return nil, err
+			return err
 		}
 
 		statusErr, ok := status.FromError(err)
 		if !ok {
-			return nil, err
+			return err
 		}
 
 		switch statusErr.Code() {
 		case codes.Unavailable, codes.DeadlineExceeded, codes.Unknown:
 			// We should retry
 		default:
-			return nil, err
+			return err
 		}
 
 		finalErr = err
 
 		select {
-		case <-time.After(config.retryBackoffDuration):
+		case <-time.After(retryBackoffDuration):
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
 	}
 
-	return nil, finalErr
+	return finalErr
 }
 
 func authHeaderInterceptor(token string) grpc.UnaryClientInterceptor {

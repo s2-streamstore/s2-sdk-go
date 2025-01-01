@@ -34,6 +34,21 @@ func (b *BasinClient) ListStreams(ctx context.Context, req *ListStreamsRequest) 
 	return b.listStreams(ctx, req)
 }
 
+// {{ syncDoc "BasinServiceClient.CreateStream" }}
+func (b *BasinClient) CreateStream(ctx context.Context, req *CreateStreamRequest) (*StreamInfo, error) {
+	return b.createStream(ctx, req)
+}
+
+// {{ syncDoc "BasinServiceClient.DeleteStream" }}
+func (b *BasinClient) DeleteStream(ctx context.Context, req *DeleteStreamRequest) error {
+	return b.deleteStream(ctx, req)
+}
+
+// {{ syncDoc "BasinServiceClient.ReconfigureStream" }}
+func (c *BasinClient) ReconfigureStream(ctx context.Context, req *ReconfigureStreamRequest) (*StreamConfig, error) {
+	return c.reconfigureStream(ctx, req)
+}
+
 // {{ syncDoc "BasinServiceClient.GetStreamConfig" }}
 func (b *BasinClient) GetStreamConfig(ctx context.Context, basin string) (*StreamConfig, error) {
 	return b.getStreamConfig(ctx, basin)
@@ -42,4 +57,14 @@ func (b *BasinClient) GetStreamConfig(ctx context.Context, basin string) (*Strea
 // {{ syncDoc "StreamServiceClient.CheckTail" }}
 func (s *StreamClient) CheckTail(ctx context.Context) (uint64, error) {
 	return s.checkTail(ctx)
+}
+
+// {{ syncDoc "StreamServiceClient.Append" }}
+func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendOutput, error) {
+	return s.append(ctx, input)
+}
+
+// {{ syncDoc "StreamServiceClient.Read" }}
+func (s *StreamClient) Read(ctx context.Context, req *ReadRequest) (ReadOutput, error) {
+	return s.read(ctx, req)
 }

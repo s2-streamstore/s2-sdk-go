@@ -134,3 +134,118 @@ type ReconfigureBasinRequest struct {
 	// {{ syncDocIndent "ReconfigureBasinRequest.Mask" }}
 	Mask []string
 }
+
+// {{ syncDoc "CreateStreamRequest" }}
+type CreateStreamRequest struct {
+	// {{ syncDocIndent "CreateStreamRequest.Stream" }}
+	Stream string
+	// {{ syncDocIndent "CreateStreamRequest.Config" }}
+	Config *StreamConfig
+}
+
+// {{ syncDoc "DeleteStreamRequest" }}
+type DeleteStreamRequest struct {
+	// {{ syncDocIndent "DeleteStreamRequest.Stream" }}
+	Stream string
+	// Delete stream if it exists else do nothing.
+	IfExists bool
+}
+
+// {{ syncDoc "ReconfigureStreamRequest" }}
+type ReconfigureStreamRequest struct {
+	// {{ syncDocIndent "ReconfigureStreamRequest.Stream" }}
+	Stream string
+	// {{ syncDocIndent "ReconfigureStreamRequest.Config" }}
+	Config *StreamConfig
+	// {{ syncDocIndent "ReconfigureStreamRequest.Mask" }}
+	Mask []string
+}
+
+// {{ syncDoc "ReadLimit" }}
+type ReadLimit struct {
+	// {{ syncDocIndent "ReadLimit.Count" }}
+	Count uint64
+	// {{ syncDocIndent "ReadLimit.Bytes" }}
+	Bytes uint64
+}
+
+// {{ syncDoc "ReadRequest" }}
+type ReadRequest struct {
+	// {{ syncDocIndent "ReadRequest.StartSeqNum" }}
+	StartSeqNum uint64
+	// {{ syncDocIndent "ReadRequest.Limit" }}
+	Limit *ReadLimit
+}
+
+// {{ syncDoc "Header" }}
+type Header struct {
+	// {{ syncDocIndent "Header.Name" }}
+	Name []byte
+	// {{ syncDocIndent "Header.Value" }}
+	Value []byte
+}
+
+// {{ syncDoc "SequencedRecord" }}
+type SequencedRecord struct {
+	// {{ syncDocIndent "SequencedRecord.SeqNum" }}
+	SeqNum uint64
+	// {{ syncDocIndent "SequencedRecord.Headers" }}
+	Headers []Header
+	// {{ syncDocIndent "SequencedRecord.Body" }}
+	Body []byte
+}
+
+// {{ syncDoc "SequencedRecordBatch" }}
+type SequencedRecordBatch struct {
+	// {{ syncDocIndent "SequencedRecordBatch.Records" }}
+	Records []SequencedRecord
+}
+
+// {{ syncDoc "ReadOutput_Batch.Batch" }}
+type ReadOutputBatch struct {
+	*SequencedRecordBatch
+}
+
+// {{ syncDoc "ReadOutput_FirstSeqNum.FirstSeqNum" }}
+type ReadOutputFirstSeqNum uint64
+
+// {{ syncDoc "ReadOutput_NextSeqNum.NextSeqNum" }}
+type ReadOutputNextSeqNum uint64
+
+// {{ syncDoc "ReadOutput" }}
+//
+// Valid types for ReadOutput are:
+//   - `ReadOutputBatch`
+//   - `ReadOutputFirstSeqNum`
+//   - `ReadOutputNextSeqNum`
+type ReadOutput interface {
+	implReadOutput()
+}
+
+// {{ syncDoc "AppendRecord" }}
+type AppendRecord struct {
+	// {{ syncDocIndent "AppendRecord.Headers" }}
+	Headers []Header
+	// {{ syncDocIndent "AppendRecord.Body" }}
+	Body []byte
+}
+
+// {{ syncDoc "AppendInput" }}
+type AppendInput struct {
+	// {{ syncDocIndent "AppendInput.Records" }}
+	Records []AppendRecord
+	// {{ syncDocIndent "AppendInput.MatchSeqNum" }}
+	MatchSeqNum *uint64
+	// {{ syncDocIndent "AppendInput.FencingToken" }}
+	FencingToken []byte
+}
+
+// {{ syncDoc "AppendOutput" }}
+type AppendOutput struct {
+	// {{ syncDocIndent "AppendOutput.StartSeqNum" }}
+	StartSeqNum uint64
+	// {{ syncDocIndent "AppendOutput.NextSeqNum" }}
+	NextSeqNum uint64
+	// {{ syncDocIndent "AppendOutput.EndSeqNum" }}
+	EndSeqNum uint64
+}

@@ -145,3 +145,131 @@ type ReconfigureBasinRequest struct {
 	// See https://protobuf.dev/reference/protobuf/google.protobuf/#field-mask
 	Mask []string
 }
+
+// Create stream request.
+type CreateStreamRequest struct {
+	// Stream name, which must be unique within the basin.
+	// It can be an arbitrary string upto 512 characters.
+	// Backslash (`/`) is recommended as a delimiter for hierarchical naming.
+	Stream string
+	// Configuration for the new stream.
+	Config *StreamConfig
+}
+
+// Delete stream request.
+type DeleteStreamRequest struct {
+	// Stream name.
+	Stream string
+	// Delete stream if it exists else do nothing.
+	IfExists bool
+}
+
+// Reconfigure stream request.
+type ReconfigureStreamRequest struct {
+	// Stream name.
+	Stream string
+	// Stream configuration with updated values.
+	Config *StreamConfig
+	// Specifies the pieces of configuration being updated.
+	// See https://protobuf.dev/reference/protobuf/google.protobuf/#field-mask
+	Mask []string
+}
+
+// If both count and bytes are non-zero, either limit may be hit.
+type ReadLimit struct {
+	// A value of zero signifies no count limit.
+	Count uint64
+	// A value of zero signifies no bytes limit.
+	// Record sizes are calculated as metered bytes.
+	Bytes uint64
+}
+
+// Read request.
+type ReadRequest struct {
+	// Starting sequence number (inclusive).
+	StartSeqNum uint64
+	// Limit on how many records can be returned upto a maximum of 1000, or 1MiB of metered bytes.
+	Limit *ReadLimit
+}
+
+// Headers add structured information to a record as name-value pairs.
+type Header struct {
+	// Header name blob.
+	// The name cannot be empty, with the exception of an S2 command record.
+	Name []byte
+	// Header value blob.
+	Value []byte
+}
+
+// Record retrieved from a stream.
+type SequencedRecord struct {
+	// Sequence number for this record.
+	SeqNum uint64
+	// Series of name-value pairs for this record.
+	Headers []Header
+	// Body of this record.
+	Body []byte
+}
+
+// A batch of sequenced records.
+type SequencedRecordBatch struct {
+	// Batch of sequenced records.
+	Records []SequencedRecord
+}
+
+// Batch of records.
+// This batch can be empty only if a `ReadLimit` was provided in the associated read request, but the first record
+// that could have been returned would violate the limit.
+type ReadOutputBatch struct {
+	*SequencedRecordBatch
+}
+
+// Sequence number for the first record on this stream, in case the requested `start_seq_num` is smaller.
+// If returned in a streaming read session, this will be a terminal reply, to signal that there is uncertainty about whether some records may be omitted.
+// The client can re-establish the session starting at this sequence number.
+type ReadOutputFirstSeqNum uint64
+
+// Sequence number for the next record on this stream, in case the requested `start_seq_num` was larger.
+// If returned in a streaming read session, this will be a terminal reply.
+type ReadOutputNextSeqNum uint64
+
+// Output from read response.
+//
+// Valid types for ReadOutput are:
+//   - `ReadOutputBatch`
+//   - `ReadOutputFirstSeqNum`
+//   - `ReadOutputNextSeqNum`
+type ReadOutput interface {
+	implReadOutput()
+}
+
+// Record to be appended to a stream.
+type AppendRecord struct {
+	// Series of name-value pairs for this record.
+	Headers []Header
+	// Body of this record.
+	Body []byte
+}
+
+// Input for append requests.
+type AppendInput struct {
+	// Batch of records to append atomically, which must contain at least one record, and no more than 1000.
+	// The total size of a batch of records may not exceed 1MiB of metered bytes.
+	Records []AppendRecord
+	// Enforce that the sequence number issued to the first record matches.
+	MatchSeqNum *uint64
+	// Enforce a fencing token which must have been previously set by a `fence` command record.
+	FencingToken []byte
+}
+
+// Output from append response.
+type AppendOutput struct {
+	// Sequence number of first record appended.
+	StartSeqNum uint64
+	// Sequence number of last durable record on the stream + 1.
+	// This can be greater than `end_seq_num` in case of concurrent appends.
+	NextSeqNum uint64
+	// Sequence number of last record appended + 1.
+	// `end_seq_num - start_seq_num` will be the number of records in the batch.
+	EndSeqNum uint64
+}
