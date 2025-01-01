@@ -11,6 +11,12 @@ tasks:
       - go build -o .out/examples/{{.NAME}} ./examples/{{.NAME}}
       - .out/examples/{{.NAME}}
 
+  test:
+    deps:
+      - gen
+    cmds:
+      - go test ./...
+
   gen:
     deps:
       - gen:proto

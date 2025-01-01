@@ -9,39 +9,36 @@ import (
 type checkTailServiceRequest struct {
 	Client pb.StreamServiceClient
 	Stream string
-	Tail   uint64
 }
 
 func (r *checkTailServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
-func (r *checkTailServiceRequest) Send(ctx context.Context) error {
+func (r *checkTailServiceRequest) Send(ctx context.Context) (uint64, error) {
 	req := &pb.CheckTailRequest{
 		Stream: r.Stream,
 	}
 
 	pbResp, err := r.Client.CheckTail(ctx, req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	r.Tail = pbResp.GetNextSeqNum()
-	return nil
+	return pbResp.GetNextSeqNum(), nil
 }
 
 type appendServiceRequest struct {
 	Client pb.StreamServiceClient
 	Stream string
 	Input  *AppendInput
-	Output *AppendOutput
 }
 
 func (r *appendServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelUnknown
 }
 
-func (r *appendServiceRequest) Send(ctx context.Context) error {
+func (r *appendServiceRequest) Send(ctx context.Context) (*AppendOutput, error) {
 	pbInput := appendInputIntoProto(r.Stream, r.Input)
 	req := &pb.AppendRequest{
 		Input: pbInput,
@@ -49,25 +46,23 @@ func (r *appendServiceRequest) Send(ctx context.Context) error {
 
 	pbResp, err := r.Client.Append(ctx, req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	r.Output = appendOutputFromProto(pbResp.GetOutput())
-	return nil
+	return appendOutputFromProto(pbResp.GetOutput()), nil
 }
 
 type readServiceRequest struct {
 	Client pb.StreamServiceClient
 	Stream string
 	Req    *ReadRequest
-	Output ReadOutput
 }
 
 func (r *readServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
-func (r *readServiceRequest) Send(ctx context.Context) error {
+func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
 	var limit *pb.ReadLimit
 	if r.Req.Limit != nil {
 		limit = &pb.ReadLimit{
@@ -83,14 +78,8 @@ func (r *readServiceRequest) Send(ctx context.Context) error {
 
 	pbResp, err := r.Client.Read(ctx, req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	output, err := readOutputFromProto(pbResp.GetOutput())
-	if err != nil {
-		return err
-	}
-
-	r.Output = output
-	return nil
+	return readOutputFromProto(pbResp.GetOutput())
 }

@@ -13,14 +13,13 @@ import (
 type listStreamsServiceRequest struct {
 	Client pb.BasinServiceClient
 	Req    *ListStreamsRequest
-	Resp   *ListStreamsResponse
 }
 
 func (r *listStreamsServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
-func (r *listStreamsServiceRequest) Send(ctx context.Context) error {
+func (r *listStreamsServiceRequest) Send(ctx context.Context) (*ListStreamsResponse, error) {
 	req := &pb.ListStreamsRequest{
 		Prefix:     r.Req.Prefix,
 		StartAfter: r.Req.StartAfter,
@@ -29,7 +28,7 @@ func (r *listStreamsServiceRequest) Send(ctx context.Context) error {
 
 	pbResp, err := r.Client.ListStreams(ctx, req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	pbStreams := pbResp.GetStreams()
@@ -38,28 +37,26 @@ func (r *listStreamsServiceRequest) Send(ctx context.Context) error {
 		streamInfos = append(streamInfos, streamInfoFromProto(pbInfo))
 	}
 
-	r.Resp = &ListStreamsResponse{
+	return &ListStreamsResponse{
 		Streams: streamInfos,
 		HasMore: pbResp.GetHasMore(),
-	}
-	return nil
+	}, nil
 }
 
 type createStreamServiceRequest struct {
 	Client pb.BasinServiceClient
 	Req    *CreateStreamRequest
 	ReqID  uuid.UUID
-	Info   *StreamInfo
 }
 
 func (r *createStreamServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelIdempotent
 }
 
-func (r *createStreamServiceRequest) Send(ctx context.Context) error {
+func (r *createStreamServiceRequest) Send(ctx context.Context) (*StreamInfo, error) {
 	config, err := streamConfigIntoProto(r.Req.Config)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	req := &pb.CreateStreamRequest{
@@ -71,12 +68,11 @@ func (r *createStreamServiceRequest) Send(ctx context.Context) error {
 
 	pbResp, err := r.Client.CreateStream(ctx, req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	info := streamInfoFromProto(pbResp.GetInfo())
-	r.Info = &info
-	return nil
+	return &info, nil
 }
 
 type deleteStreamServiceRequest struct {
@@ -88,7 +84,7 @@ func (r *deleteStreamServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelIdempotent
 }
 
-func (r *deleteStreamServiceRequest) Send(ctx context.Context) error {
+func (r *deleteStreamServiceRequest) Send(ctx context.Context) (struct{}, error) {
 	req := &pb.DeleteStreamRequest{
 		Stream: r.Req.Stream,
 	}
@@ -97,32 +93,31 @@ func (r *deleteStreamServiceRequest) Send(ctx context.Context) error {
 	if err != nil {
 		statusErr, ok := status.FromError(err)
 		if ok && statusErr.Code() == codes.NotFound && r.Req.IfExists {
-			return nil
+			return struct{}{}, nil
 		}
 
-		return err
+		return struct{}{}, err
 	}
 
-	return nil
+	return struct{}{}, nil
 }
 
 type reconfigureStreamServiceRequest struct {
-	Client        pb.BasinServiceClient
-	Req           *ReconfigureStreamRequest
-	UpdatedConfig *StreamConfig
+	Client pb.BasinServiceClient
+	Req    *ReconfigureStreamRequest
 }
 
 func (r *reconfigureStreamServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelIdempotent
 }
 
-func (r *reconfigureStreamServiceRequest) Send(ctx context.Context) error {
+func (r *reconfigureStreamServiceRequest) Send(ctx context.Context) (*StreamConfig, error) {
 	var streamConfig *pb.StreamConfig
 	if r.Req.Config != nil {
 		var err error
 		streamConfig, err = streamConfigIntoProto(r.Req.Config)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -139,43 +134,30 @@ func (r *reconfigureStreamServiceRequest) Send(ctx context.Context) error {
 
 	pbResp, err := r.Client.ReconfigureStream(ctx, req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	config, err := streamConfigFromProto(pbResp.GetConfig())
-	if err != nil {
-		return err
-	}
-
-	r.UpdatedConfig = config
-	return nil
+	return streamConfigFromProto(pbResp.GetConfig())
 }
 
 type getStreamConfigServiceRequest struct {
 	Client pb.BasinServiceClient
 	Stream string
-	Config *StreamConfig
 }
 
 func (r *getStreamConfigServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
-func (r *getStreamConfigServiceRequest) Send(ctx context.Context) error {
+func (r *getStreamConfigServiceRequest) Send(ctx context.Context) (*StreamConfig, error) {
 	req := &pb.GetStreamConfigRequest{
 		Stream: r.Stream,
 	}
 
 	pbResp, err := r.Client.GetStreamConfig(ctx, req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	config, err := streamConfigFromProto(pbResp.GetConfig())
-	if err != nil {
-		return err
-	}
-
-	r.Config = config
-	return nil
+	return streamConfigFromProto(pbResp.GetConfig())
 }

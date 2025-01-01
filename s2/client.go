@@ -114,8 +114,7 @@ func (c *Client) listBasins(ctx context.Context, req *ListBasinsRequest) (*ListB
 		Client: c.inner.AccountServiceClient(),
 		Req:    req,
 	}
-	err := c.inner.SendRetryable(ctx, &r)
-	return r.Resp, err
+	return sendRetryable(ctx, c.inner, &r)
 }
 
 func (c *Client) createBasin(ctx context.Context, req *CreateBasinRequest) (*BasinInfo, error) {
@@ -124,8 +123,7 @@ func (c *Client) createBasin(ctx context.Context, req *CreateBasinRequest) (*Bas
 		Req:    req,
 		ReqID:  uuid.New(),
 	}
-	err := c.inner.SendRetryable(ctx, &r)
-	return r.Info, err
+	return sendRetryable(ctx, c.inner, &r)
 }
 
 func (c *Client) deleteBasin(ctx context.Context, req *DeleteBasinRequest) error {
@@ -133,7 +131,8 @@ func (c *Client) deleteBasin(ctx context.Context, req *DeleteBasinRequest) error
 		Client: c.inner.AccountServiceClient(),
 		Req:    req,
 	}
-	return c.inner.SendRetryable(ctx, &r)
+	_, err := sendRetryable(ctx, c.inner, &r)
+	return err
 }
 
 func (c *Client) reconfigureBasin(ctx context.Context, req *ReconfigureBasinRequest) (*BasinConfig, error) {
@@ -141,8 +140,7 @@ func (c *Client) reconfigureBasin(ctx context.Context, req *ReconfigureBasinRequ
 		Client: c.inner.AccountServiceClient(),
 		Req:    req,
 	}
-	err := c.inner.SendRetryable(ctx, &r)
-	return r.UpdatedConfig, err
+	return sendRetryable(ctx, c.inner, &r)
 }
 
 func (c *Client) getBasinConfig(ctx context.Context, basin string) (*BasinConfig, error) {
@@ -150,8 +148,7 @@ func (c *Client) getBasinConfig(ctx context.Context, basin string) (*BasinConfig
 		Client: c.inner.AccountServiceClient(),
 		Basin:  basin,
 	}
-	err := c.inner.SendRetryable(ctx, &r)
-	return r.Config, err
+	return sendRetryable(ctx, c.inner, &r)
 }
 
 func (c *Client) BasinClient(basin string) (*BasinClient, error) {
@@ -189,8 +186,7 @@ func (b *BasinClient) listStreams(ctx context.Context, req *ListStreamsRequest) 
 		Client: b.inner.BasinServiceClient(),
 		Req:    req,
 	}
-	err := b.inner.SendRetryable(ctx, &r)
-	return r.Resp, err
+	return sendRetryable(ctx, b.inner, &r)
 }
 
 func (b *BasinClient) createStream(ctx context.Context, req *CreateStreamRequest) (*StreamInfo, error) {
@@ -199,8 +195,7 @@ func (b *BasinClient) createStream(ctx context.Context, req *CreateStreamRequest
 		Req:    req,
 		ReqID:  uuid.New(),
 	}
-	err := b.inner.SendRetryable(ctx, &r)
-	return r.Info, err
+	return sendRetryable(ctx, b.inner, &r)
 }
 
 func (b *BasinClient) deleteStream(ctx context.Context, req *DeleteStreamRequest) error {
@@ -208,7 +203,8 @@ func (b *BasinClient) deleteStream(ctx context.Context, req *DeleteStreamRequest
 		Client: b.inner.BasinServiceClient(),
 		Req:    req,
 	}
-	return b.inner.SendRetryable(ctx, &r)
+	_, err := sendRetryable(ctx, b.inner, &r)
+	return err
 }
 
 func (b *BasinClient) reconfigureStream(ctx context.Context, req *ReconfigureStreamRequest) (*StreamConfig, error) {
@@ -216,8 +212,7 @@ func (b *BasinClient) reconfigureStream(ctx context.Context, req *ReconfigureStr
 		Client: b.inner.BasinServiceClient(),
 		Req:    req,
 	}
-	err := b.inner.SendRetryable(ctx, &r)
-	return r.UpdatedConfig, err
+	return sendRetryable(ctx, b.inner, &r)
 }
 
 func (b *BasinClient) getStreamConfig(ctx context.Context, stream string) (*StreamConfig, error) {
@@ -225,8 +220,7 @@ func (b *BasinClient) getStreamConfig(ctx context.Context, stream string) (*Stre
 		Client: b.inner.BasinServiceClient(),
 		Stream: stream,
 	}
-	err := b.inner.SendRetryable(ctx, &r)
-	return r.Config, err
+	return sendRetryable(ctx, b.inner, &r)
 }
 
 func (b *BasinClient) StreamClient(stream string) *StreamClient {
@@ -254,8 +248,7 @@ func (s *StreamClient) checkTail(ctx context.Context) (uint64, error) {
 		Client: s.inner.StreamServiceClient(),
 		Stream: s.stream,
 	}
-	err := s.inner.SendRetryable(ctx, &r)
-	return r.Tail, err
+	return sendRetryable(ctx, s.inner, &r)
 }
 
 func (s *StreamClient) append(ctx context.Context, input *AppendInput) (*AppendOutput, error) {
@@ -264,8 +257,7 @@ func (s *StreamClient) append(ctx context.Context, input *AppendInput) (*AppendO
 		Stream: s.stream,
 		Input:  input,
 	}
-	err := s.inner.SendRetryable(ctx, &r)
-	return r.Output, err
+	return sendRetryable(ctx, s.inner, &r)
 }
 
 func (s *StreamClient) read(ctx context.Context, req *ReadRequest) (ReadOutput, error) {
@@ -274,8 +266,7 @@ func (s *StreamClient) read(ctx context.Context, req *ReadRequest) (ReadOutput, 
 		Stream: s.stream,
 		Req:    req,
 	}
-	err := s.inner.SendRetryable(ctx, &r)
-	return r.Output, err
+	return sendRetryable(ctx, s.inner, &r)
 }
 
 type clientConfig struct {
@@ -372,7 +363,7 @@ func (c *clientInner) StreamServiceClient() pb.StreamServiceClient {
 	return pb.NewStreamServiceClient(c.conn)
 }
 
-func (c *clientInner) SendRetryable(ctx context.Context, r serviceRequest) error {
+func sendRetryable[T any](ctx context.Context, c *clientInner, r serviceRequest[T]) (T, error) {
 	// Add required headers
 	if c.basin != "" {
 		ctx = ctxWithHeader(ctx, "s2-basin", c.basin)
@@ -381,35 +372,35 @@ func (c *clientInner) SendRetryable(ctx context.Context, r serviceRequest) error
 	return sendRetryableInner(ctx, r, c.config.retryBackoffDuration, c.config.maxRetryAttempts)
 }
 
-func sendRetryableInner(
+func sendRetryableInner[T any](
 	ctx context.Context,
-	r serviceRequest,
+	r serviceRequest[T],
 	retryBackoffDuration time.Duration,
 	maxRetryAttempts uint,
-) error {
+) (T, error) {
 	var finalErr error
 
 	for i := uint(0); i < maxRetryAttempts; i++ {
-		err := r.Send(ctx)
+		v, err := r.Send(ctx)
 		if err == nil {
-			return nil
+			return v, nil
 		}
 
 		// Figure out if need to retry
 		if !r.IdempotencyLevel().IsIdempotent() {
-			return err
+			return v, err
 		}
 
 		statusErr, ok := status.FromError(err)
 		if !ok {
-			return err
+			return v, err
 		}
 
 		switch statusErr.Code() {
 		case codes.Unavailable, codes.DeadlineExceeded, codes.Unknown:
 			// We should retry
 		default:
-			return err
+			return v, err
 		}
 
 		finalErr = err
@@ -417,11 +408,12 @@ func sendRetryableInner(
 		select {
 		case <-time.After(retryBackoffDuration):
 		case <-ctx.Done():
-			return ctx.Err()
+			return v, ctx.Err()
 		}
 	}
 
-	return finalErr
+	var v T
+	return v, finalErr
 }
 
 func authHeaderInterceptor(token string) grpc.UnaryClientInterceptor {

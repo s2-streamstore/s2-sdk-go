@@ -22,12 +22,12 @@ func (t *testRetryServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return t.idLevel
 }
 
-func (t *testRetryServiceRequest) Send(ctx context.Context) error {
+func (t *testRetryServiceRequest) Send(ctx context.Context) (struct{}, error) {
 	t.attempts++
 	if t.attempts == 3 {
-		return nil
+		return struct{}{}, nil
 	}
-	return t.sendErr
+	return struct{}{}, t.sendErr
 }
 
 func TestSendRetrable(t *testing.T) {
@@ -93,12 +93,12 @@ func TestSendRetrable(t *testing.T) {
 	for _, tc := range testCases {
 		for _, maxAttempts := range []uint{2, 4} {
 			t.Run(fmt.Sprintf("%s %v", tc.idLevel, tc.sendErr), func(t *testing.T) {
-				r := &testRetryServiceRequest{
+				r := testRetryServiceRequest{
 					idLevel: tc.idLevel,
 					sendErr: tc.sendErr,
 				}
 
-				err := sendRetryableInner(context.TODO(), r, 0, maxAttempts)
+				_, err := sendRetryableInner(context.TODO(), &r, 0, maxAttempts)
 				if tc.shouldRetry && maxAttempts >= 3 {
 					require.NoError(t, err)
 				} else {

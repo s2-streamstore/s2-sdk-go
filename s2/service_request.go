@@ -31,9 +31,9 @@ func (i idempotencyLevel) String() string {
 	}
 }
 
-type serviceRequest interface {
+type serviceRequest[T any] interface {
 	IdempotencyLevel() idempotencyLevel
-	Send(ctx context.Context) error
+	Send(ctx context.Context) (T, error)
 }
 
 func ctxWithHeader(ctx context.Context, key, val string) context.Context {
