@@ -72,7 +72,7 @@ func (r *createBasinServiceRequest) Send(ctx context.Context) (*BasinInfo, error
 		Config: basinConfig,
 	}
 
-	ctx = ctxWithHeader(ctx, "s2-request-token", r.ReqID.String())
+	ctx = ctxWithHeaders(ctx, "s2-request-token", r.ReqID.String())
 
 	pbResp, err := r.Client.CreateBasin(ctx, req)
 	if err != nil {

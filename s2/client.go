@@ -113,6 +113,13 @@ func WithConnectTimeout(d time.Duration) ConfigParam {
 	})
 }
 
+func WithUserAgent(u string) ConfigParam {
+	return applyConfigParamFunc(func(cc *clientConfig) error {
+		cc.userAgent = u
+		return nil
+	})
+}
+
 func WithRetryBackoffDuration(d time.Duration) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
 		cc.retryBackoffDuration = d
@@ -332,6 +339,7 @@ type clientConfig struct {
 	authToken            string
 	endpoints            *Endpoints
 	connectTimeout       time.Duration
+	userAgent            string
 	retryBackoffDuration time.Duration
 	maxRetryAttempts     uint
 }
@@ -346,6 +354,7 @@ func newClientConfig(authToken string, params ...ConfigParam) (*clientConfig, er
 		authToken:            authToken,
 		endpoints:            EndpointsForCloud(CloudAWS),
 		connectTimeout:       3 * time.Second,
+		userAgent:            "s2-sdk-go",
 		retryBackoffDuration: 100 * time.Millisecond,
 		maxRetryAttempts:     3,
 	}
@@ -431,9 +440,13 @@ func (c *clientInner) StreamServiceClient() pb.StreamServiceClient {
 
 func sendRetryable[T any](ctx context.Context, c *clientInner, r serviceRequest[T]) (T, error) {
 	// Add required headers
-	ctx = ctxWithHeader(ctx, "authorization", fmt.Sprintf("Bearer %s", c.config.authToken))
+	ctx = ctxWithHeaders(
+		ctx,
+		"user-agent", c.config.userAgent,
+		"authorization", fmt.Sprintf("Bearer %s", c.config.authToken),
+	)
 	if c.basin != "" {
-		ctx = ctxWithHeader(ctx, "s2-basin", c.basin)
+		ctx = ctxWithHeaders(ctx, "s2-basin", c.basin)
 	}
 
 	return sendRetryableInner(ctx, r, c.config.retryBackoffDuration, c.config.maxRetryAttempts)

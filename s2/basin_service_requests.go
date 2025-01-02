@@ -64,7 +64,7 @@ func (r *createStreamServiceRequest) Send(ctx context.Context) (*StreamInfo, err
 		Config: config,
 	}
 
-	ctx = ctxWithHeader(ctx, "s2-request-token", r.ReqID.String())
+	ctx = ctxWithHeaders(ctx, "s2-request-token", r.ReqID.String())
 
 	pbResp, err := r.Client.CreateStream(ctx, req)
 	if err != nil {
