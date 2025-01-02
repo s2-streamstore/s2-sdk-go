@@ -64,7 +64,17 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendO
 	return s.append(ctx, input)
 }
 
+// {{ syncDoc "StreamServiceClient.AppendSession" }}
+func (s *StreamClient) AppendSession(ctx context.Context) (Sender[*AppendInput], Receiver[*AppendOutput], error) {
+	return s.appendSession(ctx)
+}
+
 // {{ syncDoc "StreamServiceClient.Read" }}
 func (s *StreamClient) Read(ctx context.Context, req *ReadRequest) (ReadOutput, error) {
 	return s.read(ctx, req)
+}
+
+// {{ syncDoc "StreamServiceClient.ReadSession" }}
+func (s *StreamClient) ReadSession(ctx context.Context, req *ReadSessionRequest) (Receiver[ReadOutput], error) {
+	return s.readSession(ctx, req)
 }

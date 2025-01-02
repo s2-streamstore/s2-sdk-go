@@ -7,6 +7,41 @@ import (
 	"github.com/s2-streamstore/s2-sdk-go/pb"
 )
 
+type Receiver[T any] interface {
+	Recv() (T, error)
+}
+
+type Sender[T any] interface {
+	Send(T) error
+}
+
+type recvInner[F, T any] struct {
+	Client    Receiver[*F]
+	ConvertFn func(*F) (T, error)
+}
+
+func (r recvInner[F, T]) Recv() (T, error) {
+	f, err := r.Client.Recv()
+	if err != nil {
+		var v T
+		return v, err
+	}
+	return r.ConvertFn(f)
+}
+
+type sendInner[F, T any] struct {
+	Client    Sender[*T]
+	ConvertFn func(F) (*T, error)
+}
+
+func (r sendInner[F, T]) Send(f F) error {
+	t, err := r.ConvertFn(f)
+	if err != nil {
+		return err
+	}
+	return r.Client.Send(t)
+}
+
 type implRetentionPolicy interface {
 	implRetentionPolicy()
 }

@@ -249,3 +249,11 @@ type AppendOutput struct {
 	// {{ syncDocIndent "AppendOutput.EndSeqNum" }}
 	EndSeqNum uint64
 }
+
+// {{ syncDoc "ReadSessionRequest" }}
+type ReadSessionRequest struct {
+	// {{ syncDocIndent "ReadSessionRequest.StartSeqNum" }}
+	StartSeqNum uint64
+	// {{ syncDocIndent "ReadSessionRequest.Limit" }}
+	Limit *ReadLimit
+}

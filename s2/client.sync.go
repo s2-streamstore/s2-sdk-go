@@ -70,7 +70,18 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendO
 	return s.append(ctx, input)
 }
 
+// Append batches of records to a stream continuously, while guaranteeing pipelined requests are processed in order.
+// If any request fails, the session is terminated.
+func (s *StreamClient) AppendSession(ctx context.Context) (Sender[*AppendInput], Receiver[*AppendOutput], error) {
+	return s.appendSession(ctx)
+}
+
 // Retrieve a batch of records from a stream.
 func (s *StreamClient) Read(ctx context.Context, req *ReadRequest) (ReadOutput, error) {
 	return s.read(ctx, req)
+}
+
+// Retrieve batches of records from a stream continuously.
+func (s *StreamClient) ReadSession(ctx context.Context, req *ReadSessionRequest) (Receiver[ReadOutput], error) {
+	return s.readSession(ctx, req)
 }
