@@ -27,3 +27,15 @@ The Go SDK provides ergonomic wrappers and utilities to interact with the
 ---
 
 This project is a **WORK IN PROGRESS**
+
+## Starwars
+
+Try out the SDK by running the Starwars example:
+
+```bash
+export S2_AUTH_TOKEN="<s2 authentication token>"
+export STARWARS_BASIN="<your existing basin name>"
+export STARWARS_STREAM="<your existing stream name>"
+
+go run ./examples/starwars
+```

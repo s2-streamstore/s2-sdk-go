@@ -260,8 +260,29 @@ func (s *StreamClient) append(ctx context.Context, input *AppendInput) (*AppendO
 	return sendRetryable(ctx, s.inner, &r)
 }
 
+func (s *StreamClient) appendSession(ctx context.Context) (Sender[*AppendInput], Receiver[*AppendOutput], error) {
+	r := appendSessionServiceRequest{
+		Client: s.inner.StreamServiceClient(),
+		Stream: s.stream,
+	}
+	channel, err := sendRetryable(ctx, s.inner, &r)
+	if err != nil {
+		return nil, nil, err
+	}
+	return channel.Sender, channel.Receiver, nil
+}
+
 func (s *StreamClient) read(ctx context.Context, req *ReadRequest) (ReadOutput, error) {
 	r := readServiceRequest{
+		Client: s.inner.StreamServiceClient(),
+		Stream: s.stream,
+		Req:    req,
+	}
+	return sendRetryable(ctx, s.inner, &r)
+}
+
+func (s *StreamClient) readSession(ctx context.Context, req *ReadSessionRequest) (Receiver[ReadOutput], error) {
+	r := readSessionServiceRequest{
 		Client: s.inner.StreamServiceClient(),
 		Stream: s.stream,
 		Req:    req,
@@ -322,7 +343,6 @@ func newClientInner(config *clientConfig, basin string) (*clientInner, error) {
 	conn, err := grpc.NewClient(
 		endpoint,
 		grpc.WithTransportCredentials(creds),
-		grpc.WithUnaryInterceptor(authHeaderInterceptor(config.authToken)),
 	)
 	if err != nil {
 		return nil, err
@@ -365,6 +385,7 @@ func (c *clientInner) StreamServiceClient() pb.StreamServiceClient {
 
 func sendRetryable[T any](ctx context.Context, c *clientInner, r serviceRequest[T]) (T, error) {
 	// Add required headers
+	ctx = ctxWithHeader(ctx, "authorization", fmt.Sprintf("Bearer %s", c.config.authToken))
 	if c.basin != "" {
 		ctx = ctxWithHeader(ctx, "s2-basin", c.basin)
 	}
@@ -414,19 +435,4 @@ func sendRetryableInner[T any](
 
 	var v T
 	return v, finalErr
-}
-
-func authHeaderInterceptor(token string) grpc.UnaryClientInterceptor {
-	return func(
-		ctx context.Context,
-		method string,
-		req any,
-		reply any,
-		cc *grpc.ClientConn,
-		invoker grpc.UnaryInvoker,
-		opts ...grpc.CallOption,
-	) error {
-		ctx = ctxWithHeader(ctx, "authorization", fmt.Sprintf("Bearer %s", token))
-		return invoker(ctx, method, req, reply, cc, opts...)
-	}
 }

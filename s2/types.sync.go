@@ -273,3 +273,14 @@ type AppendOutput struct {
 	// `end_seq_num - start_seq_num` will be the number of records in the batch.
 	EndSeqNum uint64
 }
+
+// Read session request.
+type ReadSessionRequest struct {
+	// Starting sequence number (inclusive).
+	StartSeqNum uint64
+	// Limit on how many records can be returned. When a limit is specified, the session will be terminated as soon as
+	// the limit is met, or when the current tail of the stream is reached -- whichever occurs first.
+	// If no limit is specified, the session will remain open after catching up to the tail, and continue tailing as
+	// new messages are written to the stream.
+	Limit *ReadLimit
+}
