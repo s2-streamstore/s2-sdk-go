@@ -33,9 +33,8 @@ This project is a **WORK IN PROGRESS**
 Try out the SDK by running the Starwars example:
 
 ```bash
-export S2_AUTH_TOKEN="<s2 authentication token>"
-export STARWARS_BASIN="<your existing basin name>"
-export STARWARS_STREAM="<your existing stream name>"
-
-go run ./examples/starwars
+go run ./examples/starwars \
+  -basin "<basin name>"    \
+  -stream "<stream name>"  \
+  -token "<auth token>"
 ```

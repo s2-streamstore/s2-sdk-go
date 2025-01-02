@@ -9,7 +9,7 @@ tasks:
       vars: [NAME]
     cmds:
       - go build -o .out/examples/{{.NAME}} ./examples/{{.NAME}}
-      - .out/examples/{{.NAME}}
+      - .out/examples/{{.NAME}} {{.CLI_ARGS}}
 
   test:
     deps:

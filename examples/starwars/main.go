@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -63,10 +64,28 @@ func read(rx s2.Receiver[s2.ReadOutput]) error {
 }
 
 func run(ctx context.Context) error {
+	basin := flag.String("basin", "", "Basin name")
+	stream := flag.String("stream", "", "Stream name")
+
+	authToken := os.Getenv("S2_AUTH_TOKEN")
+	if authToken == "" {
+		flag.StringVar(&authToken, "token", "", "S2 Authentication token")
+	}
+
+	flag.Parse()
+
+	if *basin == "" {
+		return fmt.Errorf("basin name cannot be empty")
+	}
+
+	if *stream == "" {
+		return fmt.Errorf("stream name cannot be empty")
+	}
+
 	client, err := s2.NewStreamClient(
-		os.Getenv("STARWARS_BASIN"),
-		os.Getenv("STARWARS_STREAM"),
-		os.Getenv("S2_AUTH_TOKEN"),
+		*basin,
+		*stream,
+		authToken,
 	)
 	if err != nil {
 		return fmt.Errorf("client create: %w", err)
