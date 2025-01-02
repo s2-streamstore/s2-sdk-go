@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/s2-streamstore/s2-sdk-go/pb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
@@ -31,6 +33,15 @@ func (c Cloud) String() string {
 	}
 }
 
+func ParseCloud(s string) (Cloud, error) {
+	switch strings.ToLower(s) {
+	case "aws":
+		return CloudAWS, nil
+	default:
+		return 0, fmt.Errorf("unsupported cloud %q", s)
+	}
+}
+
 type Endpoints struct {
 	Account string
 	Basin   string
@@ -44,17 +55,37 @@ func EndpointsForCloud(cloud Cloud) *Endpoints {
 }
 
 func EndpointsForCell(cloud Cloud, cellID string) *Endpoints {
-	panic("todo")
+	endpoint := fmt.Sprintf("%s.o.%s.s2.dev", cellID, cloud)
+	return &Endpoints{
+		Account: endpoint,
+		Basin:   endpoint,
+	}
 }
 
 func EndpointsFromEnv() (*Endpoints, error) {
-	panic("todo")
-}
+	cloudStr := os.Getenv("S2_CLOUD")
+	cloud := CloudAWS
+	if cloudStr != "" {
+		var err error
+		cloud, err = ParseCloud(cloudStr)
+		if err != nil {
+			return nil, err
+		}
+	}
 
-func (e *Endpoints) apply(config *clientConfig) error {
-	// TODO: Validate endpoints
-	config.endpoints = e
-	return nil
+	endpoints := EndpointsForCloud(cloud)
+
+	accountEndpoint := os.Getenv("S2_ACCOUNT_ENDPOINT")
+	if accountEndpoint != "" {
+		endpoints.Account = accountEndpoint
+	}
+
+	basinEndpoint := os.Getenv("S2_BASIN_ENDPOINT")
+	if basinEndpoint != "" {
+		endpoints.Basin = basinEndpoint
+	}
+
+	return endpoints, nil
 }
 
 type ConfigParam interface {
@@ -71,6 +102,13 @@ func WithEndpoints(e *Endpoints) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
 		// TODO: Validate endpoints
 		cc.endpoints = e
+		return nil
+	})
+}
+
+func WithConnectTimeout(d time.Duration) ConfigParam {
+	return applyConfigParamFunc(func(cc *clientConfig) error {
+		cc.connectTimeout = d
 		return nil
 	})
 }
@@ -293,6 +331,7 @@ func (s *StreamClient) readSession(ctx context.Context, req *ReadSessionRequest)
 type clientConfig struct {
 	authToken            string
 	endpoints            *Endpoints
+	connectTimeout       time.Duration
 	retryBackoffDuration time.Duration
 	maxRetryAttempts     uint
 }
@@ -306,6 +345,7 @@ func newClientConfig(authToken string, params ...ConfigParam) (*clientConfig, er
 	config := &clientConfig{
 		authToken:            authToken,
 		endpoints:            EndpointsForCloud(CloudAWS),
+		connectTimeout:       3 * time.Second,
 		retryBackoffDuration: 100 * time.Millisecond,
 		maxRetryAttempts:     3,
 	}
@@ -340,9 +380,15 @@ func newClientInner(config *clientConfig, basin string) (*clientInner, error) {
 		}
 	}
 
+	connectParams := grpc.ConnectParams{
+		MinConnectTimeout: config.connectTimeout,
+		Backoff:           backoff.DefaultConfig,
+	}
+
 	conn, err := grpc.NewClient(
 		endpoint,
 		grpc.WithTransportCredentials(creds),
+		grpc.WithConnectParams(connectParams),
 	)
 	if err != nil {
 		return nil, err
