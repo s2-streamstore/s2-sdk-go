@@ -36,8 +36,8 @@ type serviceRequest[T any] interface {
 	Send(ctx context.Context) (T, error)
 }
 
-func ctxWithHeader(ctx context.Context, key, val string) context.Context {
-	headers := metadata.Pairs(key, val)
+func ctxWithHeaders(ctx context.Context, pairs ...string) context.Context {
+	headers := metadata.Pairs(pairs...)
 
 	if existing, ok := metadata.FromOutgoingContext(ctx); ok {
 		headers = metadata.Join(existing, headers)
