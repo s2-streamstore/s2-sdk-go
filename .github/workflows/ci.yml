@@ -38,6 +38,7 @@ jobs:
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
+      - uses: arduino/setup-protoc@v3
       - name: Build
         run: |
           for eg in `go list ./examples/... | sed 's|.*/||'`; do
@@ -56,6 +57,7 @@ jobs:
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
+      - uses: arduino/setup-protoc@v3
       - name: Test
         run: task test
 
@@ -73,7 +75,7 @@ jobs:
           version: v1.63
 
   gen-lint:
-    name: Lint
+    name: Code Generation Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -83,5 +85,6 @@ jobs:
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
+      - uses: arduino/setup-protoc@v3
       - name: Lint
         run: task lint:gen
