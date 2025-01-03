@@ -67,7 +67,7 @@ tasks:
         msg: |
           `protoc-gen-go` command not found
           Install the Go extension using:
-          $ go install google.golang.org/grpc/cmd/protoc-gen-go@latest
+          $ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
       - sh: which protoc-gen-go-grpc
         msg: |
           `protoc-gen-go-grpc` command not found

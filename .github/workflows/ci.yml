@@ -41,7 +41,7 @@ jobs:
       - uses: arduino/setup-protoc@v3
       - name: Setup protoc
         run: |
-          go install google.golang.org/grpc/cmd/protoc-gen-go@latest
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
       - name: Build
         run: |
@@ -64,7 +64,7 @@ jobs:
       - uses: arduino/setup-protoc@v3
       - name: Setup protoc
         run: |
-          go install google.golang.org/grpc/cmd/protoc-gen-go@latest
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
       - name: Test
         run: task test
@@ -96,7 +96,7 @@ jobs:
       - uses: arduino/setup-protoc@v3
       - name: Setup protoc
         run: |
-          go install google.golang.org/grpc/cmd/protoc-gen-go@latest
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
       - name: Lint
         run: task lint:gen
