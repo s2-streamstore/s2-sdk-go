@@ -3,6 +3,7 @@ package s2
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -15,6 +16,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
+)
+
+// Errors.
+var (
+	ErrUnspportedCloud = errors.New("unsupported cloud")
+	ErrEmptyAuthToken  = errors.New("auth token cannot be empty")
 )
 
 type Cloud uint
@@ -38,7 +45,7 @@ func ParseCloud(s string) (Cloud, error) {
 	case "aws":
 		return CloudAWS, nil
 	default:
-		return 0, fmt.Errorf("unsupported cloud %q", s)
+		return 0, fmt.Errorf("%w: %q", ErrUnspportedCloud, s)
 	}
 }
 
@@ -56,6 +63,7 @@ func EndpointsForCloud(cloud Cloud) *Endpoints {
 
 func EndpointsForCell(cloud Cloud, cellID string) *Endpoints {
 	endpoint := fmt.Sprintf("%s.o.%s.s2.dev", cellID, cloud)
+
 	return &Endpoints{
 		Account: endpoint,
 		Basin:   endpoint,
@@ -65,8 +73,10 @@ func EndpointsForCell(cloud Cloud, cellID string) *Endpoints {
 func EndpointsFromEnv() (*Endpoints, error) {
 	cloudStr := os.Getenv("S2_CLOUD")
 	cloud := CloudAWS
+
 	if cloudStr != "" {
 		var err error
+
 		cloud, err = ParseCloud(cloudStr)
 		if err != nil {
 			return nil, err
@@ -102,6 +112,7 @@ func WithEndpoints(e *Endpoints) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
 		// TODO: Validate endpoints
 		cc.endpoints = e
+
 		return nil
 	})
 }
@@ -109,6 +120,7 @@ func WithEndpoints(e *Endpoints) ConfigParam {
 func WithConnectTimeout(d time.Duration) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
 		cc.connectTimeout = d
+
 		return nil
 	})
 }
@@ -116,6 +128,7 @@ func WithConnectTimeout(d time.Duration) ConfigParam {
 func WithUserAgent(u string) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
 		cc.userAgent = u
+
 		return nil
 	})
 }
@@ -123,6 +136,7 @@ func WithUserAgent(u string) ConfigParam {
 func WithRetryBackoffDuration(d time.Duration) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
 		cc.retryBackoffDuration = d
+
 		return nil
 	})
 }
@@ -130,6 +144,7 @@ func WithRetryBackoffDuration(d time.Duration) ConfigParam {
 func WithMaxRetryAttempts(n uint) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
 		cc.maxRetryAttempts = n
+
 		return nil
 	})
 }
@@ -159,6 +174,7 @@ func (c *Client) listBasins(ctx context.Context, req *ListBasinsRequest) (*ListB
 		Client: c.inner.AccountServiceClient(),
 		Req:    req,
 	}
+
 	return sendRetryable(ctx, c.inner, &r)
 }
 
@@ -168,6 +184,7 @@ func (c *Client) createBasin(ctx context.Context, req *CreateBasinRequest) (*Bas
 		Req:    req,
 		ReqID:  uuid.New(),
 	}
+
 	return sendRetryable(ctx, c.inner, &r)
 }
 
@@ -177,6 +194,7 @@ func (c *Client) deleteBasin(ctx context.Context, req *DeleteBasinRequest) error
 		Req:    req,
 	}
 	_, err := sendRetryable(ctx, c.inner, &r)
+
 	return err
 }
 
@@ -185,6 +203,7 @@ func (c *Client) reconfigureBasin(ctx context.Context, req *ReconfigureBasinRequ
 		Client: c.inner.AccountServiceClient(),
 		Req:    req,
 	}
+
 	return sendRetryable(ctx, c.inner, &r)
 }
 
@@ -193,6 +212,7 @@ func (c *Client) getBasinConfig(ctx context.Context, basin string) (*BasinConfig
 		Client: c.inner.AccountServiceClient(),
 		Basin:  basin,
 	}
+
 	return sendRetryable(ctx, c.inner, &r)
 }
 
@@ -201,6 +221,7 @@ func (c *Client) BasinClient(basin string) (*BasinClient, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &BasinClient{
 		inner: inner,
 	}, nil
@@ -231,6 +252,7 @@ func (b *BasinClient) listStreams(ctx context.Context, req *ListStreamsRequest) 
 		Client: b.inner.BasinServiceClient(),
 		Req:    req,
 	}
+
 	return sendRetryable(ctx, b.inner, &r)
 }
 
@@ -240,6 +262,7 @@ func (b *BasinClient) createStream(ctx context.Context, req *CreateStreamRequest
 		Req:    req,
 		ReqID:  uuid.New(),
 	}
+
 	return sendRetryable(ctx, b.inner, &r)
 }
 
@@ -249,6 +272,7 @@ func (b *BasinClient) deleteStream(ctx context.Context, req *DeleteStreamRequest
 		Req:    req,
 	}
 	_, err := sendRetryable(ctx, b.inner, &r)
+
 	return err
 }
 
@@ -257,6 +281,7 @@ func (b *BasinClient) reconfigureStream(ctx context.Context, req *ReconfigureStr
 		Client: b.inner.BasinServiceClient(),
 		Req:    req,
 	}
+
 	return sendRetryable(ctx, b.inner, &r)
 }
 
@@ -265,6 +290,7 @@ func (b *BasinClient) getStreamConfig(ctx context.Context, stream string) (*Stre
 		Client: b.inner.BasinServiceClient(),
 		Stream: stream,
 	}
+
 	return sendRetryable(ctx, b.inner, &r)
 }
 
@@ -285,6 +311,7 @@ func NewStreamClient(basin, stream, authToken string, params ...ConfigParam) (*S
 	if err != nil {
 		return nil, err
 	}
+
 	return basinClient.StreamClient(stream), nil
 }
 
@@ -293,6 +320,7 @@ func (s *StreamClient) checkTail(ctx context.Context) (uint64, error) {
 		Client: s.inner.StreamServiceClient(),
 		Stream: s.stream,
 	}
+
 	return sendRetryable(ctx, s.inner, &r)
 }
 
@@ -302,6 +330,7 @@ func (s *StreamClient) append(ctx context.Context, input *AppendInput) (*AppendO
 		Stream: s.stream,
 		Input:  input,
 	}
+
 	return sendRetryable(ctx, s.inner, &r)
 }
 
@@ -310,10 +339,12 @@ func (s *StreamClient) appendSession(ctx context.Context) (Sender[*AppendInput],
 		Client: s.inner.StreamServiceClient(),
 		Stream: s.stream,
 	}
+
 	channel, err := sendRetryable(ctx, s.inner, &r)
 	if err != nil {
 		return nil, nil, err
 	}
+
 	return channel.Sender, channel.Receiver, nil
 }
 
@@ -323,6 +354,7 @@ func (s *StreamClient) read(ctx context.Context, req *ReadRequest) (ReadOutput, 
 		Stream: s.stream,
 		Req:    req,
 	}
+
 	return sendRetryable(ctx, s.inner, &r)
 }
 
@@ -332,6 +364,7 @@ func (s *StreamClient) readSession(ctx context.Context, req *ReadSessionRequest)
 		Stream: s.stream,
 		Req:    req,
 	}
+
 	return sendRetryable(ctx, s.inner, &r)
 }
 
@@ -346,7 +379,7 @@ type clientConfig struct {
 
 func newClientConfig(authToken string, params ...ConfigParam) (*clientConfig, error) {
 	if authToken == "" {
-		return nil, fmt.Errorf("auth token cannot be empty")
+		return nil, ErrEmptyAuthToken
 	}
 
 	// Default configuration
@@ -460,7 +493,7 @@ func sendRetryableInner[T any](
 ) (T, error) {
 	var finalErr error
 
-	for i := uint(0); i < maxRetryAttempts; i++ {
+	for range maxRetryAttempts {
 		v, err := r.Send(ctx)
 		if err == nil {
 			return v, nil
@@ -493,5 +526,6 @@ func sendRetryableInner[T any](
 	}
 
 	var v T
+
 	return v, finalErr
 }

@@ -33,6 +33,7 @@ func (r *listStreamsServiceRequest) Send(ctx context.Context) (*ListStreamsRespo
 
 	pbStreams := pbResp.GetStreams()
 	streamInfos := make([]StreamInfo, 0, len(pbStreams))
+
 	for _, pbInfo := range pbStreams {
 		streamInfos = append(streamInfos, streamInfoFromProto(pbInfo))
 	}
@@ -72,6 +73,7 @@ func (r *createStreamServiceRequest) Send(ctx context.Context) (*StreamInfo, err
 	}
 
 	info := streamInfoFromProto(pbResp.GetInfo())
+
 	return &info, nil
 }
 
@@ -113,8 +115,10 @@ func (r *reconfigureStreamServiceRequest) IdempotencyLevel() idempotencyLevel {
 
 func (r *reconfigureStreamServiceRequest) Send(ctx context.Context) (*StreamConfig, error) {
 	var streamConfig *pb.StreamConfig
+
 	if r.Req.Config != nil {
 		var err error
+
 		streamConfig, err = streamConfigIntoProto(r.Req.Config)
 		if err != nil {
 			return nil, err

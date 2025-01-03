@@ -1,0 +1,70 @@
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - dupl
+    - dupword
+    - durationcheck
+    - err113
+    - errname
+    - errorlint
+    - exhaustive
+    - exptostd
+    - fatcontext
+    - forcetypeassert
+    - gci
+    - ginkgolinter
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    - gocognit
+    - goconst
+    - gocritic
+    - godot
+    - gofmt
+    - gofumpt
+    - goimports
+    - goprintffuncname
+    - grouper
+    - importas
+    - intrange
+    - lll
+    - makezero
+    - mirror
+    - misspell
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - nlreturn
+    - nolintlint
+    - nonamedreturns
+    - nosprintfhostport
+    - prealloc
+    - predeclared
+    - protogetter
+    - reassign
+    - recvcheck
+    - revive
+    - stylecheck
+    - tenv
+    - testableexamples
+    - testifylint
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+    - wsl
+
+linters-settings:
+  exhaustive:
+    default-signifies-exhaustive: true
+  gochecksumtype:
+    default-signifies-exhaustive: false
