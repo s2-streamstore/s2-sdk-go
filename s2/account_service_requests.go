@@ -33,11 +33,13 @@ func (r *listBasinsServiceRequest) Send(ctx context.Context) (*ListBasinsRespons
 
 	pbBasins := pbResp.GetBasins()
 	basinInfos := make([]BasinInfo, 0, len(pbBasins))
+
 	for _, pbInfo := range pbBasins {
 		info, err := basinInfoFromProto(pbInfo)
 		if err != nil {
 			return nil, err
 		}
+
 		basinInfos = append(basinInfos, info)
 	}
 
@@ -59,8 +61,10 @@ func (r *createBasinServiceRequest) IdempotencyLevel() idempotencyLevel {
 
 func (r *createBasinServiceRequest) Send(ctx context.Context) (*BasinInfo, error) {
 	var basinConfig *pb.BasinConfig
+
 	if r.Req.Config != nil {
 		var err error
+
 		basinConfig, err = basinConfigIntoProto(r.Req.Config)
 		if err != nil {
 			return nil, err
@@ -125,8 +129,10 @@ func (r *reconfigureBasinServiceRequest) IdempotencyLevel() idempotencyLevel {
 
 func (r *reconfigureBasinServiceRequest) Send(ctx context.Context) (*BasinConfig, error) {
 	var basinConfig *pb.BasinConfig
+
 	if r.Req.Config != nil {
 		var err error
+
 		basinConfig, err = basinConfigIntoProto(r.Req.Config)
 		if err != nil {
 			return nil, err

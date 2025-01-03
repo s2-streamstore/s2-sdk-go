@@ -35,7 +35,7 @@ func commentString(doc string, indent uint) string {
 		}
 
 		tab := ""
-		for i := uint(0); i < indent; i++ {
+		for range indent {
 			tab += "\t"
 		}
 
@@ -45,8 +45,92 @@ func commentString(doc string, indent uint) string {
 	return strings.Join(lines[:sliceAt], "\n")
 }
 
+func inspectFuncDecl(t *ast.FuncDecl, commentMap map[string]string) {
+	if t.Doc != nil {
+		if t.Recv != nil && len(t.Recv.List) > 0 {
+			// Handle methods
+			recvType := getTypeName(t.Recv.List[0].Type)
+			key := fmt.Sprintf("%s.%s", recvType, t.Name.Name)
+			commentMap[key] = strings.TrimSpace(t.Doc.Text())
+		} else {
+			// Handle top-level functions
+			commentMap[t.Name.Name] = strings.TrimSpace(t.Doc.Text())
+		}
+	}
+}
+
+func inspectValueSpec(typeSpec *ast.ValueSpec, commentMap map[string]string) {
+	if typeSpec.Doc != nil {
+		for _, name := range typeSpec.Names {
+			commentMap[name.Name] = strings.TrimSpace(typeSpec.Doc.Text())
+		}
+	}
+}
+
+func inspectStructType(typeSpec *ast.TypeSpec, ts *ast.StructType, commentMap map[string]string) {
+	// Handle struct fields
+	for _, field := range ts.Fields.List {
+		if field.Doc != nil && len(field.Names) > 0 {
+			for _, name := range field.Names {
+				key := fmt.Sprintf("%s.%s", typeSpec.Name.Name, name.Name)
+				commentMap[key] = strings.TrimSpace(field.Doc.Text())
+			}
+		}
+	}
+}
+
+func inspectInterfaceType(typeSpec *ast.TypeSpec, ts *ast.InterfaceType, commentMap map[string]string) {
+	// Handle interface methods
+	for _, method := range ts.Methods.List {
+		if method.Doc != nil && len(method.Names) > 0 {
+			for _, name := range method.Names {
+				key := fmt.Sprintf("%s.%s", typeSpec.Name.Name, name.Name)
+				commentMap[key] = strings.TrimSpace(method.Doc.Text())
+			}
+		}
+	}
+}
+
+func inspectTypeSpec(t *ast.GenDecl, typeSpec *ast.TypeSpec, commentMap map[string]string) {
+	// Add type comment
+	if t.Doc != nil {
+		commentMap[typeSpec.Name.Name] = strings.TrimSpace(t.Doc.Text())
+	}
+
+	switch ts := typeSpec.Type.(type) {
+	case *ast.StructType:
+		inspectStructType(typeSpec, ts, commentMap)
+	case *ast.InterfaceType:
+		inspectInterfaceType(typeSpec, ts, commentMap)
+	}
+}
+
+func inspectGenDecl(t *ast.GenDecl, commentMap map[string]string) {
+	// Handle type declarations
+	for _, spec := range t.Specs {
+		switch typeSpec := spec.(type) {
+		case *ast.ValueSpec:
+			inspectValueSpec(typeSpec, commentMap)
+		case *ast.TypeSpec:
+			inspectTypeSpec(t, typeSpec, commentMap)
+		}
+	}
+}
+
+func inspectAST(n ast.Node, commentMap map[string]string) bool {
+	switch t := n.(type) {
+	case *ast.GenDecl:
+		inspectGenDecl(t, commentMap)
+	case *ast.FuncDecl:
+		inspectFuncDecl(t, commentMap)
+	}
+
+	return true
+}
+
 func parseComments(src string) map[string]string {
 	fset := token.NewFileSet()
+
 	node, err := parser.ParseFile(fset, "", src, parser.ParseComments)
 	if err != nil {
 		panic(err)
@@ -56,61 +140,7 @@ func parseComments(src string) map[string]string {
 
 	// Traverse the AST to extract types and their fields/methods
 	ast.Inspect(node, func(n ast.Node) bool {
-		switch t := n.(type) {
-		case *ast.GenDecl:
-			// Handle type declarations
-			for _, spec := range t.Specs {
-				switch typeSpec := spec.(type) {
-				case *ast.ValueSpec:
-					if typeSpec.Doc != nil {
-						for _, name := range typeSpec.Names {
-							commentMap[name.Name] = strings.TrimSpace(typeSpec.Doc.Text())
-						}
-					}
-				case *ast.TypeSpec:
-					// Add type comment
-					if t.Doc != nil {
-						commentMap[typeSpec.Name.Name] = strings.TrimSpace(t.Doc.Text())
-					}
-
-					switch ts := typeSpec.Type.(type) {
-					case *ast.StructType:
-						// Handle struct fields
-						for _, field := range ts.Fields.List {
-							if field.Doc != nil && len(field.Names) > 0 {
-								for _, name := range field.Names {
-									key := fmt.Sprintf("%s.%s", typeSpec.Name.Name, name.Name)
-									commentMap[key] = strings.TrimSpace(field.Doc.Text())
-								}
-							}
-						}
-					case *ast.InterfaceType:
-						// Handle interface methods
-						for _, method := range ts.Methods.List {
-							if method.Doc != nil && len(method.Names) > 0 {
-								for _, name := range method.Names {
-									key := fmt.Sprintf("%s.%s", typeSpec.Name.Name, name.Name)
-									commentMap[key] = strings.TrimSpace(method.Doc.Text())
-								}
-							}
-						}
-					}
-				}
-			}
-		case *ast.FuncDecl:
-			if t.Doc != nil {
-				if t.Recv != nil && len(t.Recv.List) > 0 {
-					// Handle methods
-					recvType := getTypeName(t.Recv.List[0].Type)
-					key := fmt.Sprintf("%s.%s", recvType, t.Name.Name)
-					commentMap[key] = strings.TrimSpace(t.Doc.Text())
-				} else {
-					// Handle top-level functions
-					commentMap[t.Name.Name] = strings.TrimSpace(t.Doc.Text())
-				}
-			}
-		}
-		return true
+		return inspectAST(n, commentMap)
 	})
 
 	return commentMap
@@ -127,7 +157,7 @@ func getTypeName(expr ast.Expr) string {
 	}
 }
 
-// syncDoc looks up and formats the comment for a given key
+// syncDoc looks up and formats the comment for a given key.
 func syncDoc(commentMap map[string]string, key string, indent uint) string {
 	doc, ok := commentMap[key]
 	if !ok {
@@ -153,6 +183,7 @@ func applyTemplate(tmplSrc string, commentMap map[string]string) string {
 	}
 
 	var buf bytes.Buffer
+
 	err = tmpl.Execute(&buf, commentMap)
 	if err != nil {
 		panic(err)
@@ -197,7 +228,7 @@ func main() {
 	output = "// Auto generated file. DO NOT EDIT.\n\n" + output
 
 	// Write the generated code to the output file
-	err = os.WriteFile(*outputFile, []byte(output), 0644)
+	err = os.WriteFile(*outputFile, []byte(output), 0o644)
 	if err != nil {
 		fmt.Printf("Error writing to output file: %v\n", err)
 		os.Exit(1)

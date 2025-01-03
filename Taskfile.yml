@@ -3,19 +3,54 @@ version: '3'
 tasks:
   example:
     aliases: [eg]
+    requires:
+      vars: [NAME]
+    cmds:
+      - task: example:build
+        vars: { NAME: '{{.NAME}}' }
+      - .out/examples/{{.NAME}} {{.CLI_ARGS}}
+
+  example:build:
     deps:
       - gen
     requires:
       vars: [NAME]
     cmds:
       - go build -o .out/examples/{{.NAME}} ./examples/{{.NAME}}
-      - .out/examples/{{.NAME}} {{.CLI_ARGS}}
 
   test:
     deps:
       - gen
     cmds:
       - go test ./...
+
+  lint:
+    deps:
+      - lint:gen
+      - lint:go
+
+  lint:go:
+    deps:
+      - gen
+    cmds:
+      - golangci-lint run
+
+  lint:gen:
+    deps:
+      - gen
+    cmds:
+      - |
+        git diff --exit-code pb/*.go s2/*.sync.go && echo "Up-to-date" || {
+            echo "Not up-to-date"
+            echo "Run task:gen and update the generated code"
+            exit 1
+        }
+
+  fmt:
+    deps:
+      - gen
+    cmds:
+      - golangci-lint run --fix &> /dev/null
 
   gen:
     deps:
@@ -32,7 +67,7 @@ tasks:
         msg: |
           `protoc-gen-go` command not found
           Install the Go extension using:
-          $ go install google.golang.org/grpc/cmd/protoc-gen-go@latest
+          $ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
       - sh: which protoc-gen-go-grpc
         msg: |
           `protoc-gen-go-grpc` command not found
@@ -93,7 +128,7 @@ tasks:
             -i pb/s2_grpc.pb.go \
             -t syncgen/client.sync.tmpl \
             -o s2/client.sync.go
-    
+
   gen:sync:_bin:
     sources:
       - cmd/sync-docs/*.go

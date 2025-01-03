@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/stretchr/testify/require"
 )
 
 type testRetryServiceRequest struct {
@@ -22,15 +21,16 @@ func (t *testRetryServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return t.idLevel
 }
 
-func (t *testRetryServiceRequest) Send(ctx context.Context) (struct{}, error) {
+func (t *testRetryServiceRequest) Send(context.Context) (struct{}, error) {
 	t.attempts++
 	if t.attempts == 3 {
 		return struct{}{}, nil
 	}
+
 	return struct{}{}, t.sendErr
 }
 
-func TestSendRetrable(t *testing.T) {
+func TestSendRetryable(t *testing.T) {
 	type testCase struct {
 		idLevel     idempotencyLevel
 		sendErr     error
@@ -40,12 +40,12 @@ func TestSendRetrable(t *testing.T) {
 	testCases := []testCase{
 		{
 			idLevel:     idempotencyLevelNoSideEffects,
-			sendErr:     errors.New("hello"),
+			sendErr:     errors.New("hello"), //nolint:err113
 			shouldRetry: false,
 		},
 		{
 			idLevel:     idempotencyLevelIdempotent,
-			sendErr:     errors.New("hello"),
+			sendErr:     errors.New("hello"), //nolint:err113
 			shouldRetry: false,
 		},
 		{
