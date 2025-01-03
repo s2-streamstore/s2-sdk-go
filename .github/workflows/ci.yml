@@ -40,9 +40,9 @@ jobs:
           version: 3.40.x
       - uses: arduino/setup-protoc@v3
       - name: Setup protoc
-        run:
-          - go install google.golang.org/grpc/cmd/protoc-gen-go@latest
-          - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+        run: |
+          go install google.golang.org/grpc/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
       - name: Build
         run: |
           for eg in `go list ./examples/... | sed 's|.*/||'`; do
@@ -63,9 +63,9 @@ jobs:
           version: 3.40.x
       - uses: arduino/setup-protoc@v3
       - name: Setup protoc
-        run:
-          - go install google.golang.org/grpc/cmd/protoc-gen-go@latest
-          - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+        run: |
+          go install google.golang.org/grpc/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
       - name: Test
         run: task test
 
@@ -95,8 +95,8 @@ jobs:
           version: 3.40.x
       - uses: arduino/setup-protoc@v3
       - name: Setup protoc
-        run:
-          - go install google.golang.org/grpc/cmd/protoc-gen-go@latest
-          - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+        run: |
+          go install google.golang.org/grpc/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
       - name: Lint
         run: task lint:gen
