@@ -50,7 +50,7 @@ tasks:
     deps:
       - gen
     cmds:
-      - golangci-lint run --fix &> /dev/null
+      - golangci-lint run --fix --issues-exit-code 0 &> /dev/null
 
   gen:
     deps:

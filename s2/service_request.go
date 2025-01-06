@@ -3,7 +3,9 @@ package s2
 import (
 	"context"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type idempotencyLevel uint
@@ -34,6 +36,28 @@ func (i idempotencyLevel) String() string {
 type serviceRequest[T any] interface {
 	IdempotencyLevel() idempotencyLevel
 	Send(ctx context.Context) (T, error)
+}
+
+func shouldRetry[T any](r serviceRequest[T], err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if !r.IdempotencyLevel().IsIdempotent() {
+		return false
+	}
+
+	statusErr, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+
+	switch statusErr.Code() {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.Unknown:
+		return true
+	default:
+		return false
+	}
 }
 
 func ctxWithHeaders(ctx context.Context, pairs ...string) context.Context {

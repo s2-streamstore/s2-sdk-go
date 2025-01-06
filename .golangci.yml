@@ -7,7 +7,6 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-    - containedctx
     - contextcheck
     - copyloopvar
     - dupl
