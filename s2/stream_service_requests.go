@@ -112,6 +112,7 @@ func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
 			Bytes: r.Req.Limit.Bytes,
 		}
 	}
+
 	req := &pb.ReadRequest{
 		Stream:      r.Stream,
 		StartSeqNum: r.Req.StartSeqNum,
@@ -144,6 +145,7 @@ func (r *readSessionServiceRequest) Send(ctx context.Context) (Receiver[ReadOutp
 			Bytes: r.Req.Limit.Bytes,
 		}
 	}
+
 	req := &pb.ReadSessionRequest{
 		Stream:      r.Stream,
 		StartSeqNum: r.Req.StartSeqNum,

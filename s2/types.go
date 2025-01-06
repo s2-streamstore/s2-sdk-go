@@ -1,10 +1,19 @@
 package s2
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/s2-streamstore/s2-sdk-go/pb"
+)
+
+// Errors.
+var (
+	ErrUnknownBasinState      = errors.New("unknown basin state")
+	ErrUnknownStorageClass    = errors.New("unknown storage class")
+	ErrUnknownRetentionPolicy = errors.New("unknown retention policy")
+	ErrUnknownReadOutput      = errors.New("unknown read output")
 )
 
 type Receiver[T any] interface {
@@ -24,8 +33,10 @@ func (r recvInner[F, T]) Recv() (T, error) {
 	f, err := r.Client.Recv()
 	if err != nil {
 		var v T
+
 		return v, err
 	}
+
 	return r.ConvertFn(f)
 }
 
@@ -39,6 +50,7 @@ func (r sendInner[F, T]) Send(f F) error {
 	if err != nil {
 		return err
 	}
+
 	return r.Client.Send(t)
 }
 
@@ -78,6 +90,7 @@ func (s BasinState) String() string {
 
 func basinInfoFromProto(pbInfo *pb.BasinInfo) (BasinInfo, error) {
 	var state BasinState
+
 	switch pbInfo.GetState() {
 	case pb.BasinState_BASIN_STATE_UNSPECIFIED:
 		state = BasinStateUnspecified
@@ -88,7 +101,7 @@ func basinInfoFromProto(pbInfo *pb.BasinInfo) (BasinInfo, error) {
 	case pb.BasinState_BASIN_STATE_DELETING:
 		state = BasinStateCreating
 	default:
-		return BasinInfo{}, fmt.Errorf("unknown basin state %d", pbInfo.GetState())
+		return BasinInfo{}, fmt.Errorf("%w: %d", ErrUnknownBasinState, pbInfo.GetState())
 	}
 
 	return BasinInfo{
@@ -101,10 +114,12 @@ func basinInfoFromProto(pbInfo *pb.BasinInfo) (BasinInfo, error) {
 
 func streamInfoFromProto(pbInfo *pb.StreamInfo) StreamInfo {
 	var deletedAt *time.Time
+
 	if pbInfo.DeletedAt != nil {
 		deletedAtTime := time.Unix(int64(pbInfo.GetDeletedAt()), 0)
 		deletedAt = &deletedAtTime
 	}
+
 	return StreamInfo{
 		Name:      pbInfo.GetName(),
 		CreatedAt: time.Unix(int64(pbInfo.GetCreatedAt()), 0),
@@ -114,6 +129,7 @@ func streamInfoFromProto(pbInfo *pb.StreamInfo) StreamInfo {
 
 func streamConfigFromProto(pbConfig *pb.StreamConfig) (*StreamConfig, error) {
 	var storageClass StorageClass
+
 	switch pbConfig.GetStorageClass() {
 	case pb.StorageClass_STORAGE_CLASS_UNSPECIFIED:
 		storageClass = StorageClassUnspecified
@@ -122,7 +138,7 @@ func streamConfigFromProto(pbConfig *pb.StreamConfig) (*StreamConfig, error) {
 	case pb.StorageClass_STORAGE_CLASS_EXPRESS:
 		storageClass = StorageClassExpress
 	default:
-		return nil, fmt.Errorf("unknown storage class %d", pbConfig.GetStorageClass())
+		return nil, fmt.Errorf("%w: %d", ErrUnknownStorageClass, pbConfig.GetStorageClass())
 	}
 
 	var retentionPolicy implRetentionPolicy
@@ -132,7 +148,7 @@ func streamConfigFromProto(pbConfig *pb.StreamConfig) (*StreamConfig, error) {
 	case nil:
 		retentionPolicy = nil
 	default:
-		return nil, fmt.Errorf("unknown retention policy %T", r)
+		return nil, fmt.Errorf("%w: %T", ErrUnknownRetentionPolicy, r)
 	}
 
 	return &StreamConfig{
@@ -152,7 +168,7 @@ func streamConfigIntoProto(config *StreamConfig) (*pb.StreamConfig, error) {
 	case StorageClassExpress:
 		pbConfig.StorageClass = pb.StorageClass_STORAGE_CLASS_EXPRESS
 	default:
-		return nil, fmt.Errorf("unknown storage class %d", config.StorageClass)
+		return nil, fmt.Errorf("%w: %d", ErrUnknownStorageClass, config.StorageClass)
 	}
 
 	switch r := config.RetentionPolicy.(type) {
@@ -161,7 +177,7 @@ func streamConfigIntoProto(config *StreamConfig) (*pb.StreamConfig, error) {
 	case nil:
 		pbConfig.RetentionPolicy = nil
 	default:
-		return nil, fmt.Errorf("unknown retention policy %T", r)
+		return nil, fmt.Errorf("%w: %T", ErrUnknownRetentionPolicy, r)
 	}
 
 	return pbConfig, nil
@@ -169,13 +185,17 @@ func streamConfigIntoProto(config *StreamConfig) (*pb.StreamConfig, error) {
 
 func basinConfigFromProto(pbConfig *pb.BasinConfig) (*BasinConfig, error) {
 	var defaultStreamConfig *StreamConfig
-	if pbConfig.DefaultStreamConfig != nil {
+
+	pbDefaultStreamConfig := pbConfig.GetDefaultStreamConfig()
+	if pbDefaultStreamConfig != nil {
 		var err error
-		defaultStreamConfig, err = streamConfigFromProto(pbConfig.GetDefaultStreamConfig())
+
+		defaultStreamConfig, err = streamConfigFromProto(pbDefaultStreamConfig)
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	return &BasinConfig{
 		DefaultStreamConfig: defaultStreamConfig,
 	}, nil
@@ -186,6 +206,7 @@ func basinConfigIntoProto(config *BasinConfig) (*pb.BasinConfig, error) {
 
 	if config.DefaultStreamConfig != nil {
 		var err error
+
 		pbConfig.DefaultStreamConfig, err = streamConfigIntoProto(config.DefaultStreamConfig)
 		if err != nil {
 			return nil, err
@@ -209,9 +230,11 @@ func headerFromProto(pbHeader *pb.Header) Header {
 func sequencedRecordFromProto(pbRecord *pb.SequencedRecord) SequencedRecord {
 	pbHeaders := pbRecord.GetHeaders()
 	headers := make([]Header, 0, len(pbHeaders))
+
 	for _, h := range pbHeaders {
 		headers = append(headers, headerFromProto(h))
 	}
+
 	return SequencedRecord{
 		SeqNum:  pbRecord.GetSeqNum(),
 		Headers: headers,
@@ -222,9 +245,11 @@ func sequencedRecordFromProto(pbRecord *pb.SequencedRecord) SequencedRecord {
 func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) *SequencedRecordBatch {
 	pbRecords := pbBatch.GetRecords()
 	records := make([]SequencedRecord, 0, len(pbRecords))
+
 	for _, r := range pbRecords {
 		records = append(records, sequencedRecordFromProto(r))
 	}
+
 	return &SequencedRecordBatch{
 		Records: records,
 	}
@@ -242,8 +267,9 @@ func readOutputFromProto(pbOutput *pb.ReadOutput) (ReadOutput, error) {
 	case *pb.ReadOutput_NextSeqNum:
 		output = ReadOutputNextSeqNum(o.NextSeqNum)
 	default:
-		return nil, fmt.Errorf("unknown read output %T", o)
+		return nil, fmt.Errorf("%w: %T", ErrUnknownReadOutput, o)
 	}
+
 	return output, nil
 }
 
@@ -259,6 +285,7 @@ func appendRecordIntoProto(record *AppendRecord) *pb.AppendRecord {
 	for _, h := range record.Headers {
 		headers = append(headers, headerIntoProto(h))
 	}
+
 	return &pb.AppendRecord{
 		Headers: headers,
 		Body:    record.Body,
@@ -267,9 +294,10 @@ func appendRecordIntoProto(record *AppendRecord) *pb.AppendRecord {
 
 func appendInputIntoProto(stream string, input *AppendInput) *pb.AppendInput {
 	records := make([]*pb.AppendRecord, 0, len(input.Records))
-	for i := 0; i < len(input.Records); i++ {
+	for i := range len(input.Records) {
 		records = append(records, appendRecordIntoProto(&input.Records[i]))
 	}
+
 	return &pb.AppendInput{
 		Stream:       stream,
 		Records:      records,
