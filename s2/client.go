@@ -96,18 +96,18 @@ func EndpointsFromEnv() (*Endpoints, error) {
 	return endpoints, nil
 }
 
-type ConfigParam interface {
+type ClientConfigParam interface {
 	apply(*clientConfig) error
 }
 
-type applyConfigParamFunc func(*clientConfig) error
+type applyClientConfigParamFunc func(*clientConfig) error
 
-func (f applyConfigParamFunc) apply(cc *clientConfig) error {
+func (f applyClientConfigParamFunc) apply(cc *clientConfig) error {
 	return f(cc)
 }
 
-func WithEndpoints(e *Endpoints) ConfigParam {
-	return applyConfigParamFunc(func(cc *clientConfig) error {
+func WithEndpoints(e *Endpoints) ClientConfigParam {
+	return applyClientConfigParamFunc(func(cc *clientConfig) error {
 		// TODO: Validate endpoints
 		cc.Endpoints = e
 
@@ -115,32 +115,32 @@ func WithEndpoints(e *Endpoints) ConfigParam {
 	})
 }
 
-func WithConnectTimeout(d time.Duration) ConfigParam {
-	return applyConfigParamFunc(func(cc *clientConfig) error {
+func WithConnectTimeout(d time.Duration) ClientConfigParam {
+	return applyClientConfigParamFunc(func(cc *clientConfig) error {
 		cc.ConnectTimeout = d
 
 		return nil
 	})
 }
 
-func WithUserAgent(u string) ConfigParam {
-	return applyConfigParamFunc(func(cc *clientConfig) error {
+func WithUserAgent(u string) ClientConfigParam {
+	return applyClientConfigParamFunc(func(cc *clientConfig) error {
 		cc.UserAgent = u
 
 		return nil
 	})
 }
 
-func WithRetryBackoffDuration(d time.Duration) ConfigParam {
-	return applyConfigParamFunc(func(cc *clientConfig) error {
+func WithRetryBackoffDuration(d time.Duration) ClientConfigParam {
+	return applyClientConfigParamFunc(func(cc *clientConfig) error {
 		cc.RetryBackoffDuration = d
 
 		return nil
 	})
 }
 
-func WithMaxRetryAttempts(n uint) ConfigParam {
-	return applyConfigParamFunc(func(cc *clientConfig) error {
+func WithMaxRetryAttempts(n uint) ClientConfigParam {
+	return applyClientConfigParamFunc(func(cc *clientConfig) error {
 		cc.MaxRetryAttempts = n
 
 		return nil
@@ -151,7 +151,7 @@ type Client struct {
 	inner *clientInner
 }
 
-func NewClient(authToken string, params ...ConfigParam) (*Client, error) {
+func NewClient(authToken string, params ...ClientConfigParam) (*Client, error) {
 	config, err := newClientConfig(authToken, params...)
 	if err != nil {
 		return nil, err
@@ -229,7 +229,7 @@ type BasinClient struct {
 	inner *clientInner
 }
 
-func NewBasinClient(basin, authToken string, params ...ConfigParam) (*BasinClient, error) {
+func NewBasinClient(basin, authToken string, params ...ClientConfigParam) (*BasinClient, error) {
 	config, err := newClientConfig(authToken, params...)
 	if err != nil {
 		return nil, err
@@ -304,7 +304,7 @@ type StreamClient struct {
 	inner  *clientInner
 }
 
-func NewStreamClient(basin, stream, authToken string, params ...ConfigParam) (*StreamClient, error) {
+func NewStreamClient(basin, stream, authToken string, params ...ClientConfigParam) (*StreamClient, error) {
 	basinClient, err := NewBasinClient(basin, authToken, params...)
 	if err != nil {
 		return nil, err
@@ -385,7 +385,7 @@ type clientConfig struct {
 	MaxRetryAttempts     uint
 }
 
-func newClientConfig(authToken string, params ...ConfigParam) (*clientConfig, error) {
+func newClientConfig(authToken string, params ...ClientConfigParam) (*clientConfig, error) {
 	if authToken == "" {
 		return nil, ErrEmptyAuthToken
 	}
