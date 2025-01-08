@@ -13,9 +13,7 @@ import (
 	"github.com/s2-streamstore/s2-sdk-go/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/status"
 )
 
 // Errors.
@@ -111,7 +109,7 @@ func (f applyConfigParamFunc) apply(cc *clientConfig) error {
 func WithEndpoints(e *Endpoints) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
 		// TODO: Validate endpoints
-		cc.endpoints = e
+		cc.Endpoints = e
 
 		return nil
 	})
@@ -119,7 +117,7 @@ func WithEndpoints(e *Endpoints) ConfigParam {
 
 func WithConnectTimeout(d time.Duration) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
-		cc.connectTimeout = d
+		cc.ConnectTimeout = d
 
 		return nil
 	})
@@ -127,7 +125,7 @@ func WithConnectTimeout(d time.Duration) ConfigParam {
 
 func WithUserAgent(u string) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
-		cc.userAgent = u
+		cc.UserAgent = u
 
 		return nil
 	})
@@ -135,7 +133,7 @@ func WithUserAgent(u string) ConfigParam {
 
 func WithRetryBackoffDuration(d time.Duration) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
-		cc.retryBackoffDuration = d
+		cc.RetryBackoffDuration = d
 
 		return nil
 	})
@@ -143,7 +141,7 @@ func WithRetryBackoffDuration(d time.Duration) ConfigParam {
 
 func WithMaxRetryAttempts(n uint) ConfigParam {
 	return applyConfigParamFunc(func(cc *clientConfig) error {
-		cc.maxRetryAttempts = n
+		cc.MaxRetryAttempts = n
 
 		return nil
 	})
@@ -365,16 +363,26 @@ func (s *StreamClient) readSession(ctx context.Context, req *ReadSessionRequest)
 		Req:    req,
 	}
 
-	return sendRetryable(ctx, s.inner, &r)
+	recv, err := sendRetryable(ctx, s.inner, &r)
+	if err != nil {
+		return nil, err
+	}
+
+	return &readSessionReceiver{
+		ServiceReq: &r,
+		ReqCtx:     ctx,
+		Client:     s.inner,
+		RecvInner:  recv,
+	}, nil
 }
 
 type clientConfig struct {
-	authToken            string
-	endpoints            *Endpoints
-	connectTimeout       time.Duration
-	userAgent            string
-	retryBackoffDuration time.Duration
-	maxRetryAttempts     uint
+	AuthToken            string
+	Endpoints            *Endpoints
+	ConnectTimeout       time.Duration
+	UserAgent            string
+	RetryBackoffDuration time.Duration
+	MaxRetryAttempts     uint
 }
 
 func newClientConfig(authToken string, params ...ConfigParam) (*clientConfig, error) {
@@ -384,12 +392,12 @@ func newClientConfig(authToken string, params ...ConfigParam) (*clientConfig, er
 
 	// Default configuration
 	config := &clientConfig{
-		authToken:            authToken,
-		endpoints:            EndpointsForCloud(CloudAWS),
-		connectTimeout:       3 * time.Second,
-		userAgent:            "s2-sdk-go",
-		retryBackoffDuration: 100 * time.Millisecond,
-		maxRetryAttempts:     3,
+		AuthToken:            authToken,
+		Endpoints:            EndpointsForCloud(CloudAWS),
+		ConnectTimeout:       3 * time.Second,
+		UserAgent:            "s2-sdk-go",
+		RetryBackoffDuration: 100 * time.Millisecond,
+		MaxRetryAttempts:     3,
 	}
 
 	for _, param := range params {
@@ -402,9 +410,9 @@ func newClientConfig(authToken string, params ...ConfigParam) (*clientConfig, er
 }
 
 type clientInner struct {
-	conn   *grpc.ClientConn
-	config *clientConfig
-	basin  string
+	Conn   *grpc.ClientConn
+	Config *clientConfig
+	Basin  string
 }
 
 func newClientInner(config *clientConfig, basin string) (*clientInner, error) {
@@ -413,9 +421,9 @@ func newClientInner(config *clientConfig, basin string) (*clientInner, error) {
 		MinVersion: tls.VersionTLS12, // Ensure HTTP/2 support
 	})
 
-	endpoint := config.endpoints.Account
+	endpoint := config.Endpoints.Account
 	if basin != "" {
-		endpoint = config.endpoints.Basin
+		endpoint = config.Endpoints.Basin
 		if strings.HasPrefix(endpoint, "{basin}.") {
 			endpoint = basin + strings.TrimPrefix(endpoint, "{basin}")
 			basin = "" // No need to set header
@@ -423,7 +431,7 @@ func newClientInner(config *clientConfig, basin string) (*clientInner, error) {
 	}
 
 	connectParams := grpc.ConnectParams{
-		MinConnectTimeout: config.connectTimeout,
+		MinConnectTimeout: config.ConnectTimeout,
 		Backoff:           backoff.DefaultConfig,
 	}
 
@@ -437,52 +445,52 @@ func newClientInner(config *clientConfig, basin string) (*clientInner, error) {
 	}
 
 	return &clientInner{
-		conn:   conn,
-		config: config,
-		basin:  basin,
+		Conn:   conn,
+		Config: config,
+		Basin:  basin,
 	}, nil
 }
 
 func (c *clientInner) BasinClient(basin string) (*clientInner, error) {
-	if c.config.endpoints.Account == c.config.endpoints.Basin {
+	if c.Config.Endpoints.Account == c.Config.Endpoints.Basin {
 		// No need to reconnect
 		//
 		// NOTE: Create a new "clientInner" since we don't want the old one
 		// to send basin header.
 		return &clientInner{
-			conn:   c.conn,
-			config: c.config,
-			basin:  basin,
+			Conn:   c.Conn,
+			Config: c.Config,
+			Basin:  basin,
 		}, nil
 	}
 
-	return newClientInner(c.config, basin)
+	return newClientInner(c.Config, basin)
 }
 
 func (c *clientInner) AccountServiceClient() pb.AccountServiceClient {
-	return pb.NewAccountServiceClient(c.conn)
+	return pb.NewAccountServiceClient(c.Conn)
 }
 
 func (c *clientInner) BasinServiceClient() pb.BasinServiceClient {
-	return pb.NewBasinServiceClient(c.conn)
+	return pb.NewBasinServiceClient(c.Conn)
 }
 
 func (c *clientInner) StreamServiceClient() pb.StreamServiceClient {
-	return pb.NewStreamServiceClient(c.conn)
+	return pb.NewStreamServiceClient(c.Conn)
 }
 
 func sendRetryable[T any](ctx context.Context, c *clientInner, r serviceRequest[T]) (T, error) {
 	// Add required headers
 	ctx = ctxWithHeaders(
 		ctx,
-		"user-agent", c.config.userAgent,
-		"authorization", fmt.Sprintf("Bearer %s", c.config.authToken),
+		"user-agent", c.Config.UserAgent,
+		"authorization", fmt.Sprintf("Bearer %s", c.Config.AuthToken),
 	)
-	if c.basin != "" {
-		ctx = ctxWithHeaders(ctx, "s2-basin", c.basin)
+	if c.Basin != "" {
+		ctx = ctxWithHeaders(ctx, "s2-basin", c.Basin)
 	}
 
-	return sendRetryableInner(ctx, r, c.config.retryBackoffDuration, c.config.maxRetryAttempts)
+	return sendRetryableInner(ctx, r, c.Config.RetryBackoffDuration, c.Config.MaxRetryAttempts)
 }
 
 func sendRetryableInner[T any](
@@ -499,20 +507,7 @@ func sendRetryableInner[T any](
 			return v, nil
 		}
 
-		// Figure out if need to retry
-		if !r.IdempotencyLevel().IsIdempotent() {
-			return v, err
-		}
-
-		statusErr, ok := status.FromError(err)
-		if !ok {
-			return v, err
-		}
-
-		switch statusErr.Code() {
-		case codes.Unavailable, codes.DeadlineExceeded, codes.Unknown:
-			// We should retry
-		default:
+		if !shouldRetry(r, err) {
 			return v, err
 		}
 
@@ -528,4 +523,47 @@ func sendRetryableInner[T any](
 	var v T
 
 	return v, finalErr
+}
+
+type readSessionReceiver struct {
+	ServiceReq *readSessionServiceRequest
+	ReqCtx     context.Context
+	Client     *clientInner
+	RecvInner  Receiver[ReadOutput]
+}
+
+func (r *readSessionReceiver) Recv() (ReadOutput, error) {
+	var finalErr error
+
+	for range r.Client.Config.MaxRetryAttempts {
+		next, err := r.RecvInner.Recv()
+		if err == nil {
+			if batch, ok := next.(ReadOutputBatch); ok && len(batch.Records) > 0 {
+				r.ServiceReq.Req.StartSeqNum = 1 + batch.Records[len(batch.Records)-1].SeqNum
+			}
+
+			return next, nil
+		}
+
+		if !shouldRetry(r.ServiceReq, err) {
+			return nil, err
+		}
+
+		finalErr = err
+
+		select {
+		case <-time.After(r.Client.Config.RetryBackoffDuration):
+			newRecv, newErr := sendRetryable(r.ReqCtx, r.Client, r.ServiceReq)
+			if newErr != nil {
+				return nil, newErr
+			}
+
+			r.RecvInner = newRecv
+
+		case <-r.ReqCtx.Done():
+			return nil, r.ReqCtx.Err()
+		}
+	}
+
+	return nil, finalErr
 }
