@@ -51,6 +51,7 @@ func appendRecordBatchingWorker(
 	config *appendRecordBatchingConfig,
 ) error {
 	var peekedRecord *AppendRecord
+
 	recordsToFlush := make([]AppendRecord, 0, config.MaxRecordsInBatch)
 
 	flush := func() error {
@@ -59,6 +60,7 @@ func appendRecordBatchingWorker(
 		}
 
 		var matchSeqNum *uint64
+
 		if config.MatchSeqNum != nil {
 			// Copy current match sequence number in another variable so we can
 			// mutate it later for the up-coming sequence number. Working with
@@ -81,6 +83,7 @@ func appendRecordBatchingWorker(
 
 		// Only clear after it's sent.
 		clear(recordsToFlush)
+
 		if peekedRecord != nil {
 			recordsToFlush = append(recordsToFlush, *peekedRecord)
 			peekedRecord = nil
@@ -139,5 +142,6 @@ func (s *AppendRecordBatchingSender) Send(record AppendRecord) error {
 func (s *AppendRecordBatchingSender) Close() error {
 	s.closeWorkerCancel()
 	<-s.workerExitCtx.Done()
+
 	return context.Cause(s.workerExitCtx)
 }
