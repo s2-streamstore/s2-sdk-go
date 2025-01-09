@@ -16,17 +16,19 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-// Errors.
+// Client errors.
 var (
 	ErrUnspportedCloud = errors.New("unsupported cloud")
 	ErrEmptyAuthToken  = errors.New("auth token cannot be empty")
+	ErrNumTriesZero    = errors.New("number of tries must be more than 0")
 )
 
+// S2 cloud environment to connect with.
 type Cloud uint
 
 const (
+	// S2 running on AWS.
 	CloudAWS Cloud = iota
-	// More clouds to come...
 )
 
 func (c Cloud) String() string {
@@ -38,6 +40,7 @@ func (c Cloud) String() string {
 	}
 }
 
+// Parse S2 cloud from a string.
 func ParseCloud(s string) (Cloud, error) {
 	switch strings.ToLower(s) {
 	case "aws":
@@ -47,11 +50,21 @@ func ParseCloud(s string) (Cloud, error) {
 	}
 }
 
+// Endpoints for the S2 environment.
+//
+// You can find the S2 endpoints in our [documentation].
+//
+// [documentation]: https://s2.dev/docs/interface/endpoints
 type Endpoints struct {
+	// Used by AccountService requests.
 	Account string
-	Basin   string
+	// Used by BasinService and StreamService requests.
+	//
+	// The prefix "{basin}." indicates the basin endpoint is parent zone else direct.
+	Basin string
 }
 
+// Get S2 endpoints for the specified cloud.
 func EndpointsForCloud(cloud Cloud) *Endpoints {
 	return &Endpoints{
 		Account: fmt.Sprintf("%s.s2.dev", cloud),
@@ -59,6 +72,7 @@ func EndpointsForCloud(cloud Cloud) *Endpoints {
 	}
 }
 
+// Get S2 endpoints for the specified cell.
 func EndpointsForCell(cloud Cloud, cellID string) *Endpoints {
 	endpoint := fmt.Sprintf("%s.o.%s.s2.dev", cellID, cloud)
 
@@ -68,6 +82,12 @@ func EndpointsForCell(cloud Cloud, cellID string) *Endpoints {
 	}
 }
 
+// Get S2 endpoints from environment variables.
+//
+// The following environment variables are used:
+//   - S2_CLOUD: Valid S2 cloud name. Defaults to AWS.
+//   - S2_ACCOUNT_ENDPOINT: Overrides the account endpoint.
+//   - S2_BASIN_ENDPOINT: Overrides the basin endpoint.
 func EndpointsFromEnv() (*Endpoints, error) {
 	cloudStr := os.Getenv("S2_CLOUD")
 	cloud := CloudAWS
@@ -96,6 +116,7 @@ func EndpointsFromEnv() (*Endpoints, error) {
 	return endpoints, nil
 }
 
+// A configuration parameter for creating an S2 client.
 type ClientConfigParam interface {
 	apply(*clientConfig) error
 }
@@ -106,6 +127,9 @@ func (f applyClientConfigParamFunc) apply(cc *clientConfig) error {
 	return f(cc)
 }
 
+// S2 endpoints to connect to.
+//
+// Defaults to endpoints for AWS.
 func WithEndpoints(e *Endpoints) ClientConfigParam {
 	return applyClientConfigParamFunc(func(cc *clientConfig) error {
 		// TODO: Validate endpoints
@@ -115,6 +139,9 @@ func WithEndpoints(e *Endpoints) ClientConfigParam {
 	})
 }
 
+// Timeout for connecting and transparently reconnecting.
+//
+// Defaults to 3s.
 func WithConnectTimeout(d time.Duration) ClientConfigParam {
 	return applyClientConfigParamFunc(func(cc *clientConfig) error {
 		cc.ConnectTimeout = d
@@ -123,6 +150,9 @@ func WithConnectTimeout(d time.Duration) ClientConfigParam {
 	})
 }
 
+// User agent.
+//
+// Defaults to s2-sdk-go. Feel free to say hi.
 func WithUserAgent(u string) ClientConfigParam {
 	return applyClientConfigParamFunc(func(cc *clientConfig) error {
 		cc.UserAgent = u
@@ -131,6 +161,9 @@ func WithUserAgent(u string) ClientConfigParam {
 	})
 }
 
+// Backoff duration when retrying.
+//
+// Defaults to 100ms.
 func WithRetryBackoffDuration(d time.Duration) ClientConfigParam {
 	return applyClientConfigParamFunc(func(cc *clientConfig) error {
 		cc.RetryBackoffDuration = d
@@ -139,18 +172,27 @@ func WithRetryBackoffDuration(d time.Duration) ClientConfigParam {
 	})
 }
 
-func WithMaxRetryAttempts(n uint) ClientConfigParam {
+// Maximum number of attempts per request.
+//
+// Setting it to 1 disables retrying. The default is to make 3 attempts.
+func WithMaxAttempts(n uint) ClientConfigParam {
 	return applyClientConfigParamFunc(func(cc *clientConfig) error {
-		cc.MaxRetryAttempts = n
+		if n == 0 {
+			return ErrNumTriesZero
+		}
+
+		cc.MaxAttempts = n
 
 		return nil
 	})
 }
 
+// Client for account-level operations.
 type Client struct {
 	inner *clientInner
 }
 
+// Create a new SDK client.
 func NewClient(authToken string, params ...ClientConfigParam) (*Client, error) {
 	config, err := newClientConfig(authToken, params...)
 	if err != nil {
@@ -214,6 +256,7 @@ func (c *Client) getBasinConfig(ctx context.Context, basin string) (*BasinConfig
 	return sendRetryable(ctx, c.inner, &r)
 }
 
+// Create basin client from the given name.
 func (c *Client) BasinClient(basin string) (*BasinClient, error) {
 	inner, err := c.inner.BasinClient(basin)
 	if err != nil {
@@ -225,10 +268,12 @@ func (c *Client) BasinClient(basin string) (*BasinClient, error) {
 	}, nil
 }
 
+// Client for basin-level operations.
 type BasinClient struct {
 	inner *clientInner
 }
 
+// Create a new basin client.
 func NewBasinClient(basin, authToken string, params ...ClientConfigParam) (*BasinClient, error) {
 	config, err := newClientConfig(authToken, params...)
 	if err != nil {
@@ -292,6 +337,7 @@ func (b *BasinClient) getStreamConfig(ctx context.Context, stream string) (*Stre
 	return sendRetryable(ctx, b.inner, &r)
 }
 
+// Create a new client for stream-level operations.
 func (b *BasinClient) StreamClient(stream string) *StreamClient {
 	return &StreamClient{
 		stream: stream,
@@ -299,11 +345,13 @@ func (b *BasinClient) StreamClient(stream string) *StreamClient {
 	}
 }
 
+// Client for stream-level operations.
 type StreamClient struct {
 	stream string
 	inner  *clientInner
 }
 
+// Create a new stream client.
 func NewStreamClient(basin, stream, authToken string, params ...ClientConfigParam) (*StreamClient, error) {
 	basinClient, err := NewBasinClient(basin, authToken, params...)
 	if err != nil {
@@ -382,7 +430,7 @@ type clientConfig struct {
 	ConnectTimeout       time.Duration
 	UserAgent            string
 	RetryBackoffDuration time.Duration
-	MaxRetryAttempts     uint
+	MaxAttempts          uint
 }
 
 func newClientConfig(authToken string, params ...ClientConfigParam) (*clientConfig, error) {
@@ -397,7 +445,7 @@ func newClientConfig(authToken string, params ...ClientConfigParam) (*clientConf
 		ConnectTimeout:       3 * time.Second,
 		UserAgent:            "s2-sdk-go",
 		RetryBackoffDuration: 100 * time.Millisecond,
-		MaxRetryAttempts:     3,
+		MaxAttempts:          3,
 	}
 
 	for _, param := range params {
@@ -490,7 +538,7 @@ func sendRetryable[T any](ctx context.Context, c *clientInner, r serviceRequest[
 		ctx = ctxWithHeaders(ctx, "s2-basin", c.Basin)
 	}
 
-	return sendRetryableInner(ctx, r, c.Config.RetryBackoffDuration, c.Config.MaxRetryAttempts)
+	return sendRetryableInner(ctx, r, c.Config.RetryBackoffDuration, c.Config.MaxAttempts)
 }
 
 func sendRetryableInner[T any](
@@ -514,6 +562,7 @@ func sendRetryableInner[T any](
 		finalErr = err
 
 		select {
+		// TODO: Add jitter
 		case <-time.After(retryBackoffDuration):
 		case <-ctx.Done():
 			return v, ctx.Err()
@@ -535,7 +584,7 @@ type readSessionReceiver struct {
 func (r *readSessionReceiver) Recv() (ReadOutput, error) {
 	var finalErr error
 
-	for range r.Client.Config.MaxRetryAttempts {
+	for range r.Client.Config.MaxAttempts {
 		next, err := r.RecvInner.Recv()
 		if err == nil {
 			if batch, ok := next.(ReadOutputBatch); ok && len(batch.Records) > 0 {
@@ -552,6 +601,7 @@ func (r *readSessionReceiver) Recv() (ReadOutput, error) {
 		finalErr = err
 
 		select {
+		// TODO: Add jitter
 		case <-time.After(r.Client.Config.RetryBackoffDuration):
 			newRecv, newErr := sendRetryable(r.ReqCtx, r.Client, r.ServiceReq)
 			if newErr != nil {

@@ -3,24 +3,27 @@ package s2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
-// Errors.
+// Batching errors.
 var (
 	ErrAppendRecordSenderClosed = errors.New("append record sender closed")
+	ErrAppendRecordSenderExited = errors.New("append record sender unexpectedly exited")
 	ErrInvalidNumRecordsInBatch = errors.New("records in a batch must be more than 0 and less than 1000")
 	ErrRecordTooBig             = errors.New("record to big to send given batch size limitations")
 )
 
 type appendRecordBatchingConfig struct {
-	MatchSeqNum       *uint64
-	FencingToken      []byte
-	LingerDuration    time.Duration
-	MaxRecordsInBatch uint
-	MaxBatchBytes     uint
+	MatchSeqNum     *uint64
+	FencingToken    []byte
+	LingerDuration  time.Duration
+	MaxBatchRecords uint
+	MaxBatchBytes   uint
 }
 
+// Options to configure batching scheme for AppendRecordBatchingSender.
 type AppendRecordBatchingConfigParam interface {
 	apply(*appendRecordBatchingConfig) error
 }
@@ -31,6 +34,9 @@ func (f applyAppendRecordBatchingConfigParamFunc) apply(cc *appendRecordBatching
 	return f(cc)
 }
 
+// Enforce that the sequence number issued to the first record matches.
+//
+// This is incremented automatically for each batch.
 func WithMatchSeqNum(matchSeqNum uint64) AppendRecordBatchingConfigParam {
 	return applyAppendRecordBatchingConfigParamFunc(func(arbc *appendRecordBatchingConfig) error {
 		arbc.MatchSeqNum = &matchSeqNum
@@ -39,6 +45,7 @@ func WithMatchSeqNum(matchSeqNum uint64) AppendRecordBatchingConfigParam {
 	})
 }
 
+// Enforce a fencing token.
 func WithFencingToken(fencingToken []byte) AppendRecordBatchingConfigParam {
 	return applyAppendRecordBatchingConfigParamFunc(func(arbc *appendRecordBatchingConfig) error {
 		arbc.FencingToken = fencingToken
@@ -47,6 +54,9 @@ func WithFencingToken(fencingToken []byte) AppendRecordBatchingConfigParam {
 	})
 }
 
+// Linger duration for records before flushing.
+//
+// A linger duration of 5ms is set by default. Set to 0 to disable.
 func WithLinger(duration time.Duration) AppendRecordBatchingConfigParam {
 	return applyAppendRecordBatchingConfigParamFunc(func(arbc *appendRecordBatchingConfig) error {
 		arbc.LingerDuration = duration
@@ -55,13 +65,14 @@ func WithLinger(duration time.Duration) AppendRecordBatchingConfigParam {
 	})
 }
 
-func WithMaxRecordsInBatch(n uint) AppendRecordBatchingConfigParam {
+// Maximum number of records in a batch.
+func WithMaxBatchRecords(n uint) AppendRecordBatchingConfigParam {
 	return applyAppendRecordBatchingConfigParamFunc(func(arbc *appendRecordBatchingConfig) error {
 		if n == 0 || n > MaxBatchRecords {
 			return ErrInvalidNumRecordsInBatch
 		}
 
-		arbc.MaxRecordsInBatch = n
+		arbc.MaxBatchRecords = n
 
 		return nil
 	})
@@ -72,22 +83,30 @@ type sendRecord struct {
 	Ack    chan<- struct{}
 }
 
+// An AppendRecord sender based on AppendInput sender returned by an AppendSession request.
+//
+// Smartly batch records together based on based on size limits and linger duration.
+// The sender enforces the provided fencing token (if any) and auto-increments matching sequence number for
+// concurrency control.
 type AppendRecordBatchingSender struct {
 	sendCh            chan<- *sendRecord
 	closeWorkerCancel func()
 	workerExitCtx     context.Context
 }
 
+// Create a new batching sender for AppendRecords.
+//
+// Note that this spawns a background worker which must be exited gracefully via the `Close` method.
 func NewAppendRecordBatchingSender(
 	batchSender Sender[*AppendInput],
 	params ...AppendRecordBatchingConfigParam,
 ) (*AppendRecordBatchingSender, error) {
 	config := appendRecordBatchingConfig{
-		MatchSeqNum:       nil,
-		FencingToken:      nil,
-		LingerDuration:    5 * time.Millisecond,
-		MaxRecordsInBatch: MaxBatchRecords,
-		MaxBatchBytes:     MaxBatchBytes,
+		MatchSeqNum:     nil,
+		FencingToken:    nil,
+		LingerDuration:  5 * time.Millisecond,
+		MaxBatchRecords: MaxBatchRecords,
+		MaxBatchBytes:   MaxBatchBytes,
 	}
 
 	for _, param := range params {
@@ -96,12 +115,18 @@ func NewAppendRecordBatchingSender(
 		}
 	}
 
-	sendCh := make(chan *sendRecord, config.MaxRecordsInBatch)
+	sendCh := make(chan *sendRecord, config.MaxBatchRecords)
 
 	closeWorkerCtx, closeWorkerCancel := context.WithCancel(context.Background())
 	workerExitCtx, workerExitCancel := context.WithCancelCause(context.Background())
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				workerExitCancel(fmt.Errorf("%w: %v", ErrAppendRecordSenderExited, r))
+			}
+		}()
+
 		if err := appendRecordBatchingWorker(closeWorkerCtx, sendCh, batchSender, &config); err != nil {
 			workerExitCancel(err)
 		} else {
@@ -124,7 +149,7 @@ func appendRecordBatchingWorker(
 ) error {
 	var peekedRecord *AppendRecord
 
-	recordsToFlush, _ := newAppendRecordBatch(config.MaxRecordsInBatch, config.MaxBatchBytes)
+	recordsToFlush := newEmptyAppendRecordBatch(config.MaxBatchRecords, config.MaxBatchBytes)
 
 	flush := func() error {
 		if recordsToFlush.IsEmpty() {
@@ -157,7 +182,7 @@ func appendRecordBatchingWorker(
 			return err
 		}
 
-		recordsToFlush, _ = newAppendRecordBatch(config.MaxRecordsInBatch, config.MaxBatchBytes)
+		recordsToFlush = newEmptyAppendRecordBatch(config.MaxBatchRecords, config.MaxBatchBytes)
 
 		if peekedRecord != nil {
 			if ok := recordsToFlush.Append(*peekedRecord); !ok {
@@ -213,6 +238,7 @@ func appendRecordBatchingWorker(
 	}
 }
 
+// Send the AppendRecord for batching, and eventually for appending.
 func (s *AppendRecordBatchingSender) Send(record AppendRecord) error {
 	ack := make(chan struct{})
 
@@ -235,6 +261,7 @@ func (s *AppendRecordBatchingSender) Send(record AppendRecord) error {
 	}
 }
 
+// Close the sender gracefully.
 func (s *AppendRecordBatchingSender) Close() error {
 	s.closeWorkerCancel()
 	<-s.workerExitCtx.Done()

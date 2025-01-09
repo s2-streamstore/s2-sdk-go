@@ -11,12 +11,15 @@ import (
 const (
 	mibBytes uint = 1024 * 1024
 
-	MaxRecordBytes  = mibBytes
-	MaxBatchBytes   = mibBytes
+	// Maximum metered bytes of a record.
+	MaxRecordBytes = mibBytes
+	// Maximum metered bytes of a batch.
+	MaxBatchBytes = mibBytes
+	// Maximum number of records that a batch can hold.
 	MaxBatchRecords = 1000
 )
 
-// Errors.
+// Type conversion errors.
 var (
 	ErrUnknownBasinState      = errors.New("unknown basin state")
 	ErrUnknownStorageClass    = errors.New("unknown storage class")
@@ -24,10 +27,18 @@ var (
 	ErrUnknownReadOutput      = errors.New("unknown read output")
 )
 
+// Metered size of the object in bytes.
+//
+// Bytes are calculated using the “metered bytes” formula:
+//
+//	metered_bytes = lambda record: 8 + 2 * len(record.headers) \
+//	 + sum((len(h.key) + len(h.value)) for h in record.headers) \
+//	 + len(record.body)
 type MeteredBytes interface {
 	MeteredBytes() uint
 }
 
+// Metered bytes for an AppendRecord.
 func (r *AppendRecord) MeteredBytes() uint {
 	bytes := 8 + (2 * uint(len(r.Headers))) + uint(len(r.Body))
 	for _, header := range r.Headers {
@@ -37,6 +48,7 @@ func (r *AppendRecord) MeteredBytes() uint {
 	return bytes
 }
 
+// Metered bytes for a SequencedRecord.
 func (r *SequencedRecord) MeteredBytes() uint {
 	bytes := 8 + (2 * uint(len(r.Headers))) + uint(len(r.Body))
 	for _, header := range r.Headers {
@@ -46,6 +58,7 @@ func (r *SequencedRecord) MeteredBytes() uint {
 	return bytes
 }
 
+// A collection of append records that can be sent together in a batch.
 type AppendRecordBatch struct {
 	records      []AppendRecord
 	meteredBytes uint
@@ -77,10 +90,33 @@ func newAppendRecordBatch(maxCapacity, maxBytes uint, records ...AppendRecord) (
 	}, records[i:]
 }
 
+func newEmptyAppendRecordBatch(maxCapacity, maxBytes uint) *AppendRecordBatch {
+	batch, leftOver := newAppendRecordBatch(maxCapacity, maxBytes)
+	if len(leftOver) != 0 {
+		panic("empty append record batch should not have any left-overs")
+	}
+
+	return batch
+}
+
+// Try creating a record batch from records.
+//
+// If all the items of the iterator cannot be drained into the batch, a non-empty slice of records is returned along
+// with the batch containing all the records it could fit.
+//
+//	batch, leftOver := NewAppendRecordBatch(records...)
+//	batches := []*AppendRecordBatch{batch}
+//	for len(leftOver) > 0 {
+//		batch, leftOver = NewAppendRecordBatch(leftOver...)
+//		batches = append(batches, batch)
+//	}
 func NewAppendRecordBatch(records ...AppendRecord) (*AppendRecordBatch, []AppendRecord) {
 	return newAppendRecordBatch(MaxBatchRecords, MaxBatchBytes, records...)
 }
 
+// Try creating a record batch with custom max capacity from records.
+//
+// See NewAppendRecordBatch for more details.
 func NewAppendRecordBatchWithMaxCapacity(
 	maxCapacity uint,
 	records ...AppendRecord,
@@ -88,6 +124,7 @@ func NewAppendRecordBatchWithMaxCapacity(
 	return newAppendRecordBatch(maxCapacity, MaxBatchBytes, records...)
 }
 
+// Try appending a record in the batch. Returns false if we cannot append the record.
 func (b *AppendRecordBatch) Append(record AppendRecord) bool {
 	recordBytes := record.MeteredBytes()
 	if uint(len(b.records)) == b.maxCapacity || b.meteredBytes+recordBytes > b.maxBytes {
@@ -100,31 +137,40 @@ func (b *AppendRecordBatch) Append(record AppendRecord) bool {
 	return true
 }
 
+// Number of records in the batch.
 func (b *AppendRecordBatch) Len() uint {
 	return uint(len(b.records))
 }
 
+// Returns true if there are no records in the batch.
 func (b *AppendRecordBatch) IsEmpty() bool {
 	return b.Len() == 0
 }
 
+// Returns true if the batch is at its maximum capacity.
 func (b *AppendRecordBatch) IsFull() bool {
 	return uint(len(b.records)) == b.maxCapacity || b.meteredBytes == b.maxBytes
 }
 
+// Returns the records stored in the batch.
 func (b *AppendRecordBatch) Records() []AppendRecord {
 	return b.records
 }
 
+// Returns metered bytes for the batch.
 func (b *AppendRecordBatch) MeteredBytes() uint {
 	return b.meteredBytes
 }
 
+// A listener on streaming responses for next item.
 type Receiver[T any] interface {
+	// Block until there's another item available or error response.
 	Recv() (T, error)
 }
 
+// An item sender for streaming requests.
 type Sender[T any] interface {
+	// Block until the item has been sent.
 	Send(T) error
 }
 
