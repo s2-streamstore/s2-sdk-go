@@ -75,7 +75,7 @@ func TestAppendRecordBatchingMechanics(t *testing.T) {
 
 				var params []AppendRecordBatchingConfigParam
 				if testCase.MaxBatchRecords != 0 {
-					params = append(params, WithMaxRecordsInBatch(testCase.MaxBatchRecords))
+					params = append(params, WithMaxBatchRecords(testCase.MaxBatchRecords))
 				}
 
 				if testCase.MaxBatchBytes != 0 {
@@ -121,7 +121,7 @@ func TestAppendRecordBatchingLinger(t *testing.T) {
 	recordSender, err := NewAppendRecordBatchingSender(
 		&batchSender,
 		WithLinger(2*time.Second),
-		WithMaxRecordsInBatch(3),
+		WithMaxBatchRecords(3),
 		withMaxBatchBytes(sizeLimit),
 	)
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestAppendRecordBatchingAppendInputOpts(t *testing.T) {
 		&batchSender,
 		WithFencingToken(expectedFencingToken),
 		WithMatchSeqNum(expectedMatchSeqNum),
-		WithMaxRecordsInBatch(numBatchRecords),
+		WithMaxBatchRecords(numBatchRecords),
 	)
 	require.NoError(t, err)
 
