@@ -8,6 +8,14 @@ import (
 	"github.com/s2-streamstore/s2-sdk-go/pb"
 )
 
+const (
+	mibBytes uint = 1024 * 1024
+
+	MaxRecordBytes  = mibBytes
+	MaxBatchBytes   = mibBytes
+	MaxBatchRecords = 1000
+)
+
 // Errors.
 var (
 	ErrUnknownBasinState      = errors.New("unknown basin state")
@@ -15,6 +23,102 @@ var (
 	ErrUnknownRetentionPolicy = errors.New("unknown retention policy")
 	ErrUnknownReadOutput      = errors.New("unknown read output")
 )
+
+type MeteredBytes interface {
+	MeteredBytes() uint
+}
+
+func (r *AppendRecord) MeteredBytes() uint {
+	bytes := 8 + (2 * uint(len(r.Headers))) + uint(len(r.Body))
+	for _, header := range r.Headers {
+		bytes += uint(len(header.Name)) + uint(len(header.Value))
+	}
+
+	return bytes
+}
+
+func (r *SequencedRecord) MeteredBytes() uint {
+	bytes := 8 + (2 * uint(len(r.Headers))) + uint(len(r.Body))
+	for _, header := range r.Headers {
+		bytes += uint(len(header.Name)) + uint(len(header.Value))
+	}
+
+	return bytes
+}
+
+type AppendRecordBatch struct {
+	records      []AppendRecord
+	meteredBytes uint
+	maxCapacity  uint
+	maxBytes     uint
+}
+
+func newAppendRecordBatch(maxCapacity, maxBytes uint, records ...AppendRecord) (*AppendRecordBatch, []AppendRecord) {
+	var (
+		i            uint
+		meteredBytes uint
+	)
+
+	for i = range uint(len(records)) {
+		recordBytes := records[i].MeteredBytes()
+
+		if i >= maxCapacity || meteredBytes+recordBytes > maxBytes {
+			break
+		}
+
+		meteredBytes += recordBytes
+	}
+
+	return &AppendRecordBatch{
+		records:      records[:i],
+		meteredBytes: meteredBytes,
+		maxCapacity:  maxCapacity,
+		maxBytes:     maxBytes,
+	}, records[i:]
+}
+
+func NewAppendRecordBatch(records ...AppendRecord) (*AppendRecordBatch, []AppendRecord) {
+	return newAppendRecordBatch(MaxBatchRecords, MaxBatchBytes, records...)
+}
+
+func NewAppendRecordBatchWithMaxCapacity(
+	maxCapacity uint,
+	records ...AppendRecord,
+) (*AppendRecordBatch, []AppendRecord) {
+	return newAppendRecordBatch(maxCapacity, MaxBatchBytes, records...)
+}
+
+func (b *AppendRecordBatch) Append(record AppendRecord) bool {
+	recordBytes := record.MeteredBytes()
+	if uint(len(b.records)) == b.maxCapacity || b.meteredBytes+recordBytes > b.maxBytes {
+		return false
+	}
+
+	b.records = append(b.records, record)
+	b.meteredBytes += recordBytes
+
+	return true
+}
+
+func (b *AppendRecordBatch) Len() uint {
+	return uint(len(b.records))
+}
+
+func (b *AppendRecordBatch) IsEmpty() bool {
+	return b.Len() == 0
+}
+
+func (b *AppendRecordBatch) IsFull() bool {
+	return uint(len(b.records)) == b.maxCapacity || b.meteredBytes == b.maxBytes
+}
+
+func (b *AppendRecordBatch) Records() []AppendRecord {
+	return b.records
+}
+
+func (b *AppendRecordBatch) MeteredBytes() uint {
+	return b.meteredBytes
+}
 
 type Receiver[T any] interface {
 	Recv() (T, error)
@@ -293,9 +397,11 @@ func appendRecordIntoProto(record *AppendRecord) *pb.AppendRecord {
 }
 
 func appendInputIntoProto(stream string, input *AppendInput) *pb.AppendInput {
-	records := make([]*pb.AppendRecord, 0, len(input.Records))
-	for i := range len(input.Records) {
-		records = append(records, appendRecordIntoProto(&input.Records[i]))
+	inputRecords := input.Records.Records()
+	records := make([]*pb.AppendRecord, 0, len(inputRecords))
+
+	for i := range inputRecords {
+		records = append(records, appendRecordIntoProto(&inputRecords[i]))
 	}
 
 	return &pb.AppendInput{
