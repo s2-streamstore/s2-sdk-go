@@ -255,7 +255,7 @@ type AppendRecord struct {
 type AppendInput struct {
 	// Batch of records to append atomically, which must contain at least one record, and no more than 1000.
 	// The total size of a batch of records may not exceed 1MiB of metered bytes.
-	Records []AppendRecord
+	Records *AppendRecordBatch
 	// Enforce that the sequence number issued to the first record matches.
 	MatchSeqNum *uint64
 	// Enforce a fencing token which must have been previously set by a `fence` command record.

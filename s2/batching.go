@@ -6,12 +6,11 @@ import (
 	"time"
 )
 
-const mibBytes uint = 1024 * 1024
-
 // Errors.
 var (
 	ErrAppendRecordSenderClosed = errors.New("append record sender closed")
 	ErrInvalidNumRecordsInBatch = errors.New("records in a batch must be more than 0 and less than 1000")
+	ErrRecordTooBig             = errors.New("record to big to send given batch size limitations")
 )
 
 type appendRecordBatchingConfig struct {
@@ -58,7 +57,7 @@ func WithLinger(duration time.Duration) AppendRecordBatchingConfigParam {
 
 func WithMaxRecordsInBatch(n uint) AppendRecordBatchingConfigParam {
 	return applyAppendRecordBatchingConfigParamFunc(func(arbc *appendRecordBatchingConfig) error {
-		if n == 0 || n > 1000 {
+		if n == 0 || n > MaxBatchRecords {
 			return ErrInvalidNumRecordsInBatch
 		}
 
@@ -68,8 +67,13 @@ func WithMaxRecordsInBatch(n uint) AppendRecordBatchingConfigParam {
 	})
 }
 
+type sendRecord struct {
+	Record AppendRecord
+	Ack    chan<- struct{}
+}
+
 type AppendRecordBatchingSender struct {
-	sendCh            chan<- AppendRecord
+	sendCh            chan<- *sendRecord
 	closeWorkerCancel func()
 	workerExitCtx     context.Context
 }
@@ -82,8 +86,8 @@ func NewAppendRecordBatchingSender(
 		MatchSeqNum:       nil,
 		FencingToken:      nil,
 		LingerDuration:    5 * time.Millisecond,
-		MaxRecordsInBatch: 1000,
-		MaxBatchBytes:     mibBytes,
+		MaxRecordsInBatch: MaxBatchRecords,
+		MaxBatchBytes:     MaxBatchBytes,
 	}
 
 	for _, param := range params {
@@ -92,7 +96,7 @@ func NewAppendRecordBatchingSender(
 		}
 	}
 
-	sendCh := make(chan AppendRecord)
+	sendCh := make(chan *sendRecord, config.MaxRecordsInBatch)
 
 	closeWorkerCtx, closeWorkerCancel := context.WithCancel(context.Background())
 	workerExitCtx, workerExitCancel := context.WithCancelCause(context.Background())
@@ -114,16 +118,20 @@ func NewAppendRecordBatchingSender(
 
 func appendRecordBatchingWorker(
 	ctx context.Context,
-	sendCh <-chan AppendRecord,
+	sendCh <-chan *sendRecord,
 	sender Sender[*AppendInput],
 	config *appendRecordBatchingConfig,
 ) error {
 	var peekedRecord *AppendRecord
 
-	recordsToFlush := make([]AppendRecord, 0, config.MaxRecordsInBatch)
+	recordsToFlush, _ := newAppendRecordBatch(config.MaxRecordsInBatch, config.MaxBatchBytes)
 
 	flush := func() error {
-		if len(recordsToFlush) == 0 {
+		if recordsToFlush.IsEmpty() {
+			if peekedRecord != nil {
+				return ErrRecordTooBig
+			}
+
 			return nil
 		}
 
@@ -136,7 +144,7 @@ func appendRecordBatchingWorker(
 			currentMatchSeqNum := *config.MatchSeqNum
 			matchSeqNum = &currentMatchSeqNum
 			// Update the next matching sequence number.
-			*config.MatchSeqNum += uint64(len(recordsToFlush))
+			*config.MatchSeqNum += uint64(recordsToFlush.Len())
 		}
 
 		input := &AppendInput{
@@ -149,42 +157,46 @@ func appendRecordBatchingWorker(
 			return err
 		}
 
-		// Only clear after it's sent.
-		clear(recordsToFlush)
+		recordsToFlush, _ = newAppendRecordBatch(config.MaxRecordsInBatch, config.MaxBatchBytes)
 
 		if peekedRecord != nil {
-			recordsToFlush = append(recordsToFlush, *peekedRecord)
+			if ok := recordsToFlush.Append(*peekedRecord); !ok {
+				return ErrRecordTooBig
+			}
+
 			peekedRecord = nil
 		}
 
 		return nil
 	}
 
+	var lingerCh <-chan time.Time
+
 	for {
-		lingerCh := make(<-chan time.Time) // Never
-		if len(recordsToFlush) > 0 {
-			// Initialize waiting for linger only if there's atleast one record.
-			// Otherwise there's really no point.
+		if recordsToFlush.IsEmpty() {
+			lingerCh = make(<-chan time.Time) // Never
+		} else if recordsToFlush.Len() == 1 {
 			lingerCh = time.After(config.LingerDuration)
 		}
 
 		select {
 		case record := <-sendCh:
-			if uint(len(recordsToFlush)) < config.MaxRecordsInBatch {
-				recordsToFlush = append(recordsToFlush, record)
-			} else {
+			if ok := recordsToFlush.Append(record.Record); !ok {
 				if peekedRecord != nil {
 					panic("peeked record cannot be occupied if this is the first time limit has reached")
 				}
 
-				peekedRecord = &record
+				peekedRecord = &record.Record
 			}
 
-			if uint(len(recordsToFlush)) == config.MaxRecordsInBatch || peekedRecord != nil {
+			if recordsToFlush.IsFull() || peekedRecord != nil {
 				if err := flush(); err != nil {
 					return err
 				}
 			}
+
+			// Acknowledge that the record has been appended.
+			close(record.Ack)
 
 		case <-lingerCh:
 			if err := flush(); err != nil {
@@ -202,8 +214,20 @@ func appendRecordBatchingWorker(
 }
 
 func (s *AppendRecordBatchingSender) Send(record AppendRecord) error {
+	ack := make(chan struct{})
+
 	select {
-	case s.sendCh <- record:
+	case s.sendCh <- &sendRecord{
+		Record: record,
+		Ack:    ack,
+	}: // Sent.
+
+	case <-s.workerExitCtx.Done():
+		return context.Cause(s.workerExitCtx)
+	}
+
+	select {
+	case <-ack:
 		return nil
 
 	case <-s.workerExitCtx.Done():

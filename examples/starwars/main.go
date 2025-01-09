@@ -18,23 +18,17 @@ func append(tx s2.Sender[*s2.AppendInput], tail uint64) error {
 	}
 	defer conn.Close()
 
+	rtx, err := s2.NewAppendRecordBatchingSender(tx, s2.WithLinger(0), s2.WithMatchSeqNum(tail))
+	if err != nil {
+		return err
+	}
+	defer rtx.Close()
+
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
-		// Copy tail into a new var since the arg accepts a ptr
-		matchSeqNum := tail
-		input := &s2.AppendInput{
-			Records: []s2.AppendRecord{
-				{
-					Body: scanner.Bytes(),
-				},
-			},
-			MatchSeqNum: &matchSeqNum,
-		}
-		if err := tx.Send(input); err != nil {
+		if err := rtx.Send(s2.AppendRecord{Body: scanner.Bytes()}); err != nil {
 			return err
 		}
-		// Since we're sending 1 record in every batch
-		tail++
 	}
 
 	return scanner.Err()

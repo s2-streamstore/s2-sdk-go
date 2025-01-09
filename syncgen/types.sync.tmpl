@@ -233,7 +233,7 @@ type AppendRecord struct {
 // {{ syncDoc "AppendInput" }}
 type AppendInput struct {
 	// {{ syncDocIndent "AppendInput.Records" }}
-	Records []AppendRecord
+	Records *AppendRecordBatch
 	// {{ syncDocIndent "AppendInput.MatchSeqNum" }}
 	MatchSeqNum *uint64
 	// {{ syncDocIndent "AppendInput.FencingToken" }}
