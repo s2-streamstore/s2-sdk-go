@@ -16,13 +16,13 @@ tasks:
     requires:
       vars: [NAME]
     cmds:
-      - go build -o .out/examples/{{.NAME}} ./examples/{{.NAME}}
+      - go build -v -o .out/examples/{{.NAME}} ./examples/{{.NAME}}
 
   test:
     deps:
       - gen
     cmds:
-      - go test ./...
+      - go test -v ./...
 
   lint:
     deps:
