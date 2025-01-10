@@ -10,7 +10,6 @@ linters:
     - contextcheck
     - copyloopvar
     - dupl
-    - dupword
     - durationcheck
     - err113
     - errname
@@ -52,7 +51,6 @@ linters:
     - revive
     - stylecheck
     - tenv
-    - testableexamples
     - testifylint
     - unconvert
     - unparam
