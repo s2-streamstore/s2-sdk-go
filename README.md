@@ -27,8 +27,6 @@
 The Go SDK provides ergonomic wrappers and utilities to interact with the
 [S2 API](https://s2.dev/docs/interface/grpc).
 
----
-
 ## Getting started
 
 1. Add the `s2` dependency to your project:
