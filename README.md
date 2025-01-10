@@ -13,9 +13,12 @@
   <h1>Go SDK for S2</h1>
 
   <p>
-    <!-- TODO: Badges for pkg.go.dev and CI -->
+    <!-- pkg.go.dev -->
+    <a href="https://pkg.go.dev/github.com/s2-streamstore/s2-sdk-go/s2"><img src="https://pkg.go.dev/badge/github.com/s2-streamstore/s2-sdk-go/s2.svg" /></a>
     <!-- Discord (chat) -->
     <a href="https://discord.gg/vTCs7kMkAf"><img src="https://img.shields.io/discord/1209937852528599092?logo=discord" /></a>
+    <!-- Github Actions (CI) -->
+    <a href="https://github.com/s2-streamstore/s2-sdk-go/actions?query=branch%3Amain++"><img src="https://github.com/s2-streamstore/s2-sdk-go/actions/workflows/ci.yml/badge.svg" /></a>
     <!-- LICENSE -->
     <a href="./LICENSE"><img src="https://img.shields.io/github/license/s2-streamstore/s2-sdk-go" /></a>
   </p>
@@ -24,13 +27,50 @@
 The Go SDK provides ergonomic wrappers and utilities to interact with the
 [S2 API](https://s2.dev/docs/interface/grpc).
 
----
+## Getting started
 
-This project is a **WORK IN PROGRESS**
+1. Add the `s2` dependency to your project:
+   ```bash
+   go get github.com/s2-streamstore/s2-sdk-go/s2
+   ```
 
-## Starwars
+1. Generate an authentication token by logging onto the web console at
+   [s2.dev](https://s2.dev/dashboard).
 
-Try out the SDK by running the Starwars example:
+1. Make a request using SDK client.
+   ```go
+   package main
+
+   import (
+     "context"
+     "fmt"
+
+     "github.com/s2-streamstore/s2-sdk-go/s2"
+   )
+
+   func main() {
+     client, err := s2.NewClient("<YOUR AUTH TOKEN>")
+     if err != nil {
+       // Handle error.
+     }
+
+     basins, err := client.ListBasins(&s2.ListBasinsRequest{})
+     if err != nil {
+       // Handle error.
+     }
+
+     fmt.Println(basins)
+   }
+   ```
+
+## Examples
+
+The [`s2/example_test.go`](./s2/example_test.go) contains a variety of example
+use cases demonstrating how to use the SDK effectively.
+
+### Starwars
+
+For a more practical example, try out the SDK by running the Starwars example:
 
 ```bash
 go run ./examples/starwars \
@@ -38,3 +78,31 @@ go run ./examples/starwars \
   -stream "<stream name>"  \
   -token "<auth token>"
 ```
+
+## SDK Docs and Reference
+
+Head over to [pkg.go.dev](https://pkg.go.dev/github.com/s2-streamstore/s2-sdk-go/s2)
+for detailed documentation and package reference.
+
+## Feedback
+
+We use [Github Issues](https://github.com/s2-streamstore/s2-sdk-go/issues) to
+track feature requests and issues with the SDK. If you wish to provide feedback,
+report a bug or request a feature, feel free to open a Github issue.
+
+### Contributing
+
+Developers are welcome to submit Pull Requests on the repository. If there is
+no tracking issue for the bug or feature request corresponding to the PR, we
+encourage you to open one for discussion before submitting the PR.
+
+## Reach out to us
+
+Join our [Discord](https://discord.gg/vTCs7kMkAf) server. We would love to hear
+from you.
+
+You can also email us at [hi@s2.dev](mailto:hi@s2.dev).
+
+## License
+
+This project is licensed under the [Apache-2.0 License](./LICENSE).
