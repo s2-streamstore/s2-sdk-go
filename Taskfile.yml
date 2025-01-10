@@ -136,3 +136,18 @@ tasks:
       - .out/sync-docs
     cmds:
       - go build -o .out/sync-docs ./internal/sync-docs/*.go
+
+  release:prepare:
+    requires:
+      vars: [VERSION]
+    cmds:
+      - git cliff --unreleased --tag v{{.VERSION}} --prepend CHANGELOG.md
+
+  release:tag:
+    requires:
+      vars: [VERSION]
+    cmds:
+      - git switch main
+      - git pull origin main
+      - git tag v{{.VERSION}}
+      - echo "Push the tag 'v{{.VERSION}}' to release"
