@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2025-01-10
+## [v0.1.0] - 2025-01-10
 
 ### Features
 
@@ -23,4 +23,4 @@ All notable changes to this project will be documented in this file.
 - Update starwars example with flags ([#4](https://github.com/s2-streamstore/s2-sdk-go/issues/4))
 - Add github actions for CI ([#6](https://github.com/s2-streamstore/s2-sdk-go/issues/6))
 - *(refactor)* Rearrange files ([#15](https://github.com/s2-streamstore/s2-sdk-go/issues/15))
-
+- *(release)* Create release v0.1.0 ([#17](https://github.com/s2-streamstore/s2-sdk-go/issues/17))
