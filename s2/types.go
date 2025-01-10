@@ -1,8 +1,10 @@
 package s2
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/s2-streamstore/s2-sdk-go/pb"
@@ -160,6 +162,75 @@ func (b *AppendRecordBatch) Records() []AppendRecord {
 // Returns metered bytes for the batch.
 func (b *AppendRecordBatch) MeteredBytes() uint {
 	return b.meteredBytes
+}
+
+// A command record is a special kind of AppendRecord that can be used to send command messages.
+//
+// Such a record is signalled by a sole header with empty name. The header value represents the operation and record
+// body acts as the payload.
+//
+// Valid CommandRecord variants are:
+//   - CommandRecordFence
+//   - CommandRecordTrim
+type CommandRecord interface {
+	commandRecordParts() (string, []byte)
+}
+
+// Enforce a fencing token.
+//
+// Fencing is strongly consistent, and subsequent appends that specify a fencing token will be rejected if it
+// does not match.
+type CommandRecordFence struct {
+	// Fencing token to enforce.
+	//
+	// Set empty to clear the token.
+	FencingToken []byte
+}
+
+func (c CommandRecordFence) commandRecordParts() (string, []byte) {
+	return "fence", c.FencingToken
+}
+
+// Request a trim till the sequence number.
+//
+// Trimming is eventually consistent, and trimmed records may be visible for a brief period.
+type CommandRecordTrim struct {
+	// Trim point.
+	//
+	// This sequence number is only allowed to advance, and any regression will be ignored.
+	SeqNum uint64
+}
+
+func (c CommandRecordTrim) commandRecordParts() (string, []byte) {
+	seqNum := make([]byte, 0, 8)
+	seqNum = binary.BigEndian.AppendUint64(seqNum, c.SeqNum)
+
+	return "trim", seqNum
+}
+
+func AppendRecordFromCommand(c CommandRecord) AppendRecord {
+	headerVal, body := c.commandRecordParts()
+
+	return AppendRecord{
+		Headers: []Header{{Value: []byte(headerVal)}},
+		Body:    body,
+	}
+}
+
+// Generate a random fencing token.
+//
+// Panics if n > 16.
+func GenerateFencingToken(n uint8) []byte {
+	if n > 16 {
+		panic("fencing token cannot be > 16 bytes")
+	}
+
+	fencingToken := make([]byte, 16)
+	for i := range fencingToken {
+		fencingToken[i] = byte(rand.UintN(256))
+	}
+
+	return fencingToken
 }
 
 // A listener on streaming responses for next item.
