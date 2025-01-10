@@ -3,7 +3,7 @@ package s2
 import (
 	"context"
 
-	"github.com/s2-streamstore/s2-sdk-go/pb"
+	"github.com/s2-streamstore/s2-sdk-go/internal/pb"
 )
 
 type checkTailServiceRequest struct {
