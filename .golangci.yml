@@ -64,3 +64,10 @@ linters-settings:
     default-signifies-exhaustive: true
   gochecksumtype:
     default-signifies-exhaustive: false
+
+issues:
+  exclude-rules:
+    - path: s2/example_test.go
+      linters:
+        - goconst
+        - forcetypeassert
