@@ -140,14 +140,20 @@ tasks:
   release:prepare:
     requires:
       vars: [VERSION]
+    vars:
+      SEMVER:
+        sh: ./scripts/semver.sh {{.VERSION}}
     cmds:
-      - git cliff --unreleased --tag v{{.VERSION}} --prepend CHANGELOG.md
+      - git cliff --unreleased --tag {{.SEMVER}} --prepend CHANGELOG.md
 
   release:tag:
     requires:
       vars: [VERSION]
+    vars:
+      SEMVER:
+        sh: ./scripts/semver.sh {{.VERSION}}
     cmds:
       - git switch main
       - git pull origin main
-      - git tag v{{.VERSION}}
-      - echo "Push the tag 'v{{.VERSION}}' to release"
+      - git tag {{.SEMVER}}
+      - echo "Push the tag '{{.SEMVER}}' to release"
