@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.1.1] - 2025-01-13
+
+### Documentation
+
+- Update README with detailed steps ([#20](https://github.com/s2-streamstore/s2-sdk-go/issues/20))
+
+### Miscellaneous Tasks
+
+- Add script for valid semver tag parsing ([#19](https://github.com/s2-streamstore/s2-sdk-go/issues/19))
+
 ## [v0.1.0] - 2025-01-10
 
 ### Features
