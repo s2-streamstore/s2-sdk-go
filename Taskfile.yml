@@ -143,8 +143,15 @@ tasks:
     vars:
       SEMVER:
         sh: ./scripts/semver.sh {{.VERSION}}
+      BRANCH: 'release-{{.SEMVER}}-{{now | unixEpoch}}'
     cmds:
+      - git switch main
+      - git pull origin main
+      - git switch -c {{.BRANCH}}
       - git cliff --unreleased --tag {{.SEMVER}} --prepend CHANGELOG.md
+      - git add CHANGELOG.md
+      - 'git commit -m "chore(release): {{.SEMVER}}"'
+      - echo "Push the branch '{{.BRANCH}}'. Once merged, create tag the release using 'task release:tag'"
 
   release:tag:
     requires:
