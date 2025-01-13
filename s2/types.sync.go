@@ -175,13 +175,12 @@ type ReconfigureStreamRequest struct {
 	Mask []string
 }
 
-// If both count and bytes are non-zero, either limit may be hit.
+// If both count and bytes are specified, either limit may be hit.
 type ReadLimit struct {
-	// A value of zero signifies no count limit.
-	Count uint64
-	// A value of zero signifies no bytes limit.
-	// Record sizes are calculated as metered bytes.
-	Bytes uint64
+	// Record count limit.
+	Count *uint64
+	// Metered bytes limit.
+	Bytes *uint64
 }
 
 // Read request.
@@ -189,7 +188,7 @@ type ReadRequest struct {
 	// Starting sequence number (inclusive).
 	StartSeqNum uint64
 	// Limit on how many records can be returned upto a maximum of 1000, or 1MiB of metered bytes.
-	Limit *ReadLimit
+	Limit ReadLimit
 }
 
 // Headers add structured information to a record as name-value pairs.
@@ -282,5 +281,5 @@ type ReadSessionRequest struct {
 	// the limit is met, or when the current tail of the stream is reached -- whichever occurs first.
 	// If no limit is specified, the session will remain open after catching up to the tail, and continue tailing as
 	// new messages are written to the stream.
-	Limit *ReadLimit
+	Limit ReadLimit
 }

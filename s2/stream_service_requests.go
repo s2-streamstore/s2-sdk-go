@@ -105,12 +105,9 @@ func (r *readServiceRequest) IdempotencyLevel() idempotencyLevel {
 }
 
 func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
-	var limit *pb.ReadLimit
-	if r.Req.Limit != nil {
-		limit = &pb.ReadLimit{
-			Count: r.Req.Limit.Count,
-			Bytes: r.Req.Limit.Bytes,
-		}
+	limit := &pb.ReadLimit{
+		Count: r.Req.Limit.Count,
+		Bytes: r.Req.Limit.Bytes,
 	}
 
 	req := &pb.ReadRequest{
@@ -138,12 +135,9 @@ func (r *readSessionServiceRequest) IdempotencyLevel() idempotencyLevel {
 }
 
 func (r *readSessionServiceRequest) Send(ctx context.Context) (Receiver[ReadOutput], error) {
-	var limit *pb.ReadLimit
-	if r.Req.Limit != nil {
-		limit = &pb.ReadLimit{
-			Count: r.Req.Limit.Count,
-			Bytes: r.Req.Limit.Bytes,
-		}
+	limit := &pb.ReadLimit{
+		Count: r.Req.Limit.Count,
+		Bytes: r.Req.Limit.Bytes,
 	}
 
 	req := &pb.ReadSessionRequest{

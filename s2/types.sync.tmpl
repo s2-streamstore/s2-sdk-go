@@ -164,9 +164,9 @@ type ReconfigureStreamRequest struct {
 // {{ syncDoc "ReadLimit" }}
 type ReadLimit struct {
 	// {{ syncDocIndent "ReadLimit.Count" }}
-	Count uint64
+	Count *uint64
 	// {{ syncDocIndent "ReadLimit.Bytes" }}
-	Bytes uint64
+	Bytes *uint64
 }
 
 // {{ syncDoc "ReadRequest" }}
@@ -174,7 +174,7 @@ type ReadRequest struct {
 	// {{ syncDocIndent "ReadRequest.StartSeqNum" }}
 	StartSeqNum uint64
 	// {{ syncDocIndent "ReadRequest.Limit" }}
-	Limit *ReadLimit
+	Limit ReadLimit
 }
 
 // {{ syncDoc "Header" }}
@@ -255,5 +255,5 @@ type ReadSessionRequest struct {
 	// {{ syncDocIndent "ReadSessionRequest.StartSeqNum" }}
 	StartSeqNum uint64
 	// {{ syncDocIndent "ReadSessionRequest.Limit" }}
-	Limit *ReadLimit
+	Limit ReadLimit
 }
