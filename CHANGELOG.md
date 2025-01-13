@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.1.2] - 2025-01-13
+
+### Miscellaneous Tasks
+
+- Update protos ([#22](https://github.com/s2-streamstore/s2-sdk-go/issues/22))
+
 ## [v0.1.1] - 2025-01-13
 
 ### Documentation
