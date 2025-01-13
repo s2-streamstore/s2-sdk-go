@@ -29,9 +29,17 @@ The Go SDK provides ergonomic wrappers and utilities to interact with the
 
 ## Getting started
 
+1. Create a new Go project:
+   ```bash
+   mkdir s2-sdk-test
+   cd s2-sdk-test
+   go mod init example.com/s2-sdk-test
+   touch main.go
+   ```
+
 1. Add the `s2` dependency to your project:
    ```bash
-   go get github.com/s2-streamstore/s2-sdk-go/s2
+   go get github.com/s2-streamstore/s2-sdk-go/s2@latest
    ```
 
 1. Generate an authentication token by logging onto the web console at
@@ -39,6 +47,8 @@ The Go SDK provides ergonomic wrappers and utilities to interact with the
 
 1. Make a request using SDK client.
    ```go
+   // main.go
+
    package main
 
    import (
@@ -51,17 +61,19 @@ The Go SDK provides ergonomic wrappers and utilities to interact with the
    func main() {
      client, err := s2.NewClient("<YOUR AUTH TOKEN>")
      if err != nil {
-       // Handle error.
+       panic(err)
      }
 
-     basins, err := client.ListBasins(&s2.ListBasinsRequest{})
+     basins, err := client.ListBasins(context.TODO(), &s2.ListBasinsRequest{})
      if err != nil {
-       // Handle error.
+       panic(err)
      }
 
      fmt.Println(basins)
    }
    ```
+
+   Run the above program using `go run main.go`.
 
 ## Examples
 
