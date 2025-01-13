@@ -8,7 +8,7 @@ The Go SDK provides ergonomic wrappers and utilities to interact with the
 
 1. Add the s2 dependency to your project:
 
-	go get github.com/s2-streamstore/s2-sdk-go/s2
+	go get github.com/s2-streamstore/s2-sdk-go/s2@latest
 
 2. Generate an authentication token by logging onto the web console at
 [s2.dev].
@@ -20,7 +20,7 @@ The Go SDK provides ergonomic wrappers and utilities to interact with the
 		// Handle error.
 	}
 
-	basins, err := client.ListBasins(&s2.ListBasinsRequest{})
+	basins, err := client.ListBasins(context.TODO(), &s2.ListBasinsRequest{})
 	if err != nil {
 		// Handle error.
 	}
