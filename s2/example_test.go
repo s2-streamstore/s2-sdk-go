@@ -349,13 +349,11 @@ func ExampleStreamClient_Read() {
 
 	latestSeqNum := tail - 1
 
-	readLimit := s2.ReadLimit{
-		Count: 1,
-	}
+	count := uint64(1)
 
 	latestBatch, err := streamClient.Read(context.TODO(), &s2.ReadRequest{
 		StartSeqNum: latestSeqNum,
-		Limit:       &readLimit,
+		Limit:       s2.ReadLimit{Count: &count},
 	})
 	if err != nil {
 		panic(err)

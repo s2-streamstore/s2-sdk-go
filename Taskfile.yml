@@ -145,8 +145,8 @@ tasks:
         sh: ./scripts/semver.sh {{.VERSION}}
       BRANCH: 'release-{{.SEMVER}}-{{now | unixEpoch}}'
     cmds:
-      - git switch main
-      - git pull origin main
+      - git fetch origin -t
+      - git checkout origin/main
       - git switch -c {{.BRANCH}}
       - git cliff --unreleased --tag {{.SEMVER}} --prepend CHANGELOG.md
       - git add CHANGELOG.md
@@ -160,7 +160,7 @@ tasks:
       SEMVER:
         sh: ./scripts/semver.sh {{.VERSION}}
     cmds:
-      - git switch main
-      - git pull origin main
+      - git fetch origin -t
+      - git checkout origin/main
       - git tag {{.SEMVER}}
       - echo "Push the tag '{{.SEMVER}}' to release"
