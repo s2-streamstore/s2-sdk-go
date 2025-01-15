@@ -197,6 +197,9 @@ func appendRecordBatchingWorker(
 
 	var lingerCh <-chan time.Time
 
+	// Close the input sender on exit.
+	defer sender.CloseSend() //nolint:errcheck
+
 	for {
 		if recordsToFlush.IsEmpty() {
 			lingerCh = make(<-chan time.Time) // Never
@@ -262,7 +265,7 @@ func (s *AppendRecordBatchingSender) Send(record AppendRecord) error {
 }
 
 // Close the sender gracefully.
-func (s *AppendRecordBatchingSender) Close() error {
+func (s *AppendRecordBatchingSender) CloseSend() error {
 	s.closeWorkerCancel()
 	<-s.workerExitCtx.Done()
 
