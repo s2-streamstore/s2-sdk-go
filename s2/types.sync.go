@@ -40,8 +40,8 @@ type ListBasinsRequest struct {
 	// This can be the last basin name seen in a previous listing, to continue from there.
 	// It must be greater than or equal to the prefix if specified.
 	StartAfter string
-	// Number of results, upto a maximum of 1000.
-	Limit uint64
+	// Number of results, up to a maximum of 1000.
+	Limit *uint64
 }
 
 // List basins response.
@@ -70,8 +70,8 @@ type ListStreamsRequest struct {
 	// This can be the last stream name seen in a previous listing, to continue from there.
 	// It must be greater than or equal to the prefix if specified.
 	StartAfter string
-	// Number of results, upto a maximum of 1000.
-	Limit uint64
+	// Number of results, up to a maximum of 1000.
+	Limit *uint64
 }
 
 // List streams response.

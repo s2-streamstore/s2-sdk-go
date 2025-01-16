@@ -133,10 +133,11 @@ func ExampleBasinClient_ListStreams() {
 	}
 
 	prefix := "my-"
+	limit := uint64(10)
 
 	listStreamsResponse, err := basinClient.ListStreams(context.TODO(), &s2.ListStreamsRequest{
 		Prefix: prefix,
-		Limit:  10,
+		Limit:  &limit,
 	})
 	if err != nil {
 		panic(err)
