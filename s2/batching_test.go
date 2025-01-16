@@ -26,6 +26,7 @@ func withMaxBatchBytes(n uint) AppendRecordBatchingConfigParam {
 
 type testAppendSessionSender struct {
 	inputs atomic.Value
+	closed atomic.Bool
 }
 
 func (s *testAppendSessionSender) Inputs(t *testing.T) []*AppendInput {
@@ -36,12 +37,22 @@ func (s *testAppendSessionSender) Inputs(t *testing.T) []*AppendInput {
 }
 
 func (s *testAppendSessionSender) Send(input *AppendInput) error {
+	if s.closed.Load() {
+		return ErrAppendRecordSenderClosed
+	}
+
 	if inputs, ok := s.inputs.Load().([]*AppendInput); ok {
 		inputs = append(inputs, input)
 		s.inputs.Store(inputs)
 	} else {
 		s.inputs.Store([]*AppendInput{input})
 	}
+
+	return nil
+}
+
+func (s *testAppendSessionSender) CloseSend() error {
+	s.closed.Store(true)
 
 	return nil
 }
@@ -90,7 +101,7 @@ func TestAppendRecordBatchingMechanics(t *testing.T) {
 					require.NoError(t, recordSender.Send(AppendRecord{Body: []byte(body)}))
 				}
 
-				require.NoError(t, recordSender.Close())
+				require.NoError(t, recordSender.CloseSend())
 
 				i := 0
 
@@ -169,7 +180,7 @@ func TestAppendRecordBatchingLinger(t *testing.T) {
 	sendNext("large string")
 	sendNext("")
 
-	require.NoError(t, recordSender.Close())
+	require.NoError(t, recordSender.CloseSend())
 
 	expectedBatches := [][]string{
 		{"r_0", "r_1"},
@@ -207,7 +218,7 @@ func TestAppendRecordBatchingErrorSizeLimits(t *testing.T) {
 	require.NoError(t, err)
 
 	require.ErrorIs(t, recordSender.Send(record), ErrRecordTooBig)
-	require.ErrorIs(t, recordSender.Close(), ErrRecordTooBig)
+	require.ErrorIs(t, recordSender.CloseSend(), ErrRecordTooBig)
 }
 
 func TestAppendRecordBatchingAppendInputOpts(t *testing.T) {
@@ -240,7 +251,7 @@ func TestAppendRecordBatchingAppendInputOpts(t *testing.T) {
 		require.NoError(t, recordSender.Send(record))
 	}
 
-	require.NoError(t, recordSender.Close())
+	require.NoError(t, recordSender.CloseSend())
 
 	batches := batchSender.Inputs(t)
 

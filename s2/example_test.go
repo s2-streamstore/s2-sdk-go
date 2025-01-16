@@ -389,7 +389,7 @@ func ExampleStreamClient_AppendSession() {
 	if err != nil {
 		panic(err)
 	}
-	defer recordSender.Close()
+	defer recordSender.CloseSend() //nolint:errcheck
 
 	send := make(chan error)
 
@@ -473,7 +473,7 @@ func ExampleAppendRecordBatchingSender() {
 	if err != nil {
 		panic(err)
 	}
-	defer recordSender.Close()
+	defer recordSender.CloseSend() //nolint:errcheck
 
 	records := []s2.AppendRecord{
 		{Body: []byte("my record 1")},
