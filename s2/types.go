@@ -243,6 +243,8 @@ type Receiver[T any] interface {
 type Sender[T any] interface {
 	// Block until the item has been sent.
 	Send(T) error
+	// Close the sender.
+	CloseSend() error
 }
 
 type recvInner[F, T any] struct {
@@ -273,6 +275,10 @@ func (r sendInner[F, T]) Send(f F) error {
 	}
 
 	return r.Client.Send(t)
+}
+
+func (r sendInner[F, T]) CloseSend() error {
+	return r.Client.CloseSend()
 }
 
 type implRetentionPolicy interface {
