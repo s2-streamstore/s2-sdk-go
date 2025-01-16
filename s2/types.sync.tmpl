@@ -37,7 +37,7 @@ type ListBasinsRequest struct {
 	// {{ syncDocIndent "ListBasinsRequest.StartAfter" }}
 	StartAfter string
 	// {{ syncDocIndent "ListBasinsRequest.Limit" }}
-	Limit uint64
+	Limit *uint64
 }
 
 // {{ syncDoc "ListBasinsResponse" }}
@@ -65,7 +65,7 @@ type ListStreamsRequest struct {
 	// {{ syncDocIndent "ListStreamsRequest.StartAfter" }}
 	StartAfter string
 	// {{ syncDocIndent "ListStreamsRequest.Limit" }}
-	Limit uint64
+	Limit *uint64
 }
 
 // {{ syncDoc "ListStreamsResponse" }}
