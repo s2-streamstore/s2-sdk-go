@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.2.0] - 2025-01-16
+
+### Features
+
+- Implement `Sender.CloseSend` to close the request stream ([#24](https://github.com/s2-streamstore/s2-sdk-go/issues/24))
+
 ## [v0.1.2] - 2025-01-13
 
 ### Miscellaneous Tasks
