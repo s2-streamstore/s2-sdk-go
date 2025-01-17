@@ -1,0 +1,51 @@
+name: Update protos
+
+permissions:
+  contents: write
+  pull-requests: write
+
+on:
+  repository_dispatch:
+    types: [s2-proto-update]
+
+jobs:
+  generate-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      
+      - name: Update Submodules
+        id: submodules
+        uses: sgoudham/update-git-submodules@v2.1.1
+        with:
+          submodules: s2-protos
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.40.x
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: 29.x
+      - name: Setup protoc
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+      - name: build protos
+        run: |
+          task gen
+
+      - name: Create Pull Request
+        if: ${{ steps.submodules.outputs['s2-protos--updated'] }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          committer: s2-helper[bot] <194906454+s2-helper[bot]@users.noreply.github.com>
+          author: s2-helper[bot] <194906454+s2-helper[bot]@users.noreply.github.com>
+          title: chore - protos update
+          branch: "protos/update-s2-protos-${{ steps.submodules.outputs['s2-protos--latestShortCommitSha'] }}"
+          body: ${{ steps.submodules.outputs.prBody }}
