@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/s2-streamstore/s2-sdk-go/internal/pb"
+	"github.com/s2-streamstore/s2-sdk-go/optr"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
@@ -589,6 +590,24 @@ func (r *readSessionReceiver) Recv() (ReadOutput, error) {
 		if err == nil {
 			if batch, ok := next.(ReadOutputBatch); ok && len(batch.Records) > 0 {
 				r.ServiceReq.Req.StartSeqNum = 1 + batch.Records[len(batch.Records)-1].SeqNum
+
+				r.ServiceReq.Req.Limit.Bytes = optr.Map(r.ServiceReq.Req.Limit.Bytes, func(b uint64) uint64 {
+					batchBytes := uint64(batch.SequencedRecordBatch.MeteredBytes())
+					if b < batchBytes {
+						return 0
+					}
+
+					return b - batchBytes
+				})
+
+				r.ServiceReq.Req.Limit.Count = optr.Map(r.ServiceReq.Req.Limit.Count, func(c uint64) uint64 {
+					batchSize := uint64(len(batch.Records))
+					if c < batchSize {
+						return 0
+					}
+
+					return c - batchSize
+				})
 			}
 
 			return next, nil

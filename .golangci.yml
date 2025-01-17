@@ -45,7 +45,6 @@ linters:
     - nosprintfhostport
     - prealloc
     - predeclared
-    - protogetter
     - reassign
     - recvcheck
     - revive
@@ -67,7 +66,8 @@ linters-settings:
 
 issues:
   exclude-rules:
-    - path: s2/example_test.go
+    - path: _test.go
       linters:
         - goconst
+        - err113
         - forcetypeassert
