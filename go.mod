@@ -1,9 +1,10 @@
 module github.com/s2-streamstore/s2-sdk-go
 
-go 1.23
+go 1.23.4
 
 require (
 	github.com/google/uuid v1.6.0
+	github.com/s2-streamstore/optr v1.0.0
 	github.com/stretchr/testify v1.10.0
 	google.golang.org/grpc v1.69.2
 	google.golang.org/protobuf v1.36.1

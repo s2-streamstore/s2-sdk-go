@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/s2-streamstore/s2-sdk-go/optr"
+	"github.com/s2-streamstore/optr"
 )
 
 // Batching errors.

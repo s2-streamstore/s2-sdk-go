@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/s2-streamstore/optr"
 	"github.com/s2-streamstore/s2-sdk-go/internal/pb"
-	"github.com/s2-streamstore/s2-sdk-go/optr"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"

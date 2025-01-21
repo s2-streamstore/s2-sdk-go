@@ -7,8 +7,8 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/s2-streamstore/optr"
 	"github.com/s2-streamstore/s2-sdk-go/internal/pb"
-	"github.com/s2-streamstore/s2-sdk-go/optr"
 )
 
 const (
