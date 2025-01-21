@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/s2-streamstore/optr"
 	"github.com/s2-streamstore/s2-sdk-go/internal/pb"
 )
 
@@ -55,6 +56,16 @@ func (r *SequencedRecord) MeteredBytes() uint {
 	bytes := 8 + (2 * uint(len(r.Headers))) + uint(len(r.Body))
 	for _, header := range r.Headers {
 		bytes += uint(len(header.Name)) + uint(len(header.Value))
+	}
+
+	return bytes
+}
+
+// Metered bytes for a SequencedRecordBatch.
+func (b *SequencedRecordBatch) MeteredBytes() uint {
+	var bytes uint
+	for i := range len(b.Records) {
+		bytes += b.Records[i].MeteredBytes()
 	}
 
 	return bytes
@@ -340,12 +351,9 @@ func basinInfoFromProto(pbInfo *pb.BasinInfo) (BasinInfo, error) {
 }
 
 func streamInfoFromProto(pbInfo *pb.StreamInfo) StreamInfo {
-	var deletedAt *time.Time
-
-	if pbInfo.DeletedAt != nil {
-		deletedAtTime := time.Unix(int64(pbInfo.GetDeletedAt()), 0)
-		deletedAt = &deletedAtTime
-	}
+	deletedAt := optr.Map(pbInfo.DeletedAt, func(timestamp uint32) time.Time {
+		return time.Unix(int64(timestamp), 0)
+	})
 
 	return StreamInfo{
 		Name:      pbInfo.GetName(),

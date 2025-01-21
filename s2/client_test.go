@@ -40,12 +40,12 @@ func TestSendRetryable(t *testing.T) {
 	testCases := []testCase{
 		{
 			idLevel:     idempotencyLevelNoSideEffects,
-			sendErr:     errors.New("hello"), //nolint:err113
+			sendErr:     errors.New("hello"),
 			shouldRetry: false,
 		},
 		{
 			idLevel:     idempotencyLevelIdempotent,
-			sendErr:     errors.New("hello"), //nolint:err113
+			sendErr:     errors.New("hello"),
 			shouldRetry: false,
 		},
 		{

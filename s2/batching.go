@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/s2-streamstore/optr"
 )
 
 // Batching errors.
@@ -151,6 +153,8 @@ func appendRecordBatchingWorker(
 
 	recordsToFlush := newEmptyAppendRecordBatch(config.MaxBatchRecords, config.MaxBatchBytes)
 
+	nextMatchSeqNum := optr.Cloned(config.MatchSeqNum)
+
 	flush := func() error {
 		if recordsToFlush.IsEmpty() {
 			if peekedRecord != nil {
@@ -160,27 +164,19 @@ func appendRecordBatchingWorker(
 			return nil
 		}
 
-		var matchSeqNum *uint64
-
-		if config.MatchSeqNum != nil {
-			// Copy current match sequence number in another variable so we can
-			// mutate it later for the up-coming sequence number. Working with
-			// optionals as pointer in Go is hard.
-			currentMatchSeqNum := *config.MatchSeqNum
-			matchSeqNum = &currentMatchSeqNum
-			// Update the next matching sequence number.
-			*config.MatchSeqNum += uint64(recordsToFlush.Len())
-		}
-
 		input := &AppendInput{
 			Records:      recordsToFlush,
-			MatchSeqNum:  matchSeqNum,
+			MatchSeqNum:  optr.Cloned(nextMatchSeqNum),
 			FencingToken: config.FencingToken,
 		}
 
 		if err := sender.Send(input); err != nil {
 			return err
 		}
+
+		nextMatchSeqNum = optr.Map(nextMatchSeqNum, func(m uint64) uint64 {
+			return m + uint64(recordsToFlush.Len())
+		})
 
 		recordsToFlush = newEmptyAppendRecordBatch(config.MaxBatchRecords, config.MaxBatchBytes)
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/s2-streamstore/optr"
 	"github.com/s2-streamstore/s2-sdk-go/s2"
 )
 
@@ -133,11 +134,10 @@ func ExampleBasinClient_ListStreams() {
 	}
 
 	prefix := "my-"
-	limit := uint64(10)
 
 	listStreamsResponse, err := basinClient.ListStreams(context.TODO(), &s2.ListStreamsRequest{
 		Prefix: prefix,
-		Limit:  &limit,
+		Limit:  optr.Some(uint64(10)),
 	})
 	if err != nil {
 		panic(err)
@@ -350,11 +350,9 @@ func ExampleStreamClient_Read() {
 
 	latestSeqNum := tail - 1
 
-	count := uint64(1)
-
 	latestBatch, err := streamClient.Read(context.TODO(), &s2.ReadRequest{
 		StartSeqNum: latestSeqNum,
-		Limit:       s2.ReadLimit{Count: &count},
+		Limit:       s2.ReadLimit{Count: optr.Some(uint64(1))},
 	})
 	if err != nil {
 		panic(err)
