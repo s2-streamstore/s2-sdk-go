@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.2.1] - 2025-01-21
+
+### Features
+
+- Use `optr` for optional pointer handling ([#29](https://github.com/s2-streamstore/s2-sdk-go/issues/29))
+
 ## [v0.2.0] - 2025-01-16
 
 ### Features
