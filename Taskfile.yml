@@ -42,7 +42,7 @@ tasks:
       - |
         git diff --exit-code internal/pb/*.go s2/*.sync.go && echo "Up-to-date" || {
             echo "Not up-to-date"
-            echo "Run task:gen and update the generated code"
+            echo "Run `task gen` and update the generated code"
             exit 1
         }
 
