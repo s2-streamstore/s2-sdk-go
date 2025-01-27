@@ -140,7 +140,7 @@ func streamsManagerWorker(
 	ctx context.Context,
 	client *s2.BasinClient,
 	config *InputConfig,
-	updateDuration time.Duration,
+	updateListInterval time.Duration,
 	recvCh chan<- recvOutput,
 	closeWorker <-chan string,
 	streamsManagerCloser chan<- struct{},
@@ -149,7 +149,7 @@ func streamsManagerWorker(
 
 	var (
 		existingWorkers    = make(map[string]streamWorker)
-		ticker             = time.NewTicker(updateDuration)
+		ticker             = time.NewTicker(updateListInterval)
 		exitNotifier       = make(chan struct{}, 1)
 		updateListNotifier = make(chan struct{}, 1)
 	)
