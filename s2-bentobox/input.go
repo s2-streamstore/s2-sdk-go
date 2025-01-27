@@ -62,10 +62,11 @@ func (p PrefixedInputStreams) list(ctx context.Context, client *s2.BasinClient) 
 
 type InputConfig struct {
 	*Config
-	Streams     InputStreams
-	MaxInFlight int
-	Cache       SeqNumCache
-	Logger      Logger
+	Streams            InputStreams
+	MaxInFlight        int
+	UpdateListInterval time.Duration
+	Cache              SeqNumCache
+	Logger             Logger
 }
 
 type recvOutput struct {
@@ -98,7 +99,7 @@ func ConnectInput(ctx context.Context, config *InputConfig) (*Input, error) {
 		sessionCtx,
 		client,
 		config,
-		/* updateDuration = */ time.Minute,
+		config.UpdateListInterval,
 		recvCh,
 		closeWorker,
 		streamsManagerCloser,
