@@ -62,10 +62,11 @@ func (p PrefixedInputStreams) list(ctx context.Context, client *s2.BasinClient) 
 
 type InputConfig struct {
 	*Config
-	Streams     InputStreams
-	MaxInFlight int
-	Cache       SeqNumCache
-	Logger      Logger
+	Streams            InputStreams
+	MaxInFlight        int
+	UpdateListInterval time.Duration
+	Cache              SeqNumCache
+	Logger             Logger
 }
 
 type recvOutput struct {
@@ -98,7 +99,7 @@ func ConnectInput(ctx context.Context, config *InputConfig) (*Input, error) {
 		sessionCtx,
 		client,
 		config,
-		/* updateDuration = */ time.Minute,
+		config.UpdateListInterval,
 		recvCh,
 		closeWorker,
 		streamsManagerCloser,
@@ -139,7 +140,7 @@ func streamsManagerWorker(
 	ctx context.Context,
 	client *s2.BasinClient,
 	config *InputConfig,
-	updateDuration time.Duration,
+	updateListInterval time.Duration,
 	recvCh chan<- recvOutput,
 	closeWorker <-chan string,
 	streamsManagerCloser chan<- struct{},
@@ -148,7 +149,7 @@ func streamsManagerWorker(
 
 	var (
 		existingWorkers    = make(map[string]streamWorker)
-		ticker             = time.NewTicker(updateDuration)
+		ticker             = time.NewTicker(updateListInterval)
 		exitNotifier       = make(chan struct{}, 1)
 		updateListNotifier = make(chan struct{}, 1)
 	)
