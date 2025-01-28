@@ -3,7 +3,6 @@ package s2bentobox
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -13,10 +12,7 @@ import (
 	"github.com/tidwall/btree"
 )
 
-var (
-	errCacheValueNotExist = errors.New("cache value does not exist")
-	ErrInputClosed        = errors.New("input closed")
-)
+var ErrInputClosed = errors.New("input closed")
 
 type SeqNumCache interface {
 	Get(ctx context.Context, stream string) (uint64, error)
@@ -37,13 +33,20 @@ func newSeqNumCache(inner SeqNumCache) *seqNumCache {
 	}
 }
 
-func (s *seqNumCache) Get(_ context.Context, stream string) (uint64, error) {
+func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 	seqNum, ok := s.mem.Get(stream)
-	if !ok {
-		return 0, fmt.Errorf("%w: %q", errCacheValueNotExist, stream)
+	if ok {
+		return seqNum, nil
 	}
 
-	return seqNum, nil
+	cached, err := s.inner.Get(ctx, stream)
+	if err != nil {
+		return 0, err
+	}
+
+	s.mem.Set(stream, cached)
+
+	return cached, nil
 }
 
 func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum uint64) error {
@@ -440,8 +443,18 @@ func (i *Input) AckFunc(stream string, batch *s2.SequencedRecordBatch) func(cont
 
 				// Ack this message by storing in the cache.
 				lastSeqNum := batch.Records[len(batch.Records)-1].SeqNum
-				// Add 1 to last seq num since we're tracking the "start" of read session.
-				return i.cache.Set(ctx, stream, lastSeqNum+1)
+				nextSeqNum := lastSeqNum + 1
+
+				// Only cache the value if it's greater than the value that's already cached,
+				// otherwise this could result in duplication of messages.
+				//
+				// Duplication is not an error but we can try our best not to.
+				cachedSeqNum, cErr := i.cache.Get(ctx, stream)
+				if cErr != nil || cachedSeqNum < nextSeqNum {
+					return i.cache.Set(ctx, stream, nextSeqNum)
+				}
+
+				return nil
 			}()
 		}
 
