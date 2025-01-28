@@ -35,13 +35,6 @@ func waitForClosers(ctx context.Context, closers ...<-chan struct{}) error {
 	return nil
 }
 
-func notifyOnce(ch chan<- struct{}) {
-	select {
-	case ch <- struct{}{}:
-	default:
-	}
-}
-
 type Logger interface {
 	Tracef(template string, args ...any)
 	Trace(message string)
