@@ -3,17 +3,56 @@ package s2bentobox
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"time"
 
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/s2-streamstore/optr"
 	"github.com/s2-streamstore/s2-sdk-go/s2"
 )
 
-var ErrInputClosed = errors.New("input closed")
+var (
+	errCacheValueNotExist = errors.New("cache value does not exist")
+	ErrInputClosed        = errors.New("input closed")
+)
 
 type SeqNumCache interface {
 	Get(ctx context.Context, stream string) (uint64, error)
 	Set(ctx context.Context, stream string, seqNum uint64) error
+}
+
+type seqNumCache struct {
+	inner SeqNumCache
+	// We don't trust the user to provide a valid cache so we have our own layer
+	// on top of the one provided by the user.
+	mem cmap.ConcurrentMap[string, uint64]
+}
+
+func newSeqNumCache(inner SeqNumCache) *seqNumCache {
+	return &seqNumCache{
+		inner: inner,
+		mem:   cmap.New[uint64](),
+	}
+}
+
+func (s *seqNumCache) Get(_ context.Context, stream string) (uint64, error) {
+	seqNum, ok := s.mem.Get(stream)
+	if !ok {
+		return 0, fmt.Errorf("%w: %q", errCacheValueNotExist, stream)
+	}
+
+	return seqNum, nil
+}
+
+func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum uint64) error {
+	if err := s.inner.Set(ctx, stream, seqNum); err != nil {
+		return err
+	}
+
+	s.mem.Set(stream, seqNum)
+
+	return nil
 }
 
 type InputStreams interface {
@@ -76,18 +115,16 @@ type recvOutput struct {
 	Err    error
 }
 
-type restartWorkerParams struct {
-	Stream      string
-	StartSeqNum *uint64
-	Closer      chan<- struct{}
-}
-
 type Input struct {
 	config               *InputConfig
-	recvCh               <-chan recvOutput
+	inputStream          chan recvOutput
 	streamsManagerCloser <-chan struct{}
 	cancelSession        context.CancelFunc
-	restartWorker        chan<- restartWorkerParams
+
+	cache *seqNumCache
+
+	ackMu sync.Mutex
+	nacks map[string](map[uint64]struct{})
 }
 
 func ConnectInput(ctx context.Context, config *InputConfig) (*Input, error) {
@@ -99,24 +136,28 @@ func ConnectInput(ctx context.Context, config *InputConfig) (*Input, error) {
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 
 	streamsManagerCloser := make(chan struct{})
-	restartWorker := make(chan restartWorkerParams, config.MaxInFlight)
-	recvCh := make(chan recvOutput, config.MaxInFlight)
+	// Twice the inflight requests since we can have this blocked by nacks otherwise.
+	// TODO: Maybe this number can be improved somehow?
+	inputStream := make(chan recvOutput, config.MaxInFlight*2)
+
+	cache := newSeqNumCache(config.Cache)
 
 	go streamsManagerWorker(
 		sessionCtx,
 		client,
 		config,
-		recvCh,
-		restartWorker,
+		cache,
+		inputStream,
 		streamsManagerCloser,
 	)
 
 	return &Input{
 		config:               config,
-		recvCh:               recvCh,
+		inputStream:          inputStream,
 		streamsManagerCloser: streamsManagerCloser,
 		cancelSession:        cancelSession,
-		restartWorker:        restartWorker,
+		cache:                cache,
+		nacks:                make(map[string]map[uint64]struct{}),
 	}, nil
 }
 
@@ -137,8 +178,8 @@ func streamsManagerWorker(
 	ctx context.Context,
 	client *s2.BasinClient,
 	config *InputConfig,
-	recvCh chan<- recvOutput,
-	restartWorker <-chan restartWorkerParams,
+	cache *seqNumCache,
+	inputStream chan<- recvOutput,
 	streamsManagerCloser chan<- struct{},
 ) {
 	defer close(streamsManagerCloser)
@@ -159,7 +200,7 @@ func streamsManagerWorker(
 	// Fetch the list once immediately at startup.
 	updateListNotifier <- struct{}{}
 
-	spawnWorker := func(stream string, startSeqNum *uint64) {
+	spawnWorker := func(stream string) {
 		workerCtx, cancelWorker := context.WithCancel(ctx)
 		workerCloser := make(chan struct{})
 		worker := streamWorker{
@@ -172,9 +213,9 @@ func streamsManagerWorker(
 			workerCtx,
 			client,
 			config,
+			cache,
 			stream,
-			startSeqNum,
-			recvCh,
+			inputStream,
 			workerCloser,
 		)
 	}
@@ -184,17 +225,6 @@ outerLoop:
 		select {
 		case <-ctx.Done():
 			break outerLoop
-
-		case params := <-restartWorker:
-			if worker, found := existingWorkers[params.Stream]; found {
-				worker.Close()
-				worker.Wait()
-			}
-
-			// Spawn a new worker with updated start sequence number.
-			spawnWorker(params.Stream, params.StartSeqNum)
-			// Notify that the restart is completed.
-			close(params.Closer)
 
 		case <-updateListNotifier:
 		case <-ticker.C:
@@ -226,10 +256,7 @@ outerLoop:
 			newStreamsSet[stream] = struct{}{}
 
 			if _, found := existingWorkers[stream]; !found {
-				spawnWorker(
-					stream,
-					/* Get sequence number from cache */ nil,
-				)
+				spawnWorker(stream)
 			}
 		}
 
@@ -254,8 +281,8 @@ func receiverWorker(
 	ctx context.Context,
 	client *s2.BasinClient,
 	config *InputConfig,
+	cache *seqNumCache,
 	stream string,
-	startSeqNumParam *uint64,
 	recvCh chan<- recvOutput,
 	closer chan<- struct{},
 ) {
@@ -265,15 +292,10 @@ func receiverWorker(
 	defer config.Logger.With("stream", stream).Debug("Exiting S2 source worker")
 
 	var (
-		receiver s2.Receiver[s2.ReadOutput]
-		backoff  time.Duration
+		receiver       s2.Receiver[s2.ReadOutput]
+		backoff        time.Duration
+		startSeqNumOpt *uint64
 	)
-
-	updateStartSeqNum := func(s uint64) error {
-		startSeqNumParam = optr.Some(s)
-
-		return config.Cache.Set(ctx, stream, s)
-	}
 
 	initReceiver := func() error {
 		select {
@@ -284,8 +306,8 @@ func receiverWorker(
 			return ctx.Err()
 		}
 
-		startSeqNum := optr.UnwrapOr(startSeqNumParam, func() uint64 {
-			startSeqNum, err := config.Cache.Get(ctx, stream)
+		startSeqNum := optr.UnwrapOr(startSeqNumOpt, func() uint64 {
+			startSeqNum, err := cache.Get(ctx, stream)
 			if err != nil {
 				config.Logger.
 					With(
@@ -301,11 +323,6 @@ func receiverWorker(
 			return startSeqNum
 		})
 
-		// Set the sequence number in the cache.
-		if err := updateStartSeqNum(startSeqNum); err != nil {
-			return err
-		}
-
 		var err error
 
 		receiver, err = client.StreamClient(stream).ReadSession(ctx, &s2.ReadSessionRequest{
@@ -314,6 +331,9 @@ func receiverWorker(
 		if err != nil {
 			return err
 		}
+
+		// Reset so we can hit cache the next time unless otherwise asked to.
+		startSeqNumOpt = nil
 
 		return nil
 	}
@@ -355,56 +375,25 @@ func receiverWorker(
 		case s2.ReadOutputBatch:
 			select {
 			case recvCh <- recvOutput{Stream: stream, Batch: o.SequencedRecordBatch}:
-				if len(o.Records) > 0 {
-					lastSeqNum := o.Records[len(o.Records)-1].SeqNum
-					nextStartSeqNum := lastSeqNum + 1
-
-					// Be optimistic in marking the message read. Let the "nacks" indicate that
-					// the records needs to be re-sent!
-					if err := updateStartSeqNum(nextStartSeqNum); err != nil {
-						config.Logger.
-							With(
-								"error", err,
-								"stream", stream,
-							).
-							Error("Failed to set cache value for last sequence number")
-					}
-				}
-
+				// OK
 			case <-ctx.Done():
 				return
 			}
 
 		case s2.ReadOutputFirstSeqNum:
+			startSeqNumOpt = optr.Some(uint64(o))
 			receiver = nil
-
-			if err := updateStartSeqNum(uint64(o)); err != nil {
-				config.Logger.
-					With(
-						"error", err,
-						"stream", stream,
-					).
-					Error("Failed to set cache value for first sequence number")
-			}
 
 		case s2.ReadOutputNextSeqNum:
+			startSeqNumOpt = optr.Some(uint64(o))
 			receiver = nil
-
-			if err := updateStartSeqNum(uint64(o)); err != nil {
-				config.Logger.
-					With(
-						"error", err,
-						"stream", stream,
-					).
-					Error("Failed to set cache value for next sequence number")
-			}
 		}
 	}
 }
 
 func (i *Input) ReadBatch(ctx context.Context) (*s2.SequencedRecordBatch, string, error) {
 	select {
-	case output := <-i.recvCh:
+	case output := <-i.inputStream:
 		if output.Err != nil {
 			return nil, output.Stream, output.Err
 		}
@@ -427,55 +416,58 @@ func (i *Input) AckFunc(stream string, batch *s2.SequencedRecordBatch) func(cont
 	return func(ctx context.Context, err error) error {
 		i.config.Logger.With("stream", stream).Debug("Acknowledging batch")
 
+		if len(batch.Records) == 0 {
+			// What is even being acked?
+			return nil
+		}
+
 		if err == nil {
-			return nil
+			// Set the cache if nacks are empty.
+			return func() error {
+				i.ackMu.Lock()
+				defer i.ackMu.Unlock()
+
+				streamNacks, ok := i.nacks[stream]
+				if ok && len(streamNacks) > 0 {
+					// If smallest stream nack > this batch seq num:
+					// then -> we've already considered this acknowledged.
+					// else -> this message might have been received again or can be.
+					delete(streamNacks, batch.Records[0].SeqNum)
+
+					return nil
+				}
+
+				// Ack this message by storing in the cache.
+				lastSeqNum := batch.Records[len(batch.Records)-1].SeqNum
+				// Add 1 to last seq num since we're tracking the "start" of read session.
+				return i.cache.Set(ctx, stream, lastSeqNum+1)
+			}()
 		}
 
-		restartCloser := make(chan struct{})
+		func() {
+			i.ackMu.Lock()
+			defer i.ackMu.Unlock()
 
-		var startSeqNum *uint64
-		if len(batch.Records) > 0 {
-			startSeqNum = optr.Some(batch.Records[0].SeqNum)
-		}
+			streamNacks, ok := i.nacks[stream]
+			if !ok {
+				streamNacks = make(map[uint64]struct{})
+				i.nacks[stream] = streamNacks
+			}
 
+			streamNacks[batch.Records[0].SeqNum] = struct{}{}
+		}()
+
+		// Send the batch again to be acknowledged.
 		select {
-		case i.restartWorker <- restartWorkerParams{
+		case i.inputStream <- recvOutput{
 			Stream: stream,
-			// Force a start sequence number so the cache doesn't affect where
-			// the worker restarts from.
-			StartSeqNum: startSeqNum,
-			Closer:      restartCloser,
+			Batch:  batch,
 		}:
-
-		// Since acks are tried even after the input has been "cancelled", we need to handle this
-		// case explicitly.
-		case <-i.streamsManagerCloser:
-			// Update the cache for next time explicitly.
-			if startSeqNum != nil {
-				if cErr := i.config.Cache.Set(ctx, stream, *startSeqNum); cErr != nil {
-					return cErr
-				}
-			}
-
-			return context.Canceled
-
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-
-		// Wait until restart.
-		select {
-		case <-restartCloser:
 			return nil
 
-		// Same as above.
+		// Ack functions can also be called during closures.
+		// Error if the input has closed.
 		case <-i.streamsManagerCloser:
-			if startSeqNum != nil {
-				if cErr := i.config.Cache.Set(ctx, stream, *startSeqNum); cErr != nil {
-					return cErr
-				}
-			}
-
 			return context.Canceled
 
 		case <-ctx.Done():
