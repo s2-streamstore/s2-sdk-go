@@ -10,6 +10,7 @@ import (
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/s2-streamstore/optr"
 	"github.com/s2-streamstore/s2-sdk-go/s2"
+	"github.com/tidwall/btree"
 )
 
 var (
@@ -124,7 +125,7 @@ type Input struct {
 	cache *seqNumCache
 
 	ackMu sync.Mutex
-	nacks map[string](map[uint64]struct{})
+	nacks map[string]*btree.Set[uint64]
 }
 
 func ConnectInput(ctx context.Context, config *InputConfig) (*Input, error) {
@@ -157,7 +158,7 @@ func ConnectInput(ctx context.Context, config *InputConfig) (*Input, error) {
 		streamsManagerCloser: streamsManagerCloser,
 		cancelSession:        cancelSession,
 		cache:                cache,
-		nacks:                make(map[string]map[uint64]struct{}),
+		nacks:                make(map[string]*btree.Set[uint64]),
 	}, nil
 }
 
@@ -428,11 +429,11 @@ func (i *Input) AckFunc(stream string, batch *s2.SequencedRecordBatch) func(cont
 				defer i.ackMu.Unlock()
 
 				streamNacks, ok := i.nacks[stream]
-				if ok && len(streamNacks) > 0 {
+				if ok && streamNacks.Len() > 0 {
 					// If smallest stream nack > this batch seq num:
 					// then -> we've already considered this acknowledged.
 					// else -> this message might have been received again or can be.
-					delete(streamNacks, batch.Records[0].SeqNum)
+					streamNacks.Delete(batch.Records[0].SeqNum)
 
 					return nil
 				}
@@ -444,18 +445,30 @@ func (i *Input) AckFunc(stream string, batch *s2.SequencedRecordBatch) func(cont
 			}()
 		}
 
-		func() {
+		if cErr := func() error {
 			i.ackMu.Lock()
 			defer i.ackMu.Unlock()
 
 			streamNacks, ok := i.nacks[stream]
 			if !ok {
-				streamNacks = make(map[uint64]struct{})
+				streamNacks = &btree.Set[uint64]{}
 				i.nacks[stream] = streamNacks
 			}
 
-			streamNacks[batch.Records[0].SeqNum] = struct{}{}
-		}()
+			nackSeqNum := batch.Records[0].SeqNum
+
+			streamNacks.Insert(nackSeqNum)
+
+			// Since it's already in the stream nacks, check if it's the minima.
+			if minSeqNum, ok := streamNacks.Min(); ok && minSeqNum == nackSeqNum {
+				// Update the cache since it's the minima.
+				return i.cache.Set(ctx, stream, nackSeqNum)
+			}
+
+			return nil
+		}(); cErr != nil {
+			return cErr
+		}
 
 		// Send the batch again to be acknowledged.
 		select {

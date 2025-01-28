@@ -7,6 +7,7 @@ require (
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/s2-streamstore/optr v1.0.0
 	github.com/stretchr/testify v1.10.0
+	github.com/tidwall/btree v1.7.0
 	google.golang.org/grpc v1.70.0
 	google.golang.org/protobuf v1.36.4
 )
