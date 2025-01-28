@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.3.0] - 2025-01-28
+
+### Features
+
+- Add `s2-bentobox` package ([#36](https://github.com/s2-streamstore/s2-sdk-go/issues/36))
+- *(bento)* Support configurable update list interval ([#38](https://github.com/s2-streamstore/s2-sdk-go/issues/38))
+
+### Bug Fixes
+
+- *(bento)* Handle acks without restarting the read session ([#39](https://github.com/s2-streamstore/s2-sdk-go/issues/39))
+
 ## [v0.2.1] - 2025-01-21
 
 ### Features
