@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.0] - 2025-01-29
+
+### Features
+
+- *(bento)* Simplify input plugin ([#41](https://github.com/s2-streamstore/s2-sdk-go/issues/41))
+
 ## [v0.3.0] - 2025-01-28
 
 ### Features
