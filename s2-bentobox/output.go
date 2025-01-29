@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync/atomic"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
 )
@@ -22,7 +23,9 @@ type OutputConfig struct {
 }
 
 type Output struct {
-	sendCh             chan<- sendInput
+	closed atomic.Bool
+	sendCh chan<- sendInput
+
 	ackStreamCloser    <-chan struct{}
 	appendWorkerCloser <-chan struct{}
 	cancelSession      context.CancelFunc
@@ -157,8 +160,9 @@ func (o *Output) WriteBatch(ctx context.Context, batch *s2.AppendRecordBatch) er
 }
 
 func (o *Output) Close(ctx context.Context) error {
-	// NOTE: This assumes the `Close` method is only called once.
-	close(o.sendCh)
+	if !o.closed.Load() {
+		close(o.sendCh)
+	}
 
 	// Cancel the session for abandoning the requests.
 	o.cancelSession()
