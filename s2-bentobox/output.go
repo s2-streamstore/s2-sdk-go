@@ -162,6 +162,7 @@ func (o *Output) WriteBatch(ctx context.Context, batch *s2.AppendRecordBatch) er
 func (o *Output) Close(ctx context.Context) error {
 	if !o.closed.Load() {
 		close(o.sendCh)
+		o.closed.Store(true)
 	}
 
 	// Cancel the session for abandoning the requests.

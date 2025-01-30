@@ -29,13 +29,20 @@ type batchAckStatus struct {
 }
 
 type toAckMap struct {
+	stream Stream
+	logger Logger
+
 	mu    sync.Mutex
 	inner *btree.Map[uint64, batchAckStatus]
+	cache *seqNumCache
 }
 
-func newToAckMap() *toAckMap {
+func newToAckMap(stream Stream, cache *seqNumCache, logger Logger) *toAckMap {
 	return &toAckMap{
-		inner: btree.NewMap[uint64, batchAckStatus](2),
+		stream: stream,
+		logger: logger,
+		inner:  btree.NewMap[uint64, batchAckStatus](2),
+		cache:  cache,
 	}
 }
 
@@ -58,16 +65,25 @@ func (tam *toAckMap) Add(batch *s2.SequencedRecordBatch) {
 }
 
 func (tam *toAckMap) Len() int {
-	return tam.inner.Len()
-}
-
-func (tam *toAckMap) MarkDone(seqNum uint64) (uint64, bool, error) {
 	tam.mu.Lock()
 	defer tam.mu.Unlock()
 
+	return tam.inner.Len()
+}
+
+func (tam *toAckMap) MarkDone(ctx context.Context, batch *s2.SequencedRecordBatch, updateCache bool) error {
+	if len(batch.Records) == 0 {
+		return nil
+	}
+
+	tam.mu.Lock()
+	defer tam.mu.Unlock()
+
+	seqNum := batch.Records[0].SeqNum
+
 	batchStatus, ok := tam.inner.Get(seqNum)
 	if !ok {
-		return 0, false, errCannotAckBatch
+		return errCannotAckBatch
 	}
 
 	batchStatus.Acked = true
@@ -84,8 +100,15 @@ func (tam *toAckMap) MarkDone(seqNum uint64) (uint64, bool, error) {
 			break
 		}
 
+		if isSet && value.FirstSeqNum != lastAckedBatch.LastSeqNum+1 {
+			// We only want to ack continuous batches. Ensures that everything
+			// has been received.
+			break
+		}
+
 		_, ackedBatch, ok := tam.inner.PopMin()
 		if !ok {
+			// Should not happen but let it be.
 			break
 		}
 
@@ -93,7 +116,14 @@ func (tam *toAckMap) MarkDone(seqNum uint64) (uint64, bool, error) {
 		lastAckedBatch = ackedBatch
 	}
 
-	return lastAckedBatch.LastSeqNum + 1, isSet, nil
+	if isSet && updateCache {
+		nextSeqNum := lastAckedBatch.LastSeqNum + 1
+		tam.logger.With("stream", tam.stream, "start_seq_num", nextSeqNum).Debug("Updating cached sequence number")
+
+		return tam.cache.Set(ctx, tam.stream, nextSeqNum)
+	}
+
+	return nil
 }
 
 type streamInput struct {
@@ -149,7 +179,7 @@ func connectStreamInput(
 		StreamCloser: streamCloser,
 		Cache:        cache,
 		CloseStream:  closeStream,
-		ToAck:        newToAckMap(),
+		ToAck:        newToAckMap(stream, cache, logger),
 		Nacks:        make(chan *s2.SequencedRecordBatch, maxInflight),
 	}, nil
 }
@@ -283,28 +313,17 @@ func (si *streamInput) nack(batch *s2.SequencedRecordBatch) error {
 }
 
 func (si *streamInput) ack(ctx context.Context, batch *s2.SequencedRecordBatch) error {
-	si.Logger.With("stream", si.Stream).Debug("Acknowledging batch")
+	withLog := []any{"stream", si.Stream}
 
-	// We can always ack a message. Helps in resolution.
-	batchSeqNum := batch.Records[0].SeqNum
-
-	nextSeqNum, ok, err := si.ToAck.MarkDone(batchSeqNum)
-	if err != nil {
-		return err
+	if len(batch.Records) > 0 {
+		firstSeqNum := batch.Records[0].SeqNum
+		lastSeqNum := batch.Records[len(batch.Records)-1].SeqNum
+		withLog = append(withLog, "range", fmt.Sprintf("%d..=%d", firstSeqNum, lastSeqNum))
 	}
 
-	if !ok || si.isClosed() {
-		return nil
-	}
+	si.Logger.With(withLog...).Debug("Acknowledging batch")
 
-	// We can update the cache to acknowledge.
-	si.Logger.With("stream", si.Stream, "start_seq_num", nextSeqNum).Debug("Updating cached sequence number")
-
-	if err := si.Cache.Set(ctx, si.Stream, nextSeqNum); err != nil {
-		return err
-	}
-
-	return nil
+	return si.ToAck.MarkDone(ctx, batch, !si.isClosed())
 }
 
 func (si *streamInput) Close(ctx context.Context) error {
