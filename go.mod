@@ -2,8 +2,6 @@ module github.com/s2-streamstore/s2-sdk-go
 
 go 1.22
 
-toolchain go1.23.4
-
 require (
 	github.com/google/uuid v1.6.0
 	github.com/orcaman/concurrent-map/v2 v2.0.1
