@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.5.0] - 2025-02-03
+
+### Miscellaneous Tasks
+
+- Update minimum Go version to 1.22 ([#45](https://github.com/s2-streamstore/s2-sdk-go/issues/45))
+
 ## [v0.4.1] - 2025-01-30
 
 ### Bug Fixes
