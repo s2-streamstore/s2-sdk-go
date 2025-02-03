@@ -1,11 +1,13 @@
 module github.com/s2-streamstore/s2-sdk-go
 
-go 1.23.4
+go 1.22
+
+toolchain go1.23.4
 
 require (
 	github.com/google/uuid v1.6.0
 	github.com/orcaman/concurrent-map/v2 v2.0.1
-	github.com/s2-streamstore/optr v1.0.0
+	github.com/s2-streamstore/optr v1.1.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/btree v1.7.0
 	google.golang.org/grpc v1.70.0

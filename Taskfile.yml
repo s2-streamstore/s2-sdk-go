@@ -52,6 +52,10 @@ tasks:
     cmds:
       - golangci-lint run --fix --issues-exit-code 0 &> /dev/null
 
+  gomod:
+    cmds:
+      - go mod tidy -go=1.22
+
   gen:
     deps:
       - gen:proto
