@@ -85,13 +85,14 @@ func newAppendRecordBatch(maxCapacity, maxBytes uint, records ...AppendRecord) (
 		meteredBytes uint
 	)
 
-	for i = range uint(len(records)) {
+	for range uint(len(records)) {
 		recordBytes := records[i].MeteredBytes()
 
 		if i >= maxCapacity || meteredBytes+recordBytes > maxBytes {
 			break
 		}
 
+		i++
 		meteredBytes += recordBytes
 	}
 
