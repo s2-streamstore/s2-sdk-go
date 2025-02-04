@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.5.1] - 2025-02-04
+
+### Bug Fixes
+
+- *(sdk)* Return empty leftovers when whole batch is valid ([#47](https://github.com/s2-streamstore/s2-sdk-go/issues/47))
+
 ## [v0.5.0] - 2025-02-03
 
 ### Miscellaneous Tasks
