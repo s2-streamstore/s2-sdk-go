@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/s2-streamstore/s2-sdk-go/internal/pb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/encoding/gzip"
 )
 
 type checkTailServiceRequest struct {
@@ -44,7 +46,7 @@ func (r *appendServiceRequest) Send(ctx context.Context) (*AppendOutput, error) 
 		Input: pbInput,
 	}
 
-	pbResp, err := r.Client.Append(ctx, req)
+	pbResp, err := r.Client.Append(ctx, req, grpc.UseCompressor(gzip.Name))
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +69,7 @@ func (r *appendSessionServiceRequest) IdempotencyLevel() idempotencyLevel {
 }
 
 func (r *appendSessionServiceRequest) Send(ctx context.Context) (*channel[*AppendInput, *AppendOutput], error) {
-	pbResp, err := r.Client.AppendSession(ctx)
+	pbResp, err := r.Client.AppendSession(ctx, grpc.UseCompressor(gzip.Name))
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +118,7 @@ func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
 		Limit:       limit,
 	}
 
-	pbResp, err := r.Client.Read(ctx, req)
+	pbResp, err := r.Client.Read(ctx, req, grpc.UseCompressor(gzip.Name))
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +148,7 @@ func (r *readSessionServiceRequest) Send(ctx context.Context) (Receiver[ReadOutp
 		Limit:       limit,
 	}
 
-	pbResp, err := r.Client.ReadSession(ctx, req)
+	pbResp, err := r.Client.ReadSession(ctx, req, grpc.UseCompressor(gzip.Name))
 	if err != nil {
 		return nil, err
 	}
