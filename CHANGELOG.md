@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.5.2] - 2025-02-06
+
+### Features
+
+- Enable GZIP compression ([#49](https://github.com/s2-streamstore/s2-sdk-go/issues/49))
+
 ## [v0.5.1] - 2025-02-04
 
 ### Bug Fixes
