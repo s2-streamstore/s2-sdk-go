@@ -197,8 +197,10 @@ func streamSource(
 		input, err := connectStreamInput(ctx, client, cache, logger, stream, maxInflight, inputStartSeqNum)
 		if err != nil {
 			logger.With("error", err, "stream", stream).Error("Failed to connect, retrying.")
+
 			jitter := time.Duration(rand.Int64N(int64(10 * time.Millisecond)))
 			backoff = time.After(backoffDuration + jitter)
+
 			continue
 		}
 

@@ -122,6 +122,7 @@ func appendWorker(
 			}
 
 			s.reply <- err
+
 			attemptsLeft--
 
 			continue

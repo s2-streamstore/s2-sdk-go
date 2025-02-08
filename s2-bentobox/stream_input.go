@@ -154,6 +154,7 @@ func connectStreamInput(
 	if err != nil {
 		if inputStartSeqNum == InputStartSeqNumLatest {
 			var tErr error
+
 			startSeqNum, tErr = streamClient.CheckTail(ctx)
 			if tErr != nil {
 				logger.With("stream", stream, "error", tErr).Warn("Cannot check tail")
