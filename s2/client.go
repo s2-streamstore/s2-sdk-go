@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"time"
@@ -465,7 +466,6 @@ type clientInner struct {
 }
 
 func newClientInner(config *clientConfig, basin string) (*clientInner, error) {
-	// TODO: Configure dial options
 	creds := credentials.NewTLS(&tls.Config{
 		MinVersion: tls.VersionTLS12, // Ensure HTTP/2 support
 	})
@@ -562,9 +562,10 @@ func sendRetryableInner[T any](
 
 		finalErr = err
 
+		jitter := time.Duration(rand.Int64N(int64(10 * time.Millisecond)))
+
 		select {
-		// TODO: Add jitter
-		case <-time.After(retryBackoffDuration):
+		case <-time.After(retryBackoffDuration + jitter):
 		case <-ctx.Done():
 			return v, ctx.Err()
 		}
@@ -619,9 +620,10 @@ func (r *readSessionReceiver) Recv() (ReadOutput, error) {
 
 		finalErr = err
 
+		jitter := time.Duration(rand.Int64N(int64(10 * time.Millisecond)))
+
 		select {
-		// TODO: Add jitter
-		case <-time.After(r.Client.Config.RetryBackoffDuration):
+		case <-time.After(r.Client.Config.RetryBackoffDuration + jitter):
 			newRecv, newErr := sendRetryable(r.ReqCtx, r.Client, r.ServiceReq)
 			if newErr != nil {
 				return nil, newErr

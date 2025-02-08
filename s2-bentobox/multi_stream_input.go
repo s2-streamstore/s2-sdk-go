@@ -3,6 +3,7 @@ package s2bentobox
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 	"time"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
@@ -73,6 +74,11 @@ func streamsManager(
 		updateStreamsInterval = config.UpdateStreamsInterval
 	}
 
+	backoffDuration := 100 * time.Millisecond
+	if config.BackoffDuration != 0 {
+		backoffDuration = config.BackoffDuration
+	}
+
 	updateList := make(chan struct{}, 1)
 	updateList <- struct{}{}
 
@@ -89,7 +95,18 @@ func streamsManager(
 		}
 		existingWorkers[stream] = worker
 
-		go streamSource(workerCtx, client, config.Logger, cache, stream, config.MaxInFlight, inputStream, workerCloser)
+		go streamSource(
+			workerCtx,
+			client,
+			config.Logger,
+			cache,
+			stream,
+			config.MaxInFlight,
+			backoffDuration,
+			config.StartSeqNum,
+			inputStream,
+			workerCloser,
+		)
 	}
 
 managerLoop:
@@ -157,22 +174,31 @@ func streamSource(
 	cache *seqNumCache,
 	stream string,
 	maxInflight int,
+	backoffDuration time.Duration,
+	inputStartSeqNum InputStartSeqNum,
 	inputStream chan<- recvOutput,
 	closer chan<- struct{},
 ) {
 	defer close(closer)
 
+	backoff := make(<-chan time.Time)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-backoff:
 		default:
 		}
 
-		input, err := connectStreamInput(ctx, client, cache, logger, stream, maxInflight)
+		// Never receive (reset)
+		backoff = make(<-chan time.Time)
+
+		input, err := connectStreamInput(ctx, client, cache, logger, stream, maxInflight, inputStartSeqNum)
 		if err != nil {
 			logger.With("error", err, "stream", stream).Error("Failed to connect, retrying.")
-			// TODO: Backoff
+			jitter := time.Duration(rand.Int64N(int64(10 * time.Millisecond)))
+			backoff = time.After(backoffDuration + jitter)
 			continue
 		}
 

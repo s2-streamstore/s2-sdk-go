@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
@@ -144,13 +145,25 @@ func connectStreamInput(
 	logger Logger,
 	stream string,
 	maxInflight int,
+	inputStartSeqNum InputStartSeqNum,
 ) (*streamInput, error) {
+	streamClient := client.StreamClient(stream)
+
 	// Try getting the sequence number from cache.
 	startSeqNum, err := cache.Get(ctx, stream)
 	if err != nil {
-		// We'll try to get the earliest available data.
-		// TODO: Make this configurable - earliest or latest.
-		startSeqNum = 0
+		if inputStartSeqNum == InputStartSeqNumLatest {
+			var tErr error
+			startSeqNum, tErr = streamClient.CheckTail(ctx)
+			if tErr != nil {
+				logger.With("stream", stream, "error", tErr).Warn("Cannot check tail")
+				// Set the start sequence number to max uint.
+				// Let the terminal message handle.
+				startSeqNum = math.MaxUint64
+			}
+		} else {
+			startSeqNum = 0
+		}
 	}
 
 	logger.With("stream", stream, "start_seq_num", startSeqNum).Debug("Starting to read")
@@ -158,7 +171,7 @@ func connectStreamInput(
 	// Open a read session.
 	streamCtx, closeStream := context.WithCancel(ctx)
 
-	receiver, err := client.StreamClient(stream).ReadSession(streamCtx, &s2.ReadSessionRequest{
+	receiver, err := streamClient.ReadSession(streamCtx, &s2.ReadSessionRequest{
 		StartSeqNum: startSeqNum,
 	})
 	if err != nil {
