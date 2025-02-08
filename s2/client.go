@@ -188,6 +188,17 @@ func WithMaxAttempts(n uint) ClientConfigParam {
 	})
 }
 
+// Configure compression for requests and response.
+//
+// Disabled by default.
+func WithCompression(c bool) ClientConfigParam {
+	return applyClientConfigParamFunc(func(cc *clientConfig) error {
+		cc.Compression = c
+
+		return nil
+	})
+}
+
 // Client for account-level operations.
 type Client struct {
 	inner *clientInner
@@ -373,9 +384,10 @@ func (s *StreamClient) checkTail(ctx context.Context) (uint64, error) {
 
 func (s *StreamClient) append(ctx context.Context, input *AppendInput) (*AppendOutput, error) {
 	r := appendServiceRequest{
-		Client: s.inner.StreamServiceClient(),
-		Stream: s.stream,
-		Input:  input,
+		Client:      s.inner.StreamServiceClient(),
+		Stream:      s.stream,
+		Input:       input,
+		Compression: s.inner.Config.Compression,
 	}
 
 	return sendRetryable(ctx, s.inner, &r)
@@ -383,8 +395,9 @@ func (s *StreamClient) append(ctx context.Context, input *AppendInput) (*AppendO
 
 func (s *StreamClient) appendSession(ctx context.Context) (Sender[*AppendInput], Receiver[*AppendOutput], error) {
 	r := appendSessionServiceRequest{
-		Client: s.inner.StreamServiceClient(),
-		Stream: s.stream,
+		Client:      s.inner.StreamServiceClient(),
+		Stream:      s.stream,
+		Compression: s.inner.Config.Compression,
 	}
 
 	channel, err := sendRetryable(ctx, s.inner, &r)
@@ -397,9 +410,10 @@ func (s *StreamClient) appendSession(ctx context.Context) (Sender[*AppendInput],
 
 func (s *StreamClient) read(ctx context.Context, req *ReadRequest) (ReadOutput, error) {
 	r := readServiceRequest{
-		Client: s.inner.StreamServiceClient(),
-		Stream: s.stream,
-		Req:    req,
+		Client:      s.inner.StreamServiceClient(),
+		Stream:      s.stream,
+		Req:         req,
+		Compression: s.inner.Config.Compression,
 	}
 
 	return sendRetryable(ctx, s.inner, &r)
@@ -407,9 +421,10 @@ func (s *StreamClient) read(ctx context.Context, req *ReadRequest) (ReadOutput, 
 
 func (s *StreamClient) readSession(ctx context.Context, req *ReadSessionRequest) (Receiver[ReadOutput], error) {
 	r := readSessionServiceRequest{
-		Client: s.inner.StreamServiceClient(),
-		Stream: s.stream,
-		Req:    req,
+		Client:      s.inner.StreamServiceClient(),
+		Stream:      s.stream,
+		Req:         req,
+		Compression: s.inner.Config.Compression,
 	}
 
 	recv, err := sendRetryable(ctx, s.inner, &r)
@@ -432,6 +447,7 @@ type clientConfig struct {
 	UserAgent            string
 	RetryBackoffDuration time.Duration
 	MaxAttempts          uint
+	Compression          bool
 }
 
 func newClientConfig(authToken string, params ...ClientConfigParam) (*clientConfig, error) {
@@ -447,6 +463,7 @@ func newClientConfig(authToken string, params ...ClientConfigParam) (*clientConf
 		UserAgent:            "s2-sdk-go",
 		RetryBackoffDuration: 100 * time.Millisecond,
 		MaxAttempts:          3,
+		Compression:          false,
 	}
 
 	for _, param := range params {
