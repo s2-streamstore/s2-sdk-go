@@ -53,7 +53,7 @@ func shouldRetry[T any](r serviceRequest[T], err error) bool {
 	}
 
 	switch statusErr.Code() {
-	case codes.Unavailable, codes.DeadlineExceeded, codes.Unknown:
+	case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled, codes.Unknown:
 		return true
 	default:
 		return false
