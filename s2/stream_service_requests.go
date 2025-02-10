@@ -31,9 +31,10 @@ func (r *checkTailServiceRequest) Send(ctx context.Context) (uint64, error) {
 }
 
 type appendServiceRequest struct {
-	Client pb.StreamServiceClient
-	Stream string
-	Input  *AppendInput
+	Client      pb.StreamServiceClient
+	Compression bool
+	Stream      string
+	Input       *AppendInput
 }
 
 func (r *appendServiceRequest) IdempotencyLevel() idempotencyLevel {
@@ -46,7 +47,12 @@ func (r *appendServiceRequest) Send(ctx context.Context) (*AppendOutput, error) 
 		Input: pbInput,
 	}
 
-	pbResp, err := r.Client.Append(ctx, req, grpc.UseCompressor(gzip.Name))
+	var callOpts []grpc.CallOption
+	if r.Compression {
+		callOpts = append(callOpts, grpc.UseCompressor(gzip.Name))
+	}
+
+	pbResp, err := r.Client.Append(ctx, req, callOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -60,8 +66,9 @@ type channel[S, R any] struct {
 }
 
 type appendSessionServiceRequest struct {
-	Client pb.StreamServiceClient
-	Stream string
+	Client      pb.StreamServiceClient
+	Stream      string
+	Compression bool
 }
 
 func (r *appendSessionServiceRequest) IdempotencyLevel() idempotencyLevel {
@@ -69,7 +76,12 @@ func (r *appendSessionServiceRequest) IdempotencyLevel() idempotencyLevel {
 }
 
 func (r *appendSessionServiceRequest) Send(ctx context.Context) (*channel[*AppendInput, *AppendOutput], error) {
-	pbResp, err := r.Client.AppendSession(ctx, grpc.UseCompressor(gzip.Name))
+	var callOpts []grpc.CallOption
+	if r.Compression {
+		callOpts = append(callOpts, grpc.UseCompressor(gzip.Name))
+	}
+
+	pbResp, err := r.Client.AppendSession(ctx, callOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -97,9 +109,10 @@ func (r *appendSessionServiceRequest) Send(ctx context.Context) (*channel[*Appen
 }
 
 type readServiceRequest struct {
-	Client pb.StreamServiceClient
-	Stream string
-	Req    *ReadRequest
+	Client      pb.StreamServiceClient
+	Stream      string
+	Req         *ReadRequest
+	Compression bool
 }
 
 func (r *readServiceRequest) IdempotencyLevel() idempotencyLevel {
@@ -118,7 +131,12 @@ func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
 		Limit:       limit,
 	}
 
-	pbResp, err := r.Client.Read(ctx, req, grpc.UseCompressor(gzip.Name))
+	var callOpts []grpc.CallOption
+	if r.Compression {
+		callOpts = append(callOpts, grpc.UseCompressor(gzip.Name))
+	}
+
+	pbResp, err := r.Client.Read(ctx, req, callOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -127,9 +145,10 @@ func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
 }
 
 type readSessionServiceRequest struct {
-	Client pb.StreamServiceClient
-	Stream string
-	Req    *ReadSessionRequest
+	Client      pb.StreamServiceClient
+	Stream      string
+	Req         *ReadSessionRequest
+	Compression bool
 }
 
 func (r *readSessionServiceRequest) IdempotencyLevel() idempotencyLevel {
@@ -148,7 +167,12 @@ func (r *readSessionServiceRequest) Send(ctx context.Context) (Receiver[ReadOutp
 		Limit:       limit,
 	}
 
-	pbResp, err := r.Client.ReadSession(ctx, req, grpc.UseCompressor(gzip.Name))
+	var callOpts []grpc.CallOption
+	if r.Compression {
+		callOpts = append(callOpts, grpc.UseCompressor(gzip.Name))
+	}
+
+	pbResp, err := r.Client.ReadSession(ctx, req, callOpts...)
 	if err != nil {
 		return nil, err
 	}
