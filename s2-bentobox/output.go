@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"sync/atomic"
+	"sync"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
 )
@@ -23,8 +23,9 @@ type OutputConfig struct {
 }
 
 type Output struct {
-	closed atomic.Bool
-	sendCh chan<- sendInput
+	closeMu sync.Mutex // Protect the channel senders
+	closed  bool
+	sendCh  chan<- sendInput
 
 	ackStreamCloser    <-chan struct{}
 	appendWorkerCloser <-chan struct{}
@@ -100,7 +101,14 @@ func appendWorker(
 		_ = sender.CloseSend()
 	}(sender)
 
+	attemptsLeft := 3
+
 	for s := range sendCh {
+		if attemptsLeft <= 0 {
+			// Exit the stream since we're getting too many send errors.
+			return
+		}
+
 		input := s2.AppendInput{
 			Records:      s.batch,
 			FencingToken: config.FencingToken,
@@ -113,8 +121,9 @@ func appendWorker(
 				return
 			}
 
-			// TODO: Add a retry limit here. This may keep on happening due to a connection error too.
 			s.reply <- err
+
+			attemptsLeft--
 
 			continue
 		}
@@ -160,10 +169,12 @@ func (o *Output) WriteBatch(ctx context.Context, batch *s2.AppendRecordBatch) er
 }
 
 func (o *Output) Close(ctx context.Context) error {
-	if !o.closed.Load() {
+	o.closeMu.Lock()
+	if !o.closed {
 		close(o.sendCh)
-		o.closed.Store(true)
+		o.closed = true
 	}
+	o.closeMu.Unlock()
 
 	// Cancel the session for abandoning the requests.
 	o.cancelSession()

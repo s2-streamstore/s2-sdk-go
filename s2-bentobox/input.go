@@ -101,6 +101,13 @@ func (p PrefixedInputStreams) list(ctx context.Context, client *s2.BasinClient) 
 	return streams, nil
 }
 
+type InputStartSeqNum uint
+
+const (
+	InputStartSeqNumEarliest InputStartSeqNum = iota
+	InputStartSeqNumLatest
+)
+
 type InputConfig struct {
 	*Config
 	Streams               InputStreams
@@ -108,6 +115,8 @@ type InputConfig struct {
 	UpdateStreamsInterval time.Duration
 	Cache                 SeqNumCache
 	Logger                Logger
+	BackoffDuration       time.Duration
+	StartSeqNum           InputStartSeqNum
 }
 
 type recvOutput struct {
