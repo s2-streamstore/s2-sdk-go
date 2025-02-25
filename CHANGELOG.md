@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.0] - 2025-02-25
+
+### Features
+
+- *(sdk)* Configurable compression parameter ([#52](https://github.com/s2-streamstore/s2-sdk-go/issues/52))
+- *(bento)* Configurable retry backoff and input start seq num ([#54](https://github.com/s2-streamstore/s2-sdk-go/issues/54))
+
+### Bug Fixes
+
+- *(sdk)* Retry `CANCELLED` gRPC status code ([#53](https://github.com/s2-streamstore/s2-sdk-go/issues/53))
+
 ## [v0.5.2] - 2025-02-06
 
 ### Features
