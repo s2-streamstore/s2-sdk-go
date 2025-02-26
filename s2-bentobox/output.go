@@ -98,7 +98,7 @@ func appendWorker(
 	defer close(appendWorkerCloser)
 	defer close(replyQ)
 	defer func(sender s2.Sender[*s2.AppendInput]) {
-		_ = sender.CloseSend()
+		_ = sender.Close()
 	}(sender)
 
 	attemptsLeft := 3

@@ -17,6 +17,10 @@ func (r *checkTailServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
+func (r *checkTailServiceRequest) IsStreaming() bool {
+	return false
+}
+
 func (r *checkTailServiceRequest) Send(ctx context.Context) (uint64, error) {
 	req := &pb.CheckTailRequest{
 		Stream: r.Stream,
@@ -39,6 +43,10 @@ type appendServiceRequest struct {
 
 func (r *appendServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelUnknown
+}
+
+func (r *appendServiceRequest) IsStreaming() bool {
+	return false
 }
 
 func (r *appendServiceRequest) Send(ctx context.Context) (*AppendOutput, error) {
@@ -73,6 +81,10 @@ type appendSessionServiceRequest struct {
 
 func (r *appendSessionServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelUnknown
+}
+
+func (r *appendSessionServiceRequest) IsStreaming() bool {
+	return true
 }
 
 func (r *appendSessionServiceRequest) Send(ctx context.Context) (*channel[*AppendInput, *AppendOutput], error) {
@@ -119,6 +131,10 @@ func (r *readServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
+func (r *readServiceRequest) IsStreaming() bool {
+	return false
+}
+
 func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
 	limit := &pb.ReadLimit{
 		Count: r.Req.Limit.Count,
@@ -153,6 +169,10 @@ type readSessionServiceRequest struct {
 
 func (r *readSessionServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
+}
+
+func (r *readSessionServiceRequest) IsStreaming() bool {
+	return true
 }
 
 func (r *readSessionServiceRequest) Send(ctx context.Context) (Receiver[ReadOutput], error) {

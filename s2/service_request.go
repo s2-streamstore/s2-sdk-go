@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -35,6 +36,7 @@ func (i idempotencyLevel) String() string {
 
 type serviceRequest[T any] interface {
 	IdempotencyLevel() idempotencyLevel
+	IsStreaming() bool
 	Send(ctx context.Context) (T, error)
 }
 
@@ -45,6 +47,11 @@ func shouldRetry[T any](r serviceRequest[T], err error) bool {
 
 	if !r.IdempotencyLevel().IsIdempotent() {
 		return false
+	}
+
+	// If the request timed-out, try again.
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
 	}
 
 	statusErr, ok := status.FromError(err)

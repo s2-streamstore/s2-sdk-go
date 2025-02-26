@@ -51,7 +51,7 @@ func (s *testAppendSessionSender) Send(input *AppendInput) error {
 	return nil
 }
 
-func (s *testAppendSessionSender) CloseSend() error {
+func (s *testAppendSessionSender) Close() error {
 	s.closed.Store(true)
 
 	return nil
@@ -101,7 +101,7 @@ func TestAppendRecordBatchingMechanics(t *testing.T) {
 					require.NoError(t, recordSender.Send(AppendRecord{Body: []byte(body)}))
 				}
 
-				require.NoError(t, recordSender.CloseSend())
+				require.NoError(t, recordSender.Close())
 
 				i := 0
 
@@ -180,7 +180,7 @@ func TestAppendRecordBatchingLinger(t *testing.T) {
 	sendNext("large string")
 	sendNext("")
 
-	require.NoError(t, recordSender.CloseSend())
+	require.NoError(t, recordSender.Close())
 
 	expectedBatches := [][]string{
 		{"r_0", "r_1"},
@@ -218,7 +218,7 @@ func TestAppendRecordBatchingErrorSizeLimits(t *testing.T) {
 	require.NoError(t, err)
 
 	require.ErrorIs(t, recordSender.Send(record), ErrRecordTooBig)
-	require.ErrorIs(t, recordSender.CloseSend(), ErrRecordTooBig)
+	require.ErrorIs(t, recordSender.Close(), ErrRecordTooBig)
 }
 
 func TestAppendRecordBatchingAppendInputOpts(t *testing.T) {
@@ -251,7 +251,7 @@ func TestAppendRecordBatchingAppendInputOpts(t *testing.T) {
 		require.NoError(t, recordSender.Send(record))
 	}
 
-	require.NoError(t, recordSender.CloseSend())
+	require.NoError(t, recordSender.Close())
 
 	batches := batchSender.Inputs(t)
 

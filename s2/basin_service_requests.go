@@ -19,6 +19,10 @@ func (r *listStreamsServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
+func (r *listStreamsServiceRequest) IsStreaming() bool {
+	return false
+}
+
 func (r *listStreamsServiceRequest) Send(ctx context.Context) (*ListStreamsResponse, error) {
 	req := &pb.ListStreamsRequest{
 		Prefix:     r.Req.Prefix,
@@ -54,6 +58,10 @@ func (r *createStreamServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelIdempotent
 }
 
+func (r *createStreamServiceRequest) IsStreaming() bool {
+	return false
+}
+
 func (r *createStreamServiceRequest) Send(ctx context.Context) (*StreamInfo, error) {
 	config, err := streamConfigIntoProto(r.Req.Config)
 	if err != nil {
@@ -86,6 +94,10 @@ func (r *deleteStreamServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelIdempotent
 }
 
+func (r *deleteStreamServiceRequest) IsStreaming() bool {
+	return false
+}
+
 func (r *deleteStreamServiceRequest) Send(ctx context.Context) (struct{}, error) {
 	req := &pb.DeleteStreamRequest{
 		Stream: r.Req.Stream,
@@ -111,6 +123,10 @@ type reconfigureStreamServiceRequest struct {
 
 func (r *reconfigureStreamServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelIdempotent
+}
+
+func (r *reconfigureStreamServiceRequest) IsStreaming() bool {
+	return false
 }
 
 func (r *reconfigureStreamServiceRequest) Send(ctx context.Context) (*StreamConfig, error) {
@@ -151,6 +167,10 @@ type getStreamConfigServiceRequest struct {
 
 func (r *getStreamConfigServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
+}
+
+func (r *getStreamConfigServiceRequest) IsStreaming() bool {
+	return false
 }
 
 func (r *getStreamConfigServiceRequest) Send(ctx context.Context) (*StreamConfig, error) {
