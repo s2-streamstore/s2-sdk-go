@@ -19,6 +19,10 @@ func (r *listBasinsServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
 }
 
+func (r *listBasinsServiceRequest) IsStreaming() bool {
+	return false
+}
+
 func (r *listBasinsServiceRequest) Send(ctx context.Context) (*ListBasinsResponse, error) {
 	req := &pb.ListBasinsRequest{
 		Prefix:     r.Req.Prefix,
@@ -57,6 +61,10 @@ type createBasinServiceRequest struct {
 
 func (r *createBasinServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelIdempotent
+}
+
+func (r *createBasinServiceRequest) IsStreaming() bool {
+	return false
 }
 
 func (r *createBasinServiceRequest) Send(ctx context.Context) (*BasinInfo, error) {
@@ -100,6 +108,10 @@ func (r *deleteBasinServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelIdempotent
 }
 
+func (r *deleteBasinServiceRequest) IsStreaming() bool {
+	return false
+}
+
 func (r *deleteBasinServiceRequest) Send(ctx context.Context) (struct{}, error) {
 	req := &pb.DeleteBasinRequest{
 		Basin: r.Req.Basin,
@@ -125,6 +137,10 @@ type reconfigureBasinServiceRequest struct {
 
 func (r *reconfigureBasinServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelIdempotent
+}
+
+func (r *reconfigureBasinServiceRequest) IsStreaming() bool {
+	return false
 }
 
 func (r *reconfigureBasinServiceRequest) Send(ctx context.Context) (*BasinConfig, error) {
@@ -165,6 +181,10 @@ type getBasinConfigRequest struct {
 
 func (r *getBasinConfigRequest) IdempotencyLevel() idempotencyLevel {
 	return idempotencyLevelNoSideEffects
+}
+
+func (r *getBasinConfigRequest) IsStreaming() bool {
+	return false
 }
 
 func (r *getBasinConfigRequest) Send(ctx context.Context) (*BasinConfig, error) {

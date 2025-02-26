@@ -22,7 +22,7 @@ func append(tx s2.Sender[*s2.AppendInput], tail uint64) error {
 	if err != nil {
 		return err
 	}
-	defer rtx.CloseSend()
+	defer rtx.Close()
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {

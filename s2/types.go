@@ -256,11 +256,13 @@ type Sender[T any] interface {
 	// Block until the item has been sent.
 	Send(T) error
 	// Close the sender.
-	CloseSend() error
+	Close() error
 }
 
 type recvInner[F, T any] struct {
-	Client    Receiver[*F]
+	Client interface {
+		Recv() (*F, error)
+	}
 	ConvertFn func(*F) (T, error)
 }
 
@@ -276,7 +278,10 @@ func (r recvInner[F, T]) Recv() (T, error) {
 }
 
 type sendInner[F, T any] struct {
-	Client    Sender[*T]
+	Client interface {
+		Send(*T) error
+		CloseSend() error
+	}
 	ConvertFn func(F) (*T, error)
 }
 
@@ -289,7 +294,7 @@ func (r sendInner[F, T]) Send(f F) error {
 	return r.Client.Send(t)
 }
 
-func (r sendInner[F, T]) CloseSend() error {
+func (r sendInner[F, T]) Close() error {
 	return r.Client.CloseSend()
 }
 

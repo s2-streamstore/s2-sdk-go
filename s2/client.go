@@ -445,6 +445,7 @@ type clientConfig struct {
 	AuthToken            string
 	Endpoints            *Endpoints
 	ConnectTimeout       time.Duration
+	RequestTimeout       time.Duration
 	UserAgent            string
 	RetryBackoffDuration time.Duration
 	MaxAttempts          uint
@@ -461,6 +462,7 @@ func newClientConfig(authToken string, params ...ClientConfigParam) (*clientConf
 		AuthToken:            authToken,
 		Endpoints:            EndpointsForCloud(CloudAWS),
 		ConnectTimeout:       3 * time.Second,
+		RequestTimeout:       5 * time.Second,
 		UserAgent:            "s2-sdk-go",
 		RetryBackoffDuration: 100 * time.Millisecond,
 		MaxAttempts:          3,
@@ -556,19 +558,33 @@ func sendRetryable[T any](ctx context.Context, c *clientInner, r serviceRequest[
 		ctx = ctxWithHeaders(ctx, "s2-basin", c.Basin)
 	}
 
-	return sendRetryableInner(ctx, r, c.Config.RetryBackoffDuration, c.Config.MaxAttempts)
+	return sendRetryableInner(ctx, r, c.Config.RequestTimeout, c.Config.RetryBackoffDuration, c.Config.MaxAttempts)
+}
+
+func sendAttempt[T any](ctx context.Context, r serviceRequest[T], requestTimeout time.Duration) (T, error) {
+	if !r.IsStreaming() {
+		// Only set the context timeout if the request isn't streaming.
+		// Otherwise the cancellation of request timeout exits the stream too.
+		attemptCtx, cancelAttempt := context.WithTimeout(ctx, requestTimeout)
+		defer cancelAttempt()
+
+		ctx = attemptCtx
+	}
+
+	return r.Send(ctx)
 }
 
 func sendRetryableInner[T any](
 	ctx context.Context,
 	r serviceRequest[T],
+	requestTimeout time.Duration,
 	retryBackoffDuration time.Duration,
 	maxRetryAttempts uint,
 ) (T, error) {
 	var finalErr error
 
 	for range maxRetryAttempts {
-		v, err := r.Send(ctx)
+		v, err := sendAttempt(ctx, r, requestTimeout)
 		if err == nil {
 			return v, nil
 		}

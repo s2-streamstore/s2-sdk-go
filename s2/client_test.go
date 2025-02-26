@@ -21,6 +21,10 @@ func (t *testRetryServiceRequest) IdempotencyLevel() idempotencyLevel {
 	return t.idLevel
 }
 
+func (t *testRetryServiceRequest) IsStreaming() bool {
+	return false
+}
+
 func (t *testRetryServiceRequest) Send(context.Context) (struct{}, error) {
 	t.attempts++
 	if t.attempts == 3 {
@@ -88,6 +92,16 @@ func TestSendRetryable(t *testing.T) {
 			sendErr:     status.Error(codes.InvalidArgument, "hello"),
 			shouldRetry: false,
 		},
+		{
+			idLevel:     idempotencyLevelUnknown,
+			sendErr:     context.DeadlineExceeded,
+			shouldRetry: false,
+		},
+		{
+			idLevel:     idempotencyLevelIdempotent,
+			sendErr:     context.DeadlineExceeded,
+			shouldRetry: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -98,7 +112,7 @@ func TestSendRetryable(t *testing.T) {
 					sendErr: tc.sendErr,
 				}
 
-				_, err := sendRetryableInner(context.TODO(), &r, 0, maxAttempts)
+				_, err := sendRetryableInner(context.TODO(), &r, 0, 0, maxAttempts)
 				if tc.shouldRetry && maxAttempts >= 3 {
 					require.NoError(t, err)
 				} else {
