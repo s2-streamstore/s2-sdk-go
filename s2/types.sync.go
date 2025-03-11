@@ -26,7 +26,7 @@ type BasinInfo struct {
 	Name string
 	// Basin scope.
 	Scope string
-	// Cell assignment.
+	// < Missing documentation for "BasinInfo.Cell" >
 	Cell string
 	// Basin state.
 	State BasinState
