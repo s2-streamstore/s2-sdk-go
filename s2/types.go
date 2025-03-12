@@ -25,6 +25,7 @@ const (
 // Type conversion errors.
 var (
 	ErrUnknownBasinState      = errors.New("unknown basin state")
+	ErrUnknownBasinScope      = errors.New("unknown basin scope")
 	ErrUnknownStorageClass    = errors.New("unknown storage class")
 	ErrUnknownRetentionPolicy = errors.New("unknown retention policy")
 	ErrUnknownReadOutput      = errors.New("unknown read output")
@@ -317,6 +318,39 @@ func (s StorageClass) String() string {
 	}
 }
 
+func (s BasinScope) String() string {
+	switch s {
+	case BasinScopeUnspecified:
+		return "unspecified"
+	case BasinScopeAwsUSEast1:
+		return "aws:us-east-1"
+	default:
+		return "<unknown basin scope>"
+	}
+}
+
+func basinScopeFromProto(pbScope pb.BasinScope) (BasinScope, error) {
+	switch pbScope {
+	case pb.BasinScope_BASIN_SCOPE_UNSPECIFIED:
+		return BasinScopeUnspecified, nil
+	case pb.BasinScope_BASIN_SCOPE_AWS_US_EAST_1:
+		return BasinScopeAwsUSEast1, nil
+	default:
+		return 0, fmt.Errorf("%w: %d", ErrUnknownBasinScope, pbScope)
+	}
+}
+
+func basinScopeIntoProto(scope BasinScope) (pb.BasinScope, error) {
+	switch scope {
+	case BasinScopeUnspecified:
+		return pb.BasinScope_BASIN_SCOPE_UNSPECIFIED, nil
+	case BasinScopeAwsUSEast1:
+		return pb.BasinScope_BASIN_SCOPE_AWS_US_EAST_1, nil
+	default:
+		return 0, fmt.Errorf("%w: %d", ErrUnknownBasinScope, scope)
+	}
+}
+
 func (s BasinState) String() string {
 	switch s {
 	case BasinStateUnspecified:
@@ -348,10 +382,14 @@ func basinInfoFromProto(pbInfo *pb.BasinInfo) (BasinInfo, error) {
 		return BasinInfo{}, fmt.Errorf("%w: %d", ErrUnknownBasinState, pbInfo.GetState())
 	}
 
+	scope, err := basinScopeFromProto(pbInfo.GetScope())
+	if err != nil {
+		return BasinInfo{}, err
+	}
+
 	return BasinInfo{
 		Name:  pbInfo.GetName(),
-		Scope: pbInfo.GetScope(),
-		Cell:  pbInfo.GetCell(),
+		Scope: scope,
 		State: state,
 	}, nil
 }
@@ -438,7 +476,8 @@ func basinConfigFromProto(pbConfig *pb.BasinConfig) (*BasinConfig, error) {
 	}
 
 	return &BasinConfig{
-		DefaultStreamConfig: defaultStreamConfig,
+		DefaultStreamConfig:  defaultStreamConfig,
+		CreateStreamOnAppend: pbConfig.GetCreateStreamOnAppend(),
 	}, nil
 }
 
@@ -453,6 +492,8 @@ func basinConfigIntoProto(config *BasinConfig) (*pb.BasinConfig, error) {
 			return nil, err
 		}
 	}
+
+	pbConfig.CreateStreamOnAppend = config.CreateStreamOnAppend
 
 	return pbConfig, nil
 }
@@ -496,7 +537,12 @@ func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) *SequencedR
 	}
 }
 
-func readOutputFromProto(pbOutput *pb.ReadOutput) (ReadOutput, error) {
+func readOutputFromProto(pbOutput *pb.ReadOutput, heartbeats bool) (ReadOutput, error) {
+	if heartbeats && pbOutput == nil {
+		// Heartbeat message.
+		return nil, nil
+	}
+
 	var output ReadOutput
 	switch o := pbOutput.GetOutput().(type) {
 	case *pb.ReadOutput_Batch:

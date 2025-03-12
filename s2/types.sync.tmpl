@@ -4,6 +4,16 @@ import (
 	"time"
 )
 
+// {{ syncDoc "BasinScope" }}
+type BasinScope uint
+
+const (
+	// {{ syncDocIndent "BasinScope_BASIN_SCOPE_UNSPECIFIED" }}
+	BasinScopeUnspecified BasinScope = iota
+	// {{ syncDocIndent "BasinScope_BASIN_SCOPE_AWS_US_EAST_1" }}
+	BasinScopeAwsUSEast1
+)
+
 // {{ syncDoc "BasinState" }}
 type BasinState uint
 
@@ -23,9 +33,7 @@ type BasinInfo struct {
 	// {{ syncDocIndent "BasinInfo.Name" }}
 	Name string
 	// {{ syncDocIndent "BasinInfo.Scope" }}
-	Scope string
-	// {{ syncDocIndent "BasinInfo.Cell" }}
-	Cell string
+	Scope BasinScope
 	// {{ syncDocIndent "BasinInfo.State" }}
 	State BasinState
 }
@@ -106,6 +114,8 @@ type StreamConfig struct {
 type BasinConfig struct {
 	// {{ syncDocIndent "BasinConfig.DefaultStreamConfig" }}
 	DefaultStreamConfig *StreamConfig
+	// {{ syncDocIndent "BasinConfig.CreateStreamOnAppend" }}
+	CreateStreamOnAppend bool
 }
 
 // {{ syncDoc "CreateBasinRequest" }}
@@ -114,7 +124,8 @@ type CreateBasinRequest struct {
 	Basin string
 	// {{ syncDocIndent "CreateBasinRequest.Config" }}
 	Config *BasinConfig
-	// TODO: Assignment when implemented
+	// {{ syncDocIndent "CreateBasinRequest.Scope" }}
+	Scope BasinScope
 }
 
 // {{ syncDoc "DeleteBasinRequest" }}

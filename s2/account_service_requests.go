@@ -79,9 +79,15 @@ func (r *createBasinServiceRequest) Send(ctx context.Context) (*BasinInfo, error
 		}
 	}
 
+	scope, err := basinScopeIntoProto(r.Req.Scope)
+	if err != nil {
+		return nil, err
+	}
+
 	req := &pb.CreateBasinRequest{
 		Basin:  r.Req.Basin,
 		Config: basinConfig,
+		Scope:  scope,
 	}
 
 	ctx = ctxWithHeaders(ctx, "s2-request-token", r.ReqID.String())

@@ -6,6 +6,16 @@ import (
 	"time"
 )
 
+// Basin scope.
+type BasinScope uint
+
+const (
+	// Unspecified basin scope.
+	BasinScopeUnspecified BasinScope = iota
+	// aws us-east-1 region.
+	BasinScopeAwsUSEast1
+)
+
 // Current state of the basin.
 type BasinState uint
 
@@ -25,9 +35,7 @@ type BasinInfo struct {
 	// Basin name.
 	Name string
 	// Basin scope.
-	Scope string
-	// < Missing documentation for "BasinInfo.Cell" >
-	Cell string
+	Scope BasinScope
 	// Basin state.
 	State BasinState
 }
@@ -114,6 +122,9 @@ type StreamConfig struct {
 type BasinConfig struct {
 	// Default stream configuration.
 	DefaultStreamConfig *StreamConfig
+	// Create stream on append if it doesn't exist,
+	// using the default stream configuration.
+	CreateStreamOnAppend bool
 }
 
 // Create basin request.
@@ -124,7 +135,8 @@ type CreateBasinRequest struct {
 	Basin string
 	// Basin configuration.
 	Config *BasinConfig
-	// TODO: Assignment when implemented
+	// Basin scope.
+	Scope BasinScope
 }
 
 // Delete basin request.

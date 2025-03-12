@@ -157,7 +157,7 @@ func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
 		return nil, err
 	}
 
-	return readOutputFromProto(pbResp.GetOutput())
+	return readOutputFromProto(pbResp.GetOutput() /* heartbeats = */, false)
 }
 
 type readSessionServiceRequest struct {
@@ -185,6 +185,7 @@ func (r *readSessionServiceRequest) Send(ctx context.Context) (Receiver[ReadOutp
 		Stream:      r.Stream,
 		StartSeqNum: r.Req.StartSeqNum,
 		Limit:       limit,
+		Heartbeats:  false,
 	}
 
 	var callOpts []grpc.CallOption
@@ -197,10 +198,36 @@ func (r *readSessionServiceRequest) Send(ctx context.Context) (Receiver[ReadOutp
 		return nil, err
 	}
 
-	return recvInner[pb.ReadSessionResponse, ReadOutput]{
+	var recv Receiver[ReadOutput] = recvInner[pb.ReadSessionResponse, ReadOutput]{
 		Client: pbResp,
 		ConvertFn: func(rsr *pb.ReadSessionResponse) (ReadOutput, error) {
-			return readOutputFromProto(rsr.GetOutput())
+			return readOutputFromProto(rsr.GetOutput() /* heartbeats = */, req.Heartbeats)
 		},
-	}, nil
+	}
+
+	if req.Heartbeats {
+		recv = heartbeatReadRecv{inner: recv}
+	}
+
+	return recv, nil
+}
+
+type heartbeatReadRecv struct {
+	inner Receiver[ReadOutput]
+}
+
+func (r heartbeatReadRecv) Recv() (ReadOutput, error) {
+	for {
+		oput, err := r.inner.Recv()
+		if err != nil {
+			return nil, err
+		}
+
+		if oput == nil {
+			// TODO: Handle heartbeat messages.
+			continue
+		}
+
+		return oput, nil
+	}
 }
