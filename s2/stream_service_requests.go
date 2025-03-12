@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"errors"
 
 	"github.com/s2-streamstore/s2-sdk-go/internal/pb"
 	"google.golang.org/grpc"
@@ -220,12 +221,12 @@ func (r heartbeatReadRecv) Recv() (ReadOutput, error) {
 	for {
 		oput, err := r.inner.Recv()
 		if err != nil {
-			return nil, err
-		}
+			if errors.Is(err, errHeartbeatMessage) {
+				// TODO: Handle heartbeat message.
+				continue
+			}
 
-		if oput == nil {
-			// TODO: Handle heartbeat messages.
-			continue
+			return nil, err
 		}
 
 		return oput, nil

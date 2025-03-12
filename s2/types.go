@@ -20,6 +20,8 @@ const (
 	MaxBatchBytes = mibBytes
 	// Maximum number of records that a batch can hold.
 	MaxBatchRecords = 1000
+
+	unspecifiedEnumVariant = "unspecified"
 )
 
 // Type conversion errors.
@@ -29,6 +31,9 @@ var (
 	ErrUnknownStorageClass    = errors.New("unknown storage class")
 	ErrUnknownRetentionPolicy = errors.New("unknown retention policy")
 	ErrUnknownReadOutput      = errors.New("unknown read output")
+
+	// Sentinel error to signify a heartbeat message.
+	errHeartbeatMessage = errors.New("heartbeat")
 )
 
 // Metered size of the object in bytes.
@@ -308,7 +313,7 @@ func (a RetentionPolicyAge) implRetentionPolicy() {}
 func (s StorageClass) String() string {
 	switch s {
 	case StorageClassUnspecified:
-		return "unspecified"
+		return unspecifiedEnumVariant
 	case StorageClassStandard:
 		return "standard"
 	case StorageClassExpress:
@@ -321,7 +326,7 @@ func (s StorageClass) String() string {
 func (s BasinScope) String() string {
 	switch s {
 	case BasinScopeUnspecified:
-		return "unspecified"
+		return unspecifiedEnumVariant
 	case BasinScopeAwsUSEast1:
 		return "aws:us-east-1"
 	default:
@@ -354,7 +359,7 @@ func basinScopeIntoProto(scope BasinScope) (pb.BasinScope, error) {
 func (s BasinState) String() string {
 	switch s {
 	case BasinStateUnspecified:
-		return "unspecified"
+		return unspecifiedEnumVariant
 	case BasinStateActive:
 		return "active"
 	case BasinStateCreating:
@@ -540,7 +545,7 @@ func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) *SequencedR
 func readOutputFromProto(pbOutput *pb.ReadOutput, heartbeats bool) (ReadOutput, error) {
 	if heartbeats && pbOutput == nil {
 		// Heartbeat message.
-		return nil, nil
+		return nil, errHeartbeatMessage
 	}
 
 	var output ReadOutput
