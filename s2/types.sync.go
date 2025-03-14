@@ -26,7 +26,7 @@ type BasinInfo struct {
 	Name string
 	// Basin scope.
 	Scope string
-	// Cell assignment.
+	// < Missing documentation for "BasinInfo.Cell" >
 	Cell string
 	// Basin state.
 	State BasinState
@@ -202,7 +202,7 @@ type Header struct {
 
 // Record retrieved from a stream.
 type SequencedRecord struct {
-	// Sequence number for this record.
+	// Sequence number assigned to this record.
 	SeqNum uint64
 	// Series of name-value pairs for this record.
 	Headers []Header
