@@ -436,8 +436,9 @@ func streamConfigFromProto(pbConfig *pb.StreamConfig) (*StreamConfig, error) {
 	}
 
 	return &StreamConfig{
-		StorageClass:    storageClass,
-		RetentionPolicy: retentionPolicy,
+		StorageClass:            storageClass,
+		RetentionPolicy:         retentionPolicy,
+		RequireClientTimestamps: pbConfig.GetRequireClientTimestamps(),
 	}, nil
 }
 
@@ -463,6 +464,8 @@ func streamConfigIntoProto(config *StreamConfig) (*pb.StreamConfig, error) {
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnknownRetentionPolicy, r)
 	}
+
+	pbConfig.RequireClientTimestamps = optr.Some(config.RequireClientTimestamps)
 
 	return pbConfig, nil
 }
@@ -522,10 +525,13 @@ func sequencedRecordFromProto(pbRecord *pb.SequencedRecord) SequencedRecord {
 		headers = append(headers, headerFromProto(h))
 	}
 
+	timestamp := time.Unix(int64(pbRecord.GetTimestamp()), 0)
+
 	return SequencedRecord{
-		SeqNum:  pbRecord.GetSeqNum(),
-		Headers: headers,
-		Body:    pbRecord.GetBody(),
+		SeqNum:    pbRecord.GetSeqNum(),
+		Timestamp: timestamp,
+		Headers:   headers,
+		Body:      pbRecord.GetBody(),
 	}
 }
 
@@ -542,8 +548,8 @@ func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) *SequencedR
 	}
 }
 
-func readOutputFromProto(pbOutput *pb.ReadOutput, heartbeats bool) (ReadOutput, error) {
-	if heartbeats && pbOutput == nil {
+func readOutputFromProto(pbOutput *pb.ReadOutput, acceptHeartbeats bool) (ReadOutput, error) {
+	if acceptHeartbeats && pbOutput.GetOutput() == nil {
 		// Heartbeat message.
 		return nil, errHeartbeatMessage
 	}
@@ -578,9 +584,14 @@ func appendRecordIntoProto(record *AppendRecord) *pb.AppendRecord {
 		headers = append(headers, headerIntoProto(h))
 	}
 
+	timestamp := optr.Map(record.Timestamp, func(t time.Time) uint64 {
+		return uint64(t.Unix())
+	})
+
 	return &pb.AppendRecord{
-		Headers: headers,
-		Body:    record.Body,
+		Timestamp: timestamp,
+		Headers:   headers,
+		Body:      record.Body,
 	}
 }
 

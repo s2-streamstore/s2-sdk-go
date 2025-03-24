@@ -108,6 +108,8 @@ type StreamConfig struct {
 	// Valid types for RetentionPolicy are:
 	// 	- `RetentionPolicyAge`
 	RetentionPolicy implRetentionPolicy
+	// {{ syncDocIndent "StreamConfig.RequireClientTimestamps" }}
+	RequireClientTimestamps bool
 }
 
 // {{ syncDoc "BasinConfig" }}
@@ -200,6 +202,8 @@ type Header struct {
 type SequencedRecord struct {
 	// {{ syncDocIndent "SequencedRecord.SeqNum" }}
 	SeqNum uint64
+	// {{ syncDocIndent "SequencedRecord.Timestamp" }}
+	Timestamp time.Time
 	// {{ syncDocIndent "SequencedRecord.Headers" }}
 	Headers []Header
 	// {{ syncDocIndent "SequencedRecord.Body" }}
@@ -235,6 +239,8 @@ type ReadOutput interface {
 
 // {{ syncDoc "AppendRecord" }}
 type AppendRecord struct {
+	// {{ syncDocIndent "AppendRecord.Timestamp" }}
+	Timestamp *time.Time
 	// {{ syncDocIndent "AppendRecord.Headers" }}
 	Headers []Header
 	// {{ syncDocIndent "AppendRecord.Body" }}

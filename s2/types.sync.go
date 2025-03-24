@@ -116,6 +116,10 @@ type StreamConfig struct {
 	// Valid types for RetentionPolicy are:
 	// 	- `RetentionPolicyAge`
 	RetentionPolicy implRetentionPolicy
+	// Controls how to handle timestamps when they are not provided by the client.
+	// If this is false (or not set), the record's arrival time will be assigned as its timestamp.
+	// If this is true, then any append without a client-specified timestamp will be rejected as invalid.
+	RequireClientTimestamps bool
 }
 
 // Basin configuration.
@@ -214,8 +218,10 @@ type Header struct {
 
 // Record retrieved from a stream.
 type SequencedRecord struct {
-	// Sequence number for this record.
+	// Sequence number assigned to this record.
 	SeqNum uint64
+	// Timestamp for this record in milliseconds since Unix epoch.
+	Timestamp time.Time
 	// Series of name-value pairs for this record.
 	Headers []Header
 	// Body of this record.
@@ -256,6 +262,11 @@ type ReadOutput interface {
 
 // Record to be appended to a stream.
 type AppendRecord struct {
+	// Timestamp for this record in milliseconds since Unix epoch.
+	// The service ensures monotonicity by adjusting it up if necessary to the maximum observed timestamp.
+	// A timestamp detected to be in the future will be adjusted down.
+	// If not provided, the semantics depend on the stream's `require_client_timestamps` config.
+	Timestamp *time.Time
 	// Series of name-value pairs for this record.
 	Headers []Header
 	// Body of this record.
