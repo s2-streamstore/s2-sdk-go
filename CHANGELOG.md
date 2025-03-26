@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.7.0] - 2025-03-26
+
+### Features
+
+- Implement request timeout ([#56](https://github.com/s2-streamstore/s2-sdk-go/issues/56))
+
+### Miscellaneous Tasks
+
+- *(sdk)* Proto update ([#60](https://github.com/s2-streamstore/s2-sdk-go/issues/60))
+
 ## [v0.6.0] - 2025-02-25
 
 ### Features
