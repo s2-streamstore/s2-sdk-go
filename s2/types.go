@@ -20,14 +20,20 @@ const (
 	MaxBatchBytes = mibBytes
 	// Maximum number of records that a batch can hold.
 	MaxBatchRecords = 1000
+
+	unspecifiedEnumVariant = "unspecified"
 )
 
 // Type conversion errors.
 var (
 	ErrUnknownBasinState      = errors.New("unknown basin state")
+	ErrUnknownBasinScope      = errors.New("unknown basin scope")
 	ErrUnknownStorageClass    = errors.New("unknown storage class")
 	ErrUnknownRetentionPolicy = errors.New("unknown retention policy")
 	ErrUnknownReadOutput      = errors.New("unknown read output")
+
+	// Sentinel error to signify a heartbeat message.
+	errHeartbeatMessage = errors.New("heartbeat")
 )
 
 // Metered size of the object in bytes.
@@ -307,7 +313,7 @@ func (a RetentionPolicyAge) implRetentionPolicy() {}
 func (s StorageClass) String() string {
 	switch s {
 	case StorageClassUnspecified:
-		return "unspecified"
+		return unspecifiedEnumVariant
 	case StorageClassStandard:
 		return "standard"
 	case StorageClassExpress:
@@ -317,10 +323,43 @@ func (s StorageClass) String() string {
 	}
 }
 
+func (s BasinScope) String() string {
+	switch s {
+	case BasinScopeUnspecified:
+		return unspecifiedEnumVariant
+	case BasinScopeAwsUSEast1:
+		return "aws:us-east-1"
+	default:
+		return "<unknown basin scope>"
+	}
+}
+
+func basinScopeFromProto(pbScope pb.BasinScope) (BasinScope, error) {
+	switch pbScope {
+	case pb.BasinScope_BASIN_SCOPE_UNSPECIFIED:
+		return BasinScopeUnspecified, nil
+	case pb.BasinScope_BASIN_SCOPE_AWS_US_EAST_1:
+		return BasinScopeAwsUSEast1, nil
+	default:
+		return 0, fmt.Errorf("%w: %d", ErrUnknownBasinScope, pbScope)
+	}
+}
+
+func basinScopeIntoProto(scope BasinScope) (pb.BasinScope, error) {
+	switch scope {
+	case BasinScopeUnspecified:
+		return pb.BasinScope_BASIN_SCOPE_UNSPECIFIED, nil
+	case BasinScopeAwsUSEast1:
+		return pb.BasinScope_BASIN_SCOPE_AWS_US_EAST_1, nil
+	default:
+		return 0, fmt.Errorf("%w: %d", ErrUnknownBasinScope, scope)
+	}
+}
+
 func (s BasinState) String() string {
 	switch s {
 	case BasinStateUnspecified:
-		return "unspecified"
+		return unspecifiedEnumVariant
 	case BasinStateActive:
 		return "active"
 	case BasinStateCreating:
@@ -348,10 +387,14 @@ func basinInfoFromProto(pbInfo *pb.BasinInfo) (BasinInfo, error) {
 		return BasinInfo{}, fmt.Errorf("%w: %d", ErrUnknownBasinState, pbInfo.GetState())
 	}
 
+	scope, err := basinScopeFromProto(pbInfo.GetScope())
+	if err != nil {
+		return BasinInfo{}, err
+	}
+
 	return BasinInfo{
 		Name:  pbInfo.GetName(),
-		Scope: pbInfo.GetScope(),
-		Cell:  pbInfo.GetCell(),
+		Scope: scope,
 		State: state,
 	}, nil
 }
@@ -393,8 +436,9 @@ func streamConfigFromProto(pbConfig *pb.StreamConfig) (*StreamConfig, error) {
 	}
 
 	return &StreamConfig{
-		StorageClass:    storageClass,
-		RetentionPolicy: retentionPolicy,
+		StorageClass:            storageClass,
+		RetentionPolicy:         retentionPolicy,
+		RequireClientTimestamps: pbConfig.GetRequireClientTimestamps(),
 	}, nil
 }
 
@@ -421,6 +465,8 @@ func streamConfigIntoProto(config *StreamConfig) (*pb.StreamConfig, error) {
 		return nil, fmt.Errorf("%w: %T", ErrUnknownRetentionPolicy, r)
 	}
 
+	pbConfig.RequireClientTimestamps = optr.Some(config.RequireClientTimestamps)
+
 	return pbConfig, nil
 }
 
@@ -438,7 +484,8 @@ func basinConfigFromProto(pbConfig *pb.BasinConfig) (*BasinConfig, error) {
 	}
 
 	return &BasinConfig{
-		DefaultStreamConfig: defaultStreamConfig,
+		DefaultStreamConfig:  defaultStreamConfig,
+		CreateStreamOnAppend: pbConfig.GetCreateStreamOnAppend(),
 	}, nil
 }
 
@@ -453,6 +500,8 @@ func basinConfigIntoProto(config *BasinConfig) (*pb.BasinConfig, error) {
 			return nil, err
 		}
 	}
+
+	pbConfig.CreateStreamOnAppend = config.CreateStreamOnAppend
 
 	return pbConfig, nil
 }
@@ -476,10 +525,13 @@ func sequencedRecordFromProto(pbRecord *pb.SequencedRecord) SequencedRecord {
 		headers = append(headers, headerFromProto(h))
 	}
 
+	timestamp := time.Unix(int64(pbRecord.GetTimestamp()), 0)
+
 	return SequencedRecord{
-		SeqNum:  pbRecord.GetSeqNum(),
-		Headers: headers,
-		Body:    pbRecord.GetBody(),
+		SeqNum:    pbRecord.GetSeqNum(),
+		Timestamp: timestamp,
+		Headers:   headers,
+		Body:      pbRecord.GetBody(),
 	}
 }
 
@@ -496,7 +548,12 @@ func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) *SequencedR
 	}
 }
 
-func readOutputFromProto(pbOutput *pb.ReadOutput) (ReadOutput, error) {
+func readOutputFromProto(pbOutput *pb.ReadOutput, acceptHeartbeats bool) (ReadOutput, error) {
+	if acceptHeartbeats && pbOutput.GetOutput() == nil {
+		// Heartbeat message.
+		return nil, errHeartbeatMessage
+	}
+
 	var output ReadOutput
 	switch o := pbOutput.GetOutput().(type) {
 	case *pb.ReadOutput_Batch:
@@ -527,9 +584,14 @@ func appendRecordIntoProto(record *AppendRecord) *pb.AppendRecord {
 		headers = append(headers, headerIntoProto(h))
 	}
 
+	timestamp := optr.Map(record.Timestamp, func(t time.Time) uint64 {
+		return uint64(t.Unix())
+	})
+
 	return &pb.AppendRecord{
-		Headers: headers,
-		Body:    record.Body,
+		Timestamp: timestamp,
+		Headers:   headers,
+		Body:      record.Body,
 	}
 }
 
