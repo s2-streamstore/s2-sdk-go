@@ -235,19 +235,19 @@ type SequencedRecordBatch struct {
 }
 
 // Batch of records.
-// This batch can be empty only if a `ReadLimit` was provided in the associated read request, but the first record
-// that could have been returned would violate the limit.
+// This batch can be empty only if a limit was specified in the associated read request,
+// and either the first record that could have been retrieved would violate the limit,
+// or the requested `start_seq_num` is the `next_seq_num` for the stream.
 type ReadOutputBatch struct {
 	*SequencedRecordBatch
 }
 
-// Sequence number for the first record on this stream, in case the requested `start_seq_num` is smaller.
-// If returned in a streaming read session, this will be a terminal reply, to signal that there is uncertainty about whether some records may be omitted.
-// The client can re-establish the session starting at this sequence number.
+// Sequence number for the first record on this stream,
+// in case the requested `start_seq_num` was smaller.
 type ReadOutputFirstSeqNum uint64
 
-// Sequence number for the next record on this stream, in case the requested `start_seq_num` was larger.
-// If returned in a streaming read session, this will be a terminal reply.
+// Sequence number for the next record on this stream,
+// in case the requested `start_seq_num` was larger.
 type ReadOutputNextSeqNum uint64
 
 // Output from read response.
