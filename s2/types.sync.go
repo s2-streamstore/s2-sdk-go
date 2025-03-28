@@ -203,7 +203,9 @@ type ReadLimit struct {
 type ReadRequest struct {
 	// Starting sequence number (inclusive).
 	StartSeqNum uint64
-	// Limit on how many records can be returned upto a maximum of 1000, or 1MiB of metered bytes.
+	// Limit how many records can be returned.
+	// This will get capped at the default limit,
+	// which is up to 1000 records or 1MiB of metered bytes.
 	Limit ReadLimit
 }
 
@@ -235,19 +237,20 @@ type SequencedRecordBatch struct {
 }
 
 // Batch of records.
-// This batch can be empty only if a `ReadLimit` was provided in the associated read request, but the first record
-// that could have been returned would violate the limit.
+// It can only be empty when not in a session context (which implies a limit),
+// if the first record that could have been retrieved would violate the limit.
 type ReadOutputBatch struct {
 	*SequencedRecordBatch
 }
 
-// Sequence number for the first record on this stream, in case the requested `start_seq_num` is smaller.
-// If returned in a streaming read session, this will be a terminal reply, to signal that there is uncertainty about whether some records may be omitted.
-// The client can re-establish the session starting at this sequence number.
+// Sequence number for the first record on this stream.
+// Typically this will be returned when the requested `start_seq_num` was smaller.
+// It may also be returned during a session, if the stream gets concurrently trimmed.
 type ReadOutputFirstSeqNum uint64
 
-// Sequence number for the next record on this stream, in case the requested `start_seq_num` was larger.
-// If returned in a streaming read session, this will be a terminal reply.
+// Sequence number that will be assigned to the next record on this stream.
+// This will be returned either because the requested `start_seq_num` was larger,
+// or in case of a limited read, equal to it.
 type ReadOutputNextSeqNum uint64
 
 // Output from read response.
