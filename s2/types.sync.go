@@ -191,6 +191,7 @@ type ReconfigureStreamRequest struct {
 	Mask []string
 }
 
+// Limit how many records can be retrieved.
 // If both count and bytes are specified, either limit may be hit.
 type ReadLimit struct {
 	// Record count limit.
@@ -203,7 +204,9 @@ type ReadLimit struct {
 type ReadRequest struct {
 	// Starting sequence number (inclusive).
 	StartSeqNum uint64
-	// Limit on how many records can be returned upto a maximum of 1000, or 1MiB of metered bytes.
+	// Limit how many records can be returned.
+	// This will get capped at the default limit,
+	// which is up to 1000 records or 1MiB of metered bytes.
 	Limit ReadLimit
 }
 
@@ -235,22 +238,23 @@ type SequencedRecordBatch struct {
 }
 
 // Batch of records.
-// This batch can be empty only if a `ReadLimit` was provided in the associated read request, but the first record
-// that could have been returned would violate the limit.
+// It can only be empty outside of a session context,
+// if the request cannot be satisfied without violating its limit.
 type ReadOutputBatch struct {
 	*SequencedRecordBatch
 }
 
-// Sequence number for the first record on this stream, in case the requested `start_seq_num` is smaller.
-// If returned in a streaming read session, this will be a terminal reply, to signal that there is uncertainty about whether some records may be omitted.
-// The client can re-establish the session starting at this sequence number.
+// < Missing documentation for "ReadOutput_FirstSeqNum.FirstSeqNum" >
 type ReadOutputFirstSeqNum uint64
 
-// Sequence number for the next record on this stream, in case the requested `start_seq_num` was larger.
-// If returned in a streaming read session, this will be a terminal reply.
+// Tail of the stream, i.e. sequence number that will be assigned to the next record.
+// It will primarily be returned either because the requested starting point was larger,
+// or only in case of a limited read, equal to the tail.
+// It will also be returned if there are no records on the stream between the requested
+// starting point and the tail.
 type ReadOutputNextSeqNum uint64
 
-// Output from read response.
+// Output of a read.
 //
 // Valid types for ReadOutput are:
 //   - `ReadOutputBatch`
