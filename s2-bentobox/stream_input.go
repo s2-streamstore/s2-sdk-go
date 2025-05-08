@@ -163,7 +163,7 @@ func connectStreamInput(
 		start = s2.ReadStartSeqNum(startSeqNum)
 	}
 
-	logger.With("stream", stream, "start_seq_num", startSeqNum).Debug("Starting to read")
+	logger.With("stream", stream, "start", start.String()).Debug("Starting to read")
 
 	// Open a read session.
 	streamCtx, closeStream := context.WithCancel(ctx)
@@ -284,7 +284,6 @@ func (si *streamInput) ReadBatch(ctx context.Context) (*s2.SequencedRecordBatch,
 	// that will be received once. It's safe to update the next sequence number
 	// in the cache here since no other routine will have anything to ack any
 	// records from this stream.
-
 	case s2.ReadOutputNextSeqNum:
 		startSeqNum = uint64(output)
 	}

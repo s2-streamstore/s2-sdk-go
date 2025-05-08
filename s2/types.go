@@ -548,9 +548,23 @@ func basinConfigIntoProto(config *BasinConfig) (*pb.BasinConfig, error) {
 func (ReadOutputBatch) implReadOutput()      {}
 func (ReadOutputNextSeqNum) implReadOutput() {}
 
-func (ReadStartSeqNum) implReadStart()     {}
-func (ReadStartTimestamp) implReadStart()  {}
+func (ReadStartSeqNum) implReadStart() {}
+
+func (r ReadStartSeqNum) String() string {
+	return fmt.Sprintf("SeqNum(%d)", uint64(r))
+}
+
+func (ReadStartTimestamp) implReadStart() {}
+
+func (r ReadStartTimestamp) String() string {
+	return fmt.Sprintf("Timestamp(%d)", uint64(r))
+}
+
 func (ReadStartTailOffset) implReadStart() {}
+
+func (r ReadStartTailOffset) String() string {
+	return fmt.Sprintf("TailOffset(%d)", uint64(r))
+}
 
 func headerFromProto(pbHeader *pb.Header) Header {
 	return Header{

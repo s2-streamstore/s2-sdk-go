@@ -3,6 +3,7 @@
 package s2
 
 import (
+    "fmt"
 	"time"
 )
 
@@ -310,6 +311,7 @@ type ReadStartTailOffset uint64
 //   - `ReadStartTailOffset`
 type ReadStart interface {
     implReadStart()
+    fmt.Stringer
 }
 
 // Record to be appended to a stream.

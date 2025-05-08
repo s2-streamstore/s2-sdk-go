@@ -238,8 +238,6 @@ func ExampleCommandRecordTrim() {
 		panic(err)
 	}
 
-	// FIXME: REDO this!
-
 	tail, err := streamClient.CheckTail(context.TODO())
 	if err != nil {
 		panic(err)
