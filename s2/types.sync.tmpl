@@ -99,6 +99,33 @@ const (
 // {{ syncDoc "StreamConfig_Age.Age" }}
 type RetentionPolicyAge time.Duration
 
+// {{ syncDoc "TimestampingMode" }}
+type TimestampingMode uint
+
+const (
+    // {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_UNSPECIFIED" }}
+    TimestampingModeUnspecified TimestampingMode = iota
+    // {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_CLIENT_PREFER" }}
+    TimestampingModeClientPrefer
+    // {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_CLIENT_REQUIRE" }}
+    TimestampingModeClientRequire
+    // {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_ARRIVAL" }}
+    TimestampingModeClientArrival
+)
+
+// {{ syncDoc "StreamConfig.Timestamping" }}
+type Timestamping struct {
+    // {{ syncDocIndent "StreamConfig_Timestamping.Mode" }}
+    Mode TimestampingMode
+    // {{ syncDocIndent "StreamConfig_Timestamping.Uncapped" }}
+    Uncapped *bool
+}
+
+// {{ syncDoc "StreamConfig.RetentionPolicy" }}
+type RetentionPolicy interface {
+	implRetentionPolicy()
+}
+
 // {{ syncDoc "StreamConfig" }}
 type StreamConfig struct {
 	// {{ syncDocIndent "StreamConfig.StorageClass" }}
@@ -107,9 +134,9 @@ type StreamConfig struct {
 	//
 	// Valid types for RetentionPolicy are:
 	// 	- `RetentionPolicyAge`
-	RetentionPolicy implRetentionPolicy
-	// {{ syncDocIndent "StreamConfig.RequireClientTimestamps" }}
-	RequireClientTimestamps bool
+	RetentionPolicy RetentionPolicy
+	// {{ syncDocIndent "StreamConfig.Timestamping" }}
+	Timestamping *Timestamping
 }
 
 // {{ syncDoc "BasinConfig" }}
@@ -118,6 +145,8 @@ type BasinConfig struct {
 	DefaultStreamConfig *StreamConfig
 	// {{ syncDocIndent "BasinConfig.CreateStreamOnAppend" }}
 	CreateStreamOnAppend bool
+	// {{ syncDocIndent "BasinConfig.CreateStreamOnRead" }}
+	CreateStreamOnRead bool
 }
 
 // {{ syncDoc "CreateBasinRequest" }}
@@ -184,8 +213,8 @@ type ReadLimit struct {
 
 // {{ syncDoc "ReadRequest" }}
 type ReadRequest struct {
-	// {{ syncDocIndent "ReadRequest.StartSeqNum" }}
-	StartSeqNum uint64
+	// {{ syncDocIndent "ReadRequest.Start" }}
+	Start ReadStart
 	// {{ syncDocIndent "ReadRequest.Limit" }}
 	Limit ReadLimit
 }
@@ -203,7 +232,7 @@ type SequencedRecord struct {
 	// {{ syncDocIndent "SequencedRecord.SeqNum" }}
 	SeqNum uint64
 	// {{ syncDocIndent "SequencedRecord.Timestamp" }}
-	Timestamp time.Time
+	Timestamp uint64
 	// {{ syncDocIndent "SequencedRecord.Headers" }}
 	Headers []Header
 	// {{ syncDocIndent "SequencedRecord.Body" }}
@@ -221,9 +250,6 @@ type ReadOutputBatch struct {
 	*SequencedRecordBatch
 }
 
-// {{ syncDoc "ReadOutput_FirstSeqNum.FirstSeqNum" }}
-type ReadOutputFirstSeqNum uint64
-
 // {{ syncDoc "ReadOutput_NextSeqNum.NextSeqNum" }}
 type ReadOutputNextSeqNum uint64
 
@@ -231,16 +257,34 @@ type ReadOutputNextSeqNum uint64
 //
 // Valid types for ReadOutput are:
 //   - `ReadOutputBatch`
-//   - `ReadOutputFirstSeqNum`
 //   - `ReadOutputNextSeqNum`
 type ReadOutput interface {
 	implReadOutput()
 }
 
+// {{ syncDoc "ReadRequest_SeqNum.SeqNum" }}
+type ReadStartSeqNum uint64
+
+// {{ syncDoc "ReadRequest_Timestamp.Timestamp" }}
+type ReadStartTimestamp uint64
+
+// {{ syncDoc "ReadRequest_TailOffset.TailOffset" }}
+type ReadStartTailOffset uint64
+
+// {{ syncDoc "ReadRequest.Start" }}
+//
+// Valid types for ReadStart are:
+//   - `ReadStartSeqNum`
+//   - `ReadStartTimestamp`
+//   - `ReadStartTailOffset`
+type ReadStart interface {
+    implReadStart()
+}
+
 // {{ syncDoc "AppendRecord" }}
 type AppendRecord struct {
 	// {{ syncDocIndent "AppendRecord.Timestamp" }}
-	Timestamp *time.Time
+	Timestamp *uint64
 	// {{ syncDocIndent "AppendRecord.Headers" }}
 	Headers []Header
 	// {{ syncDocIndent "AppendRecord.Body" }}
@@ -261,16 +305,30 @@ type AppendInput struct {
 type AppendOutput struct {
 	// {{ syncDocIndent "AppendOutput.StartSeqNum" }}
 	StartSeqNum uint64
-	// {{ syncDocIndent "AppendOutput.NextSeqNum" }}
-	NextSeqNum uint64
+	// {{ syncDocIndent "AppendOutput.StartTimestamp" }}
+	StartTimestamp uint64
 	// {{ syncDocIndent "AppendOutput.EndSeqNum" }}
 	EndSeqNum uint64
+	// {{ syncDocIndent "AppendOutput.EndTimestamp" }}
+	EndTimestamp uint64
+	// {{ syncDocIndent "AppendOutput.NextSeqNum" }}
+	NextSeqNum uint64
+	// {{ syncDocIndent "AppendOutput.LastTimestamp" }}
+	LastTimestamp uint64
 }
 
 // {{ syncDoc "ReadSessionRequest" }}
 type ReadSessionRequest struct {
-	// {{ syncDocIndent "ReadSessionRequest.StartSeqNum" }}
-	StartSeqNum uint64
+	// {{ syncDocIndent "ReadSessionRequest.Start" }}
+	Start ReadStart
 	// {{ syncDocIndent "ReadSessionRequest.Limit" }}
 	Limit ReadLimit
+}
+
+// {{ syncDoc "CheckTailResponse" }}
+type CheckTailResponse struct {
+    // {{ syncDocIndent "CheckTailResponse.NextSeqNum" }}
+    NextSeqNum uint64
+    // {{ syncDocIndent "CheckTailResponse.LastTimestamp" }}
+    LastTimestamp uint64
 }

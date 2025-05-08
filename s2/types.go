@@ -26,11 +26,12 @@ const (
 
 // Type conversion errors.
 var (
-	ErrUnknownBasinState      = errors.New("unknown basin state")
-	ErrUnknownBasinScope      = errors.New("unknown basin scope")
-	ErrUnknownStorageClass    = errors.New("unknown storage class")
-	ErrUnknownRetentionPolicy = errors.New("unknown retention policy")
-	ErrUnknownReadOutput      = errors.New("unknown read output")
+	ErrUnknownBasinState       = errors.New("unknown basin state")
+	ErrUnknownBasinScope       = errors.New("unknown basin scope")
+	ErrUnknownStorageClass     = errors.New("unknown storage class")
+	ErrUnknownTimestampingMode = errors.New("unknown timestamping mode")
+	ErrUnknownRetentionPolicy  = errors.New("unknown retention policy")
+	ErrUnknownReadOutput       = errors.New("unknown read output")
 
 	// Sentinel error to signify a heartbeat message.
 	errHeartbeatMessage = errors.New("heartbeat")
@@ -304,10 +305,6 @@ func (r sendInner[F, T]) Close() error {
 	return r.Client.CloseSend()
 }
 
-type implRetentionPolicy interface {
-	implRetentionPolicy()
-}
-
 func (a RetentionPolicyAge) implRetentionPolicy() {}
 
 func (s StorageClass) String() string {
@@ -425,7 +422,7 @@ func streamConfigFromProto(pbConfig *pb.StreamConfig) (*StreamConfig, error) {
 		return nil, fmt.Errorf("%w: %d", ErrUnknownStorageClass, pbConfig.GetStorageClass())
 	}
 
-	var retentionPolicy implRetentionPolicy
+	var retentionPolicy RetentionPolicy
 	switch r := pbConfig.GetRetentionPolicy().(type) {
 	case *pb.StreamConfig_Age:
 		retentionPolicy = RetentionPolicyAge(r.Age * uint64(time.Second))
@@ -435,10 +432,32 @@ func streamConfigFromProto(pbConfig *pb.StreamConfig) (*StreamConfig, error) {
 		return nil, fmt.Errorf("%w: %T", ErrUnknownRetentionPolicy, r)
 	}
 
+	pbTimestamping := pbConfig.GetTimestamping()
+
+	var timestampingMode TimestampingMode
+
+	switch pbTimestamping.GetMode() {
+	case pb.TimestampingMode_TIMESTAMPING_MODE_UNSPECIFIED:
+		timestampingMode = TimestampingModeUnspecified
+	case pb.TimestampingMode_TIMESTAMPING_MODE_CLIENT_PREFER:
+		timestampingMode = TimestampingModeClientPrefer
+	case pb.TimestampingMode_TIMESTAMPING_MODE_CLIENT_REQUIRE:
+		timestampingMode = TimestampingModeClientRequire
+	case pb.TimestampingMode_TIMESTAMPING_MODE_ARRIVAL:
+		timestampingMode = TimestampingModeClientArrival
+	default:
+		return nil, fmt.Errorf("%w: %d", ErrUnknownTimestampingMode, pbTimestamping.GetMode())
+	}
+
+	timestamping := &Timestamping{
+		Mode:     timestampingMode,
+		Uncapped: pbTimestamping.Uncapped,
+	}
+
 	return &StreamConfig{
-		StorageClass:            storageClass,
-		RetentionPolicy:         retentionPolicy,
-		RequireClientTimestamps: pbConfig.GetRequireClientTimestamps(),
+		StorageClass:    storageClass,
+		RetentionPolicy: retentionPolicy,
+		Timestamping:    timestamping,
 	}, nil
 }
 
@@ -465,7 +484,25 @@ func streamConfigIntoProto(config *StreamConfig) (*pb.StreamConfig, error) {
 		return nil, fmt.Errorf("%w: %T", ErrUnknownRetentionPolicy, r)
 	}
 
-	pbConfig.RequireClientTimestamps = optr.Some(config.RequireClientTimestamps)
+	var timestampingMode pb.TimestampingMode
+
+	switch config.Timestamping.Mode {
+	case TimestampingModeUnspecified:
+		timestampingMode = pb.TimestampingMode_TIMESTAMPING_MODE_UNSPECIFIED
+	case TimestampingModeClientPrefer:
+		timestampingMode = pb.TimestampingMode_TIMESTAMPING_MODE_CLIENT_PREFER
+	case TimestampingModeClientRequire:
+		timestampingMode = pb.TimestampingMode_TIMESTAMPING_MODE_CLIENT_REQUIRE
+	case TimestampingModeClientArrival:
+		timestampingMode = pb.TimestampingMode_TIMESTAMPING_MODE_ARRIVAL
+	default:
+		return nil, fmt.Errorf("%w: %d", ErrUnknownTimestampingMode, config.Timestamping.Mode)
+	}
+
+	pbConfig.Timestamping = &pb.StreamConfig_Timestamping{
+		Mode:     timestampingMode,
+		Uncapped: config.Timestamping.Uncapped,
+	}
 
 	return pbConfig, nil
 }
@@ -486,6 +523,7 @@ func basinConfigFromProto(pbConfig *pb.BasinConfig) (*BasinConfig, error) {
 	return &BasinConfig{
 		DefaultStreamConfig:  defaultStreamConfig,
 		CreateStreamOnAppend: pbConfig.GetCreateStreamOnAppend(),
+		CreateStreamOnRead:   pbConfig.GetCreateStreamOnRead(),
 	}, nil
 }
 
@@ -502,13 +540,17 @@ func basinConfigIntoProto(config *BasinConfig) (*pb.BasinConfig, error) {
 	}
 
 	pbConfig.CreateStreamOnAppend = config.CreateStreamOnAppend
+	pbConfig.CreateStreamOnRead = config.CreateStreamOnRead
 
 	return pbConfig, nil
 }
 
-func (b ReadOutputBatch) implReadOutput()       {}
-func (f ReadOutputFirstSeqNum) implReadOutput() {}
-func (n ReadOutputNextSeqNum) implReadOutput()  {}
+func (ReadOutputBatch) implReadOutput()      {}
+func (ReadOutputNextSeqNum) implReadOutput() {}
+
+func (ReadStartSeqNum) implReadStart()     {}
+func (ReadStartTimestamp) implReadStart()  {}
+func (ReadStartTailOffset) implReadStart() {}
 
 func headerFromProto(pbHeader *pb.Header) Header {
 	return Header{
@@ -525,11 +567,9 @@ func sequencedRecordFromProto(pbRecord *pb.SequencedRecord) SequencedRecord {
 		headers = append(headers, headerFromProto(h))
 	}
 
-	timestamp := time.Unix(int64(pbRecord.GetTimestamp()), 0)
-
 	return SequencedRecord{
 		SeqNum:    pbRecord.GetSeqNum(),
-		Timestamp: timestamp,
+		Timestamp: pbRecord.GetTimestamp(),
 		Headers:   headers,
 		Body:      pbRecord.GetBody(),
 	}
@@ -560,8 +600,6 @@ func readOutputFromProto(pbOutput *pb.ReadOutput, acceptHeartbeats bool) (ReadOu
 		output = ReadOutputBatch{
 			SequencedRecordBatch: sequencedRecordBatchFromProto(o.Batch),
 		}
-	case *pb.ReadOutput_FirstSeqNum:
-		output = ReadOutputFirstSeqNum(o.FirstSeqNum)
 	case *pb.ReadOutput_NextSeqNum:
 		output = ReadOutputNextSeqNum(o.NextSeqNum)
 	default:
@@ -584,12 +622,8 @@ func appendRecordIntoProto(record *AppendRecord) *pb.AppendRecord {
 		headers = append(headers, headerIntoProto(h))
 	}
 
-	timestamp := optr.Map(record.Timestamp, func(t time.Time) uint64 {
-		return uint64(t.Unix())
-	})
-
 	return &pb.AppendRecord{
-		Timestamp: timestamp,
+		Timestamp: record.Timestamp,
 		Headers:   headers,
 		Body:      record.Body,
 	}
@@ -613,8 +647,11 @@ func appendInputIntoProto(stream string, input *AppendInput) *pb.AppendInput {
 
 func appendOutputFromProto(pbOutput *pb.AppendOutput) *AppendOutput {
 	return &AppendOutput{
-		StartSeqNum: pbOutput.GetStartSeqNum(),
-		NextSeqNum:  pbOutput.GetNextSeqNum(),
-		EndSeqNum:   pbOutput.GetEndSeqNum(),
+		StartSeqNum:    pbOutput.GetStartSeqNum(),
+		StartTimestamp: pbOutput.GetStartTimestamp(),
+		EndSeqNum:      pbOutput.GetEndSeqNum(),
+		EndTimestamp:   pbOutput.GetEndTimestamp(),
+		NextSeqNum:     pbOutput.GetNextSeqNum(),
+		LastTimestamp:  pbOutput.GetLastTimestamp(),
 	}
 }

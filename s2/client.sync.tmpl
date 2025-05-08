@@ -55,7 +55,7 @@ func (b *BasinClient) GetStreamConfig(ctx context.Context, basin string) (*Strea
 }
 
 // {{ syncDoc "StreamServiceClient.CheckTail" }}
-func (s *StreamClient) CheckTail(ctx context.Context) (uint64, error) {
+func (s *StreamClient) CheckTail(ctx context.Context) (*CheckTailResponse, error) {
 	return s.checkTail(ctx)
 }
 

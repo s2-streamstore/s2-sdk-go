@@ -22,17 +22,20 @@ func (r *checkTailServiceRequest) IsStreaming() bool {
 	return false
 }
 
-func (r *checkTailServiceRequest) Send(ctx context.Context) (uint64, error) {
+func (r *checkTailServiceRequest) Send(ctx context.Context) (*CheckTailResponse, error) {
 	req := &pb.CheckTailRequest{
 		Stream: r.Stream,
 	}
 
 	pbResp, err := r.Client.CheckTail(ctx, req)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	return pbResp.GetNextSeqNum(), nil
+	return &CheckTailResponse{
+		NextSeqNum:    pbResp.GetNextSeqNum(),
+		LastTimestamp: pbResp.GetLastTimestamp(),
+	}, nil
 }
 
 type appendServiceRequest struct {
@@ -143,9 +146,25 @@ func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
 	}
 
 	req := &pb.ReadRequest{
-		Stream:      r.Stream,
-		StartSeqNum: r.Req.StartSeqNum,
-		Limit:       limit,
+		Stream: r.Stream,
+		Limit:  limit,
+	}
+
+	switch s := r.Req.Start.(type) {
+	case ReadStartSeqNum:
+		req.Start = &pb.ReadRequest_SeqNum{
+			SeqNum: uint64(s),
+		}
+
+	case ReadStartTimestamp:
+		req.Start = &pb.ReadRequest_Timestamp{
+			Timestamp: uint64(s),
+		}
+
+	case ReadStartTailOffset:
+		req.Start = &pb.ReadRequest_TailOffset{
+			TailOffset: uint64(s),
+		}
 	}
 
 	var callOpts []grpc.CallOption
@@ -183,10 +202,26 @@ func (r *readSessionServiceRequest) Send(ctx context.Context) (Receiver[ReadOutp
 	}
 
 	req := &pb.ReadSessionRequest{
-		Stream:      r.Stream,
-		StartSeqNum: r.Req.StartSeqNum,
-		Limit:       limit,
-		Heartbeats:  false,
+		Stream:     r.Stream,
+		Limit:      limit,
+		Heartbeats: false,
+	}
+
+	switch s := r.Req.Start.(type) {
+	case ReadStartSeqNum:
+		req.Start = &pb.ReadSessionRequest_SeqNum{
+			SeqNum: uint64(s),
+		}
+
+	case ReadStartTimestamp:
+		req.Start = &pb.ReadSessionRequest_Timestamp{
+			Timestamp: uint64(s),
+		}
+
+	case ReadStartTailOffset:
+		req.Start = &pb.ReadSessionRequest_TailOffset{
+			TailOffset: uint64(s),
+		}
 	}
 
 	var callOpts []grpc.CallOption

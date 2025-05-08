@@ -374,7 +374,7 @@ func NewStreamClient(basin, stream, authToken string, params ...ClientConfigPara
 	return basinClient.StreamClient(stream), nil
 }
 
-func (s *StreamClient) checkTail(ctx context.Context) (uint64, error) {
+func (s *StreamClient) checkTail(ctx context.Context) (*CheckTailResponse, error) {
 	r := checkTailServiceRequest{
 		Client: s.inner.StreamServiceClient(),
 		Stream: s.stream,
@@ -623,7 +623,7 @@ func (r *readSessionReceiver) Recv() (ReadOutput, error) {
 		next, err := r.RecvInner.Recv()
 		if err == nil {
 			if batch, ok := next.(ReadOutputBatch); ok && len(batch.Records) > 0 {
-				r.ServiceReq.Req.StartSeqNum = 1 + batch.Records[len(batch.Records)-1].SeqNum
+				r.ServiceReq.Req.Start = ReadStartSeqNum(1 + batch.Records[len(batch.Records)-1].SeqNum)
 
 				r.ServiceReq.Req.Limit.Bytes = optr.Map(r.ServiceReq.Req.Limit.Bytes, func(b uint64) uint64 {
 					batchBytes := uint64(batch.SequencedRecordBatch.MeteredBytes())
