@@ -36,13 +36,13 @@ jobs:
           submodules: true
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: "1.23"
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
       - uses: arduino/setup-protoc@v3
         with:
-          version: 29.x
+          version: 30.2
       - name: Setup protoc
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -63,13 +63,13 @@ jobs:
           submodules: true
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: "1.23"
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
       - uses: arduino/setup-protoc@v3
         with:
-          version: 29.x
+          version: 30.2
       - name: Setup protoc
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -86,7 +86,7 @@ jobs:
           submodules: true
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: "1.23"
       - name: Lint
         uses: golangci/golangci-lint-action@v6
         with:
@@ -101,13 +101,13 @@ jobs:
           submodules: true
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: "1.23"
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
       - uses: arduino/setup-protoc@v3
         with:
-          version: 29.x
+          version: 30.2
       - name: Setup protoc
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest

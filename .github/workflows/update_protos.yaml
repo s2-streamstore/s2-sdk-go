@@ -13,11 +13,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - uses: actions/checkout@v4
         with:
           submodules: true
-      
+
       - name: Update Submodules
         id: submodules
         uses: sgoudham/update-git-submodules@v2.1.1
@@ -25,13 +24,13 @@ jobs:
           submodules: proto
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: "1.23"
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
       - uses: arduino/setup-protoc@v3
         with:
-          version: 29.x
+          version: 30.2
       - name: Setup protoc
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest

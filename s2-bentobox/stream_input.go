@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
@@ -149,31 +148,28 @@ func connectStreamInput(
 ) (*streamInput, error) {
 	streamClient := client.StreamClient(stream)
 
+	var start s2.ReadStart
+
 	// Try getting the sequence number from cache.
 	startSeqNum, err := cache.Get(ctx, stream)
 	if err != nil {
 		if inputStartSeqNum == InputStartSeqNumLatest {
-			var tErr error
-
-			startSeqNum, tErr = streamClient.CheckTail(ctx)
-			if tErr != nil {
-				logger.With("stream", stream, "error", tErr).Warn("Cannot check tail")
-				// Set the start sequence number to max uint.
-				// Let the terminal message handle.
-				startSeqNum = math.MaxUint64
-			}
+			start = s2.ReadStartTailOffset(0)
 		} else {
-			startSeqNum = 0
+			start = s2.ReadStartSeqNum(0)
 		}
+	} else {
+		// Cache found!
+		start = s2.ReadStartSeqNum(startSeqNum)
 	}
 
-	logger.With("stream", stream, "start_seq_num", startSeqNum).Debug("Starting to read")
+	logger.With("stream", stream, "start", start.String()).Debug("Starting to read")
 
 	// Open a read session.
 	streamCtx, closeStream := context.WithCancel(ctx)
 
 	receiver, err := streamClient.ReadSession(streamCtx, &s2.ReadSessionRequest{
-		StartSeqNum: startSeqNum,
+		Start: start,
 	})
 	if err != nil {
 		closeStream()
@@ -288,10 +284,6 @@ func (si *streamInput) ReadBatch(ctx context.Context) (*s2.SequencedRecordBatch,
 	// that will be received once. It's safe to update the next sequence number
 	// in the cache here since no other routine will have anything to ack any
 	// records from this stream.
-
-	case s2.ReadOutputFirstSeqNum:
-		startSeqNum = uint64(output)
-
 	case s2.ReadOutputNextSeqNum:
 		startSeqNum = uint64(output)
 	}

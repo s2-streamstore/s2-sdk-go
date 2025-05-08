@@ -91,7 +91,7 @@ func run(ctx context.Context) error {
 	}
 
 	recRx, err := client.ReadSession(ctx, &s2.ReadSessionRequest{
-		StartSeqNum: tail,
+		Start: s2.ReadStartSeqNum(tail.NextSeqNum),
 	})
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func run(ctx context.Context) error {
 	}
 
 	go func() {
-		if err := append(appTx, tail); err != nil {
+		if err := append(appTx, tail.NextSeqNum); err != nil {
 			fmt.Fprintln(os.Stderr, "Append Error:", err)
 			os.Exit(1)
 		}

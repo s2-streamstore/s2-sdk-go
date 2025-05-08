@@ -3,6 +3,7 @@
 package s2
 
 import (
+    "fmt"
 	"time"
 )
 
@@ -94,7 +95,7 @@ type ListStreamsResponse struct {
 type StorageClass uint
 
 const (
-	// Unspecified, which is currently overridden to `STORAGE_CLASS_EXPRESS`.
+	// Defaults to `STORAGE_CLASS_EXPRESS`.
 	StorageClassUnspecified StorageClass = iota
 	// Standard, which offers end-to-end latencies under 500 ms.
 	StorageClassStandard
@@ -106,20 +107,48 @@ const (
 // If set to 0, the stream will have infinite retention.
 type RetentionPolicyAge time.Duration
 
+// Timestamping mode.
+// Note that arrival time is always in milliseconds since Unix epoch.
+type TimestampingMode uint
+
+const (
+    // Defaults to `TIMESTAMPING_MODE_CLIENT_PREFER`.
+    TimestampingModeUnspecified TimestampingMode = iota
+    // Prefer client-specified timestamp if present otherwise use arrival time.
+    TimestampingModeClientPrefer
+    // Require a client-specified timestamp and reject the append if it is missing.
+    TimestampingModeClientRequire
+    // Use the arrival time and ignore any client-specified timestamp.
+    TimestampingModeClientArrival
+)
+
+// Timestamping behavior.
+type Timestamping struct {
+    // Timestamping mode for appends that influences how timestamps are handled.
+    Mode TimestampingMode
+    // Allow client-specified timestamps to exceed the arrival time.
+	// If this is false or not set, client timestamps will be capped at the arrival time.
+    Uncapped *bool
+}
+
+// Retention policy for the stream.
+// If unspecified, the default is to retain records for 7 days.
+type RetentionPolicy interface {
+	implRetentionPolicy()
+}
+
 // Stream configuration.
 type StreamConfig struct {
-	// Storage class for recent writes. This is the main cost:performance knob in S2.
+	// Storage class for recent writes.
 	StorageClass StorageClass
 	// Retention policy for the stream.
 	// If unspecified, the default is to retain records for 7 days.
 	//
 	// Valid types for RetentionPolicy are:
 	// 	- `RetentionPolicyAge`
-	RetentionPolicy implRetentionPolicy
-	// Controls how to handle timestamps when they are not provided by the client.
-	// If this is false (or not set), the record's arrival time will be assigned as its timestamp.
-	// If this is true, then any append without a client-specified timestamp will be rejected as invalid.
-	RequireClientTimestamps bool
+	RetentionPolicy RetentionPolicy
+	// Timestamping behavior.
+	Timestamping *Timestamping
 }
 
 // Basin configuration.
@@ -129,11 +158,14 @@ type BasinConfig struct {
 	// Create stream on append if it doesn't exist,
 	// using the default stream configuration.
 	CreateStreamOnAppend bool
+	// Create stream on read if it doesn't exist,
+	// using the default stream configuration.
+	CreateStreamOnRead bool
 }
 
 // Create basin request.
 type CreateBasinRequest struct {
-	// Basin name, which must be globally unique. It can be omitted to let the service assign a unique name.
+	// Basin name, which must be globally unique.
 	// The name must be between 8 and 48 characters, comprising lowercase letters, numbers and hyphens.
 	// It cannot begin or end with a hyphen.
 	Basin string
@@ -191,6 +223,7 @@ type ReconfigureStreamRequest struct {
 	Mask []string
 }
 
+// Limit how many records can be retrieved.
 // If both count and bytes are specified, either limit may be hit.
 type ReadLimit struct {
 	// Record count limit.
@@ -201,9 +234,12 @@ type ReadLimit struct {
 
 // Read request.
 type ReadRequest struct {
-	// Starting sequence number (inclusive).
-	StartSeqNum uint64
-	// Limit on how many records can be returned upto a maximum of 1000, or 1MiB of metered bytes.
+	// Starting position for records.
+	// Retrieved batches will start at the first record whose position is greater than or equal to it.
+	Start ReadStart
+	// Limit how many records can be returned.
+	// This will get capped at the default limit,
+	// which is up to 1000 records or 1MiB of metered bytes.
 	Limit ReadLimit
 }
 
@@ -220,8 +256,8 @@ type Header struct {
 type SequencedRecord struct {
 	// Sequence number assigned to this record.
 	SeqNum uint64
-	// Timestamp for this record in milliseconds since Unix epoch.
-	Timestamp time.Time
+	// Timestamp for this record.
+	Timestamp uint64
 	// Series of name-value pairs for this record.
 	Headers []Header
 	// Body of this record.
@@ -235,38 +271,54 @@ type SequencedRecordBatch struct {
 }
 
 // Batch of records.
-// This batch can be empty only if a `ReadLimit` was provided in the associated read request, but the first record
-// that could have been returned would violate the limit.
+// It can only be empty when not in a session context,
+// if the request cannot be satisfied without violating its limit.
 type ReadOutputBatch struct {
 	*SequencedRecordBatch
 }
 
-// Sequence number for the first record on this stream, in case the requested `start_seq_num` is smaller.
-// If returned in a streaming read session, this will be a terminal reply, to signal that there is uncertainty about whether some records may be omitted.
-// The client can re-establish the session starting at this sequence number.
-type ReadOutputFirstSeqNum uint64
-
-// Sequence number for the next record on this stream, in case the requested `start_seq_num` was larger.
-// If returned in a streaming read session, this will be a terminal reply.
+// Tail of the stream, i.e. sequence number that will be assigned to the next record.
+// It will be returned if the requested starting position is greater than the tail,
+// or only in case of a limited read, equal to it.
+// It will also be returned if there are no records on the stream between the
+// requested starting position and the tail.
 type ReadOutputNextSeqNum uint64
 
-// Output from read response.
+// Output of a read.
 //
 // Valid types for ReadOutput are:
 //   - `ReadOutputBatch`
-//   - `ReadOutputFirstSeqNum`
 //   - `ReadOutputNextSeqNum`
 type ReadOutput interface {
 	implReadOutput()
 }
 
+// Sequence number.
+type ReadStartSeqNum uint64
+
+// Timestamp.
+type ReadStartTimestamp uint64
+
+// Number of records before the tail, i.e. before the next sequence number.
+type ReadStartTailOffset uint64
+
+// Starting position for records.
+// Retrieved batches will start at the first record whose position is greater than or equal to it.
+//
+// Valid types for ReadStart are:
+//   - `ReadStartSeqNum`
+//   - `ReadStartTimestamp`
+//   - `ReadStartTailOffset`
+type ReadStart interface {
+    implReadStart()
+    fmt.Stringer
+}
+
 // Record to be appended to a stream.
 type AppendRecord struct {
-	// Timestamp for this record in milliseconds since Unix epoch.
-	// The service ensures monotonicity by adjusting it up if necessary to the maximum observed timestamp.
-	// A timestamp detected to be in the future will be adjusted down.
-	// If not provided, the semantics depend on the stream's `require_client_timestamps` config.
-	Timestamp *time.Time
+	// Timestamp for this record.
+	// Precise semantics depend on the stream's `timestamping` config.
+	Timestamp *uint64
 	// Series of name-value pairs for this record.
 	Headers []Header
 	// Body of this record.
@@ -288,21 +340,38 @@ type AppendInput struct {
 type AppendOutput struct {
 	// Sequence number of first record appended.
 	StartSeqNum uint64
-	// Sequence number of last durable record on the stream + 1.
-	// This can be greater than `end_seq_num` in case of concurrent appends.
-	NextSeqNum uint64
+	// Timestamp of the first record appended.
+	StartTimestamp uint64
 	// Sequence number of last record appended + 1.
 	// `end_seq_num - start_seq_num` will be the number of records in the batch.
 	EndSeqNum uint64
+	// Timestamp of the last record appended.
+	EndTimestamp uint64
+	// Tail of the stream, i.e. sequence number that will be assigned to the next record.
+	// This can be greater than `end_seq_num` in case of concurrent appends.
+	NextSeqNum uint64
+	// Timestamp of the last durable record on the stream.
+	LastTimestamp uint64
 }
 
 // Read session request.
 type ReadSessionRequest struct {
-	// Starting sequence number (inclusive).
-	StartSeqNum uint64
+	// Starting position for records.
+	// Retrieved batches will start at the first record whose position is greater than or equal to it.
+	Start ReadStart
 	// Limit on how many records can be returned. When a limit is specified, the session will be terminated as soon as
 	// the limit is met, or when the current tail of the stream is reached -- whichever occurs first.
 	// If no limit is specified, the session will remain open after catching up to the tail, and continue tailing as
 	// new messages are written to the stream.
 	Limit ReadLimit
+}
+
+// Check tail response.
+type CheckTailResponse struct {
+    // Sequence number that will be assigned to the next record on the stream.
+	// It will be 0 for a stream that has not been written to.
+    NextSeqNum uint64
+    // Timestamp of the last durable record on the stream.
+	// It starts out as 0 for a new stream.
+    LastTimestamp uint64
 }

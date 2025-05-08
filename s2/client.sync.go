@@ -60,8 +60,8 @@ func (b *BasinClient) GetStreamConfig(ctx context.Context, basin string) (*Strea
 	return b.getStreamConfig(ctx, basin)
 }
 
-// Check the sequence number that will be assigned to the next record on a stream.
-func (s *StreamClient) CheckTail(ctx context.Context) (uint64, error) {
+// Check the tail of the stream.
+func (s *StreamClient) CheckTail(ctx context.Context) (*CheckTailResponse, error) {
 	return s.checkTail(ctx)
 }
 

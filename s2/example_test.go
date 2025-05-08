@@ -243,13 +243,13 @@ func ExampleCommandRecordTrim() {
 		panic(err)
 	}
 
-	if tail == 0 {
+	if tail.NextSeqNum == 0 {
 		fmt.Println("Empty stream")
 
 		return
 	}
 
-	latestSeqNum := tail - 1
+	latestSeqNum := tail.NextSeqNum - 1
 
 	command := s2.CommandRecordTrim{
 		SeqNum: latestSeqNum,
@@ -322,7 +322,7 @@ func ExampleStreamClient_Append() {
 
 	ack, err := streamClient.Append(context.TODO(), &s2.AppendInput{
 		Records:     batch,
-		MatchSeqNum: &tail,
+		MatchSeqNum: &tail.NextSeqNum,
 	})
 	if err != nil {
 		panic(err)
@@ -337,22 +337,9 @@ func ExampleStreamClient_Read() {
 		panic(err)
 	}
 
-	tail, err := streamClient.CheckTail(context.TODO())
-	if err != nil {
-		panic(err)
-	}
-
-	if tail == 0 {
-		fmt.Println("Empty stream")
-
-		return
-	}
-
-	latestSeqNum := tail - 1
-
 	latestBatch, err := streamClient.Read(context.TODO(), &s2.ReadRequest{
-		StartSeqNum: latestSeqNum,
-		Limit:       s2.ReadLimit{Count: optr.Some(uint64(1))},
+		Start: s2.ReadStartTailOffset(1),
+		Limit: s2.ReadLimit{Count: optr.Some(uint64(1))},
 	})
 	if err != nil {
 		panic(err)
@@ -436,7 +423,7 @@ func ExampleStreamClient_ReadSession() {
 
 	receiver, err := streamClient.ReadSession(context.TODO(), &s2.ReadSessionRequest{
 		// Read from the beginning
-		StartSeqNum: 0,
+		Start: s2.ReadStartSeqNum(0),
 	})
 	if err != nil {
 		panic(err)
