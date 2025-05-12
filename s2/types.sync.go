@@ -3,7 +3,7 @@
 package s2
 
 import (
-    "fmt"
+	"fmt"
 	"time"
 )
 
@@ -112,23 +112,23 @@ type RetentionPolicyAge time.Duration
 type TimestampingMode uint
 
 const (
-    // Defaults to `TIMESTAMPING_MODE_CLIENT_PREFER`.
-    TimestampingModeUnspecified TimestampingMode = iota
-    // Prefer client-specified timestamp if present otherwise use arrival time.
-    TimestampingModeClientPrefer
-    // Require a client-specified timestamp and reject the append if it is missing.
-    TimestampingModeClientRequire
-    // Use the arrival time and ignore any client-specified timestamp.
-    TimestampingModeClientArrival
+	// Defaults to `TIMESTAMPING_MODE_CLIENT_PREFER`.
+	TimestampingModeUnspecified TimestampingMode = iota
+	// Prefer client-specified timestamp if present otherwise use arrival time.
+	TimestampingModeClientPrefer
+	// Require a client-specified timestamp and reject the append if it is missing.
+	TimestampingModeClientRequire
+	// Use the arrival time and ignore any client-specified timestamp.
+	TimestampingModeClientArrival
 )
 
 // Timestamping behavior.
 type Timestamping struct {
-    // Timestamping mode for appends that influences how timestamps are handled.
-    Mode TimestampingMode
-    // Allow client-specified timestamps to exceed the arrival time.
+	// Timestamping mode for appends that influences how timestamps are handled.
+	Mode TimestampingMode
+	// Allow client-specified timestamps to exceed the arrival time.
 	// If this is false or not set, client timestamps will be capped at the arrival time.
-    Uncapped *bool
+	Uncapped *bool
 }
 
 // Retention policy for the stream.
@@ -264,17 +264,12 @@ type SequencedRecord struct {
 	Body []byte
 }
 
-// A batch of sequenced records.
-type SequencedRecordBatch struct {
-	// Batch of sequenced records.
-	Records []SequencedRecord
-}
-
 // Batch of records.
 // It can only be empty when not in a session context,
 // if the request cannot be satisfied without violating its limit.
 type ReadOutputBatch struct {
-	*SequencedRecordBatch
+	// Batch of sequenced records.
+	Records []SequencedRecord
 }
 
 // Tail of the stream, i.e. sequence number that will be assigned to the next record.
@@ -310,8 +305,8 @@ type ReadStartTailOffset uint64
 //   - `ReadStartTimestamp`
 //   - `ReadStartTailOffset`
 type ReadStart interface {
-    implReadStart()
-    fmt.Stringer
+	implReadStart()
+	fmt.Stringer
 }
 
 // Record to be appended to a stream.
@@ -368,10 +363,139 @@ type ReadSessionRequest struct {
 
 // Check tail response.
 type CheckTailResponse struct {
-    // Sequence number that will be assigned to the next record on the stream.
+	// Sequence number that will be assigned to the next record on the stream.
 	// It will be 0 for a stream that has not been written to.
-    NextSeqNum uint64
-    // Timestamp of the last durable record on the stream.
+	NextSeqNum uint64
+	// Timestamp of the last durable record on the stream.
 	// It starts out as 0 for a new stream.
-    LastTimestamp uint64
+	LastTimestamp uint64
+}
+
+// API operations.
+type Operation uint
+
+const (
+	// Unspecified operation.
+	OperationUnspecified Operation = iota
+	// List basins.
+	OperationListBasins
+	// Create a basin.
+	OperationCreateBasin
+	// Delete a basin.
+	OperationDeleteBasin
+	// Update basin configuration.
+	OperationReconfigureBasin
+	// Get basin configuration.
+	OperationGetBasinConfig
+	// Issue an access token.
+	OperationIssueAccessToken
+	// Revoke an access token.
+	OperationRevokeAccessToken
+	// List access tokens.
+	OperationListAccessTokens
+	// List streams.
+	OperationListStreams
+	// Create a stream.
+	OperationCreateStream
+	// Delete a stream.
+	OperationDeleteStream
+	// Get stream configuration.
+	OperationGetStreamConfig
+	// Update stream configuration.
+	OperationReconfigureStream
+	// Check tail of a stream.
+	OperationCheckTail
+	// Append records to a stream.
+	OperationAppend
+	// Read records from a stream.
+	OperationRead
+	// Trim records up to a sequence number.
+	OperationTrim
+	// Set a fencing token for a stream.
+	OperationFence
+)
+
+// Read/Write permissions.
+type ReadWritePermissions struct {
+	// Read permission.
+	Read bool
+	// Write permission.
+	Write bool
+}
+
+// Access permissions for a group.
+type PermittedOperationGroups struct {
+	// Access permissions at account level.
+	Account *ReadWritePermissions
+	// Access permissions at basin level.
+	Basin *ReadWritePermissions
+	// Access permissions at stream level.
+	Stream *ReadWritePermissions
+}
+
+// Set of named resources.
+//
+// Valid types for ResourceSet are:
+//   - `ResourceSetExact`
+//   - `ResourceSetPrefix`
+type ResourceSet interface {
+	implResourceSet()
+	fmt.Stringer
+}
+
+// Match only the resource with this exact name.
+// Use an empty string to match no resources.
+type ResourceSetExact string
+
+// Match all resources that start with this prefix.
+// Use an empty string to match all resource.
+type ResourceSetPrefix string
+
+// Access token scope.
+type AccessTokenScope struct {
+	// Basin names allowed.
+	Basins ResourceSet
+	// Stream names allowed.
+	Streams ResourceSet
+	// Token IDs allowed.
+	AccessTokens ResourceSet
+	// Access permissions at operation group level.
+	OpGroups *PermittedOperationGroups
+	// Operations allowed for the token.
+	// A union of allowed operations and groups is used as an effective set of allowed operations.
+	Ops []Operation
+}
+
+// Access token information.
+type AccessTokenInfo struct {
+	// Access token ID.
+	// It must be unique to the account and between 1 and 96 characters.
+	ID string
+	// Expiration time in seconds since Unix epoch.
+	// If not set, the expiration will be set to that of the requestor's token.
+	ExpiresAt *time.Time
+	// Namespace streams based on the configured stream-level scope, which must be a prefix.
+	// Stream name arguments will be automatically prefixed, and the prefix will be stripped
+	// when listing streams.
+	AutoPrefixStreams bool
+	// Access token scope.
+	Scope *AccessTokenScope
+}
+
+// List access tokens request.
+type ListAccessTokensRequest struct {
+	// List access tokens that begin with this prefix.
+	Prefix string
+	// Only return access tokens that lexicographically start after this ID.
+	StartAfter string
+	// Number of results, up to a maximum of 1000.
+	Limit *uint64
+}
+
+// List access tokens response.
+type ListAccessTokensResponse struct {
+	// Access tokens information.
+	AccessTokens []AccessTokenInfo
+	// If set, indicates there are more results that can be listed with `start_after`.
+	HasMore bool
 }

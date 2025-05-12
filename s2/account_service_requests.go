@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/s2-streamstore/optr"
 	"github.com/s2-streamstore/s2-sdk-go/internal/pb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,7 +28,7 @@ func (r *listBasinsServiceRequest) Send(ctx context.Context) (*ListBasinsRespons
 	req := &pb.ListBasinsRequest{
 		Prefix:     r.Req.Prefix,
 		StartAfter: r.Req.StartAfter,
-		Limit:      r.Req.Limit,
+		Limit:      optr.Cloned(r.Req.Limit),
 	}
 
 	pbResp, err := r.Client.ListBasins(ctx, req)
@@ -204,4 +205,103 @@ func (r *getBasinConfigRequest) Send(ctx context.Context) (*BasinConfig, error) 
 	}
 
 	return basinConfigFromProto(pbResp.GetConfig())
+}
+
+type listAccessTokensRequest struct {
+	Client pb.AccountServiceClient
+	Req    *ListAccessTokensRequest
+}
+
+func (r *listAccessTokensRequest) IdempotencyLevel() idempotencyLevel {
+	return idempotencyLevelNoSideEffects
+}
+
+func (r *listAccessTokensRequest) IsStreaming() bool {
+	return false
+}
+
+func (r *listAccessTokensRequest) Send(ctx context.Context) (*ListAccessTokensResponse, error) {
+	req := pb.ListAccessTokensRequest{
+		Prefix:     r.Req.Prefix,
+		StartAfter: r.Req.StartAfter,
+		Limit:      optr.Cloned(r.Req.Limit),
+	}
+
+	resp, err := r.Client.ListAccessTokens(ctx, &req)
+	if err != nil {
+		return nil, err
+	}
+
+	tokens := make([]AccessTokenInfo, 0, len(resp.GetAccessTokens()))
+
+	for _, pbToken := range resp.GetAccessTokens() {
+		token, err := accessTokenInfoFromProto(pbToken)
+		if err != nil {
+			return nil, err
+		}
+
+		tokens = append(tokens, *token)
+	}
+
+	return &ListAccessTokensResponse{
+		AccessTokens: tokens,
+		HasMore:      resp.GetHasMore(),
+	}, nil
+}
+
+type issueAccessTokenRequest struct {
+	Client pb.AccountServiceClient
+	Info   *AccessTokenInfo
+}
+
+func (r *issueAccessTokenRequest) IdempotencyLevel() idempotencyLevel {
+	return idempotencyLevelUnknown
+}
+
+func (r *issueAccessTokenRequest) IsStreaming() bool {
+	return false
+}
+
+func (r *issueAccessTokenRequest) Send(ctx context.Context) (string, error) {
+	tokenInfo, err := accessTokenInfoToProto(r.Info)
+	if err != nil {
+		return "", err
+	}
+
+	req := pb.IssueAccessTokenRequest{
+		Info: tokenInfo,
+	}
+
+	resp, err := r.Client.IssueAccessToken(ctx, &req)
+	if err != nil {
+		return "", err
+	}
+
+	return resp.GetAccessToken(), nil
+}
+
+type revokeAccessTokenRequest struct {
+	Client pb.AccountServiceClient
+	ID     string
+}
+
+func (r *revokeAccessTokenRequest) IdempotencyLevel() idempotencyLevel {
+	return idempotencyLevelIdempotent
+}
+
+func (r *revokeAccessTokenRequest) IsStreaming() bool {
+	return false
+}
+
+func (r *revokeAccessTokenRequest) Send(ctx context.Context) (*AccessTokenInfo, error) {
+	req := &pb.RevokeAccessTokenRequest{
+		Id: r.ID,
+	}
+
+	resp, err := r.Client.RevokeAccessToken(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return accessTokenInfoFromProto(resp.GetInfo())
 }
