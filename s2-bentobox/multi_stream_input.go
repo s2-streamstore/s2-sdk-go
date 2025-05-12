@@ -35,7 +35,7 @@ func ConnectMultiStreamInput(ctx context.Context, config *InputConfig) (*MultiSt
 	}, nil
 }
 
-func (msi *MultiStreamInput) ReadBatch(ctx context.Context) (*s2.SequencedRecordBatch, AckFunc, Stream, error) {
+func (msi *MultiStreamInput) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, AckFunc, Stream, error) {
 	select {
 	case r := <-msi.inputStream:
 		return r.Batch, r.AckFunc, r.Stream, r.Err

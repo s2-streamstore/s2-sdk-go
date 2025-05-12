@@ -121,7 +121,7 @@ type InputConfig struct {
 
 type recvOutput struct {
 	Stream string
-	Batch  *s2.SequencedRecordBatch
+	Batch  []s2.SequencedRecord
 	AckFunc
 	Err error
 }

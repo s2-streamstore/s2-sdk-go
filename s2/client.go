@@ -269,6 +269,36 @@ func (c *Client) getBasinConfig(ctx context.Context, basin string) (*BasinConfig
 	return sendRetryable(ctx, c.inner, &r)
 }
 
+func (c *Client) listAccessTokens(
+	ctx context.Context,
+	req *ListAccessTokensRequest,
+) (*ListAccessTokensResponse, error) {
+	r := listAccessTokensRequest{
+		Client: c.inner.AccountServiceClient(),
+		Req:    req,
+	}
+
+	return sendRetryable(ctx, c.inner, &r)
+}
+
+func (c *Client) issueAccessToken(ctx context.Context, info *AccessTokenInfo) (string, error) {
+	r := issueAccessTokenRequest{
+		Client: c.inner.AccountServiceClient(),
+		Info:   info,
+	}
+
+	return sendRetryable(ctx, c.inner, &r)
+}
+
+func (c *Client) revokeAccessToken(ctx context.Context, id string) (*AccessTokenInfo, error) {
+	r := revokeAccessTokenRequest{
+		Client: c.inner.AccountServiceClient(),
+		ID:     id,
+	}
+
+	return sendRetryable(ctx, c.inner, &r)
+}
+
 // Create basin client from the given name.
 func (c *Client) BasinClient(basin string) (*BasinClient, error) {
 	inner, err := c.inner.BasinClient(basin)
@@ -626,7 +656,7 @@ func (r *readSessionReceiver) Recv() (ReadOutput, error) {
 				r.ServiceReq.Req.Start = ReadStartSeqNum(1 + batch.Records[len(batch.Records)-1].SeqNum)
 
 				r.ServiceReq.Req.Limit.Bytes = optr.Map(r.ServiceReq.Req.Limit.Bytes, func(b uint64) uint64 {
-					batchBytes := uint64(batch.SequencedRecordBatch.MeteredBytes())
+					batchBytes := uint64(batch.MeteredBytes())
 					if b < batchBytes {
 						return 0
 					}

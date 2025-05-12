@@ -32,6 +32,8 @@ var (
 	ErrUnknownTimestampingMode = errors.New("unknown timestamping mode")
 	ErrUnknownRetentionPolicy  = errors.New("unknown retention policy")
 	ErrUnknownReadOutput       = errors.New("unknown read output")
+	ErrUnknownOperation        = errors.New("unknown operation")
+	ErrUnknownResourceSet      = errors.New("unknown resource set")
 
 	// Sentinel error to signify a heartbeat message.
 	errHeartbeatMessage = errors.New("heartbeat")
@@ -69,7 +71,7 @@ func (r *SequencedRecord) MeteredBytes() uint {
 }
 
 // Metered bytes for a SequencedRecordBatch.
-func (b *SequencedRecordBatch) MeteredBytes() uint {
+func (b *ReadOutputBatch) MeteredBytes() uint {
 	var bytes uint
 	for i := range len(b.Records) {
 		bytes += b.Records[i].MeteredBytes()
@@ -331,6 +333,18 @@ func (s BasinScope) String() string {
 	}
 }
 
+func (r ResourceSetExact) implResourceSet() {}
+
+func (r ResourceSetExact) String() string {
+	return fmt.Sprintf("Exact(%s)", string(r))
+}
+
+func (r ResourceSetPrefix) implResourceSet() {}
+
+func (r ResourceSetPrefix) String() string {
+	return fmt.Sprintf("Prefix(%s)", string(r))
+}
+
 func basinScopeFromProto(pbScope pb.BasinScope) (BasinScope, error) {
 	switch pbScope {
 	case pb.BasinScope_BASIN_SCOPE_UNSPECIFIED:
@@ -589,7 +603,7 @@ func sequencedRecordFromProto(pbRecord *pb.SequencedRecord) SequencedRecord {
 	}
 }
 
-func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) *SequencedRecordBatch {
+func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) []SequencedRecord {
 	pbRecords := pbBatch.GetRecords()
 	records := make([]SequencedRecord, 0, len(pbRecords))
 
@@ -597,9 +611,7 @@ func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) *SequencedR
 		records = append(records, sequencedRecordFromProto(r))
 	}
 
-	return &SequencedRecordBatch{
-		Records: records,
-	}
+	return records
 }
 
 func readOutputFromProto(pbOutput *pb.ReadOutput, acceptHeartbeats bool) (ReadOutput, error) {
@@ -612,7 +624,7 @@ func readOutputFromProto(pbOutput *pb.ReadOutput, acceptHeartbeats bool) (ReadOu
 	switch o := pbOutput.GetOutput().(type) {
 	case *pb.ReadOutput_Batch:
 		output = ReadOutputBatch{
-			SequencedRecordBatch: sequencedRecordBatchFromProto(o.Batch),
+			Records: sequencedRecordBatchFromProto(o.Batch),
 		}
 	case *pb.ReadOutput_NextSeqNum:
 		output = ReadOutputNextSeqNum(o.NextSeqNum)
@@ -668,4 +680,289 @@ func appendOutputFromProto(pbOutput *pb.AppendOutput) *AppendOutput {
 		NextSeqNum:     pbOutput.GetNextSeqNum(),
 		LastTimestamp:  pbOutput.GetLastTimestamp(),
 	}
+}
+
+func operationFromProto(pbOp pb.Operation) (Operation, error) {
+	switch pbOp {
+	case pb.Operation_OPERATION_UNSPECIFIED:
+		return OperationUnspecified, nil
+	case pb.Operation_OPERATION_LIST_BASINS:
+		return OperationListBasins, nil
+	case pb.Operation_OPERATION_CREATE_BASIN:
+		return OperationCreateBasin, nil
+	case pb.Operation_OPERATION_DELETE_BASIN:
+		return OperationDeleteBasin, nil
+	case pb.Operation_OPERATION_RECONFIGURE_BASIN:
+		return OperationReconfigureBasin, nil
+	case pb.Operation_OPERATION_GET_BASIN_CONFIG:
+		return OperationGetBasinConfig, nil
+	case pb.Operation_OPERATION_ISSUE_ACCESS_TOKEN:
+		return OperationIssueAccessToken, nil
+	case pb.Operation_OPERATION_REVOKE_ACCESS_TOKEN:
+		return OperationRevokeAccessToken, nil
+	case pb.Operation_OPERATION_LIST_ACCESS_TOKENS:
+		return OperationListAccessTokens, nil
+	case pb.Operation_OPERATION_LIST_STREAMS:
+		return OperationListStreams, nil
+	case pb.Operation_OPERATION_CREATE_STREAM:
+		return OperationCreateStream, nil
+	case pb.Operation_OPERATION_DELETE_STREAM:
+		return OperationDeleteStream, nil
+	case pb.Operation_OPERATION_GET_STREAM_CONFIG:
+		return OperationGetStreamConfig, nil
+	case pb.Operation_OPERATION_RECONFIGURE_STREAM:
+		return OperationReconfigureStream, nil
+	case pb.Operation_OPERATION_CHECK_TAIL:
+		return OperationCheckTail, nil
+	case pb.Operation_OPERATION_APPEND:
+		return OperationAppend, nil
+	case pb.Operation_OPERATION_READ:
+		return OperationRead, nil
+	case pb.Operation_OPERATION_TRIM:
+		return OperationTrim, nil
+	case pb.Operation_OPERATION_FENCE:
+		return OperationFence, nil
+	default:
+		return OperationUnspecified, fmt.Errorf("%w: %v", ErrUnknownOperation, pbOp)
+	}
+}
+
+func operationsFromProto(pbOps []pb.Operation) ([]Operation, error) {
+	ops := make([]Operation, 0, len(pbOps))
+
+	for _, pbOp := range pbOps {
+		op, err := operationFromProto(pbOp)
+		if err != nil {
+			return nil, err
+		}
+
+		ops = append(ops, op)
+	}
+
+	return ops, nil
+}
+
+func resourceSetFromProto(pbSet *pb.ResourceSet) (ResourceSet, error) {
+	if pbSet == nil {
+		// Most restrictive when nil.
+		return ResourceSetExact(""), nil
+	}
+
+	switch matching := pbSet.Matching.(type) {
+	case *pb.ResourceSet_Exact:
+		return ResourceSetExact(matching.Exact), nil
+	case *pb.ResourceSet_Prefix:
+		return ResourceSetPrefix(matching.Prefix), nil
+	default:
+		return nil, fmt.Errorf("%w: %v", ErrUnknownResourceSet, matching)
+	}
+}
+
+func readWritePermissionsFromProto(pbPerms *pb.ReadWritePermissions) *ReadWritePermissions {
+	return &ReadWritePermissions{
+		Read:  pbPerms.Read,
+		Write: pbPerms.Write,
+	}
+}
+
+func permittedOperationGroupsFromProto(pbGroups *pb.PermittedOperationGroups) *PermittedOperationGroups {
+	return &PermittedOperationGroups{
+		Account: readWritePermissionsFromProto(pbGroups.Account),
+		Basin:   readWritePermissionsFromProto(pbGroups.Basin),
+		Stream:  readWritePermissionsFromProto(pbGroups.Stream),
+	}
+}
+
+func accessTokenScopeFromProto(pbScope *pb.AccessTokenScope) (*AccessTokenScope, error) {
+	ops, err := operationsFromProto(pbScope.GetOps())
+	if err != nil {
+		return nil, err
+	}
+
+	basins, err := resourceSetFromProto(pbScope.GetBasins())
+	if err != nil {
+		return nil, err
+	}
+
+	streams, err := resourceSetFromProto(pbScope.GetStreams())
+	if err != nil {
+		return nil, err
+	}
+
+	accessTokens, err := resourceSetFromProto(pbScope.GetAccessTokens())
+	if err != nil {
+		return nil, err
+	}
+
+	return &AccessTokenScope{
+		Basins:       basins,
+		Streams:      streams,
+		AccessTokens: accessTokens,
+		OpGroups:     permittedOperationGroupsFromProto(pbScope.GetOpGroups()),
+		Ops:          ops,
+	}, nil
+}
+
+func accessTokenInfoFromProto(pbInfo *pb.AccessTokenInfo) (*AccessTokenInfo, error) {
+	scope, err := accessTokenScopeFromProto(pbInfo.GetScope())
+	if err != nil {
+		return nil, err
+	}
+
+	expiresAt := time.Unix(int64(pbInfo.GetExpiresAt()), 0)
+
+	return &AccessTokenInfo{
+		ID:                pbInfo.GetId(),
+		ExpiresAt:         optr.Some(expiresAt),
+		AutoPrefixStreams: pbInfo.GetAutoPrefixStreams(),
+		Scope:             scope,
+	}, nil
+}
+
+func operationToProto(op Operation) (pb.Operation, error) {
+	switch op {
+	case OperationUnspecified:
+		return pb.Operation_OPERATION_UNSPECIFIED, nil
+	case OperationListBasins:
+		return pb.Operation_OPERATION_LIST_BASINS, nil
+	case OperationCreateBasin:
+		return pb.Operation_OPERATION_CREATE_BASIN, nil
+	case OperationDeleteBasin:
+		return pb.Operation_OPERATION_DELETE_BASIN, nil
+	case OperationReconfigureBasin:
+		return pb.Operation_OPERATION_RECONFIGURE_BASIN, nil
+	case OperationGetBasinConfig:
+		return pb.Operation_OPERATION_GET_BASIN_CONFIG, nil
+	case OperationIssueAccessToken:
+		return pb.Operation_OPERATION_ISSUE_ACCESS_TOKEN, nil
+	case OperationRevokeAccessToken:
+		return pb.Operation_OPERATION_REVOKE_ACCESS_TOKEN, nil
+	case OperationListAccessTokens:
+		return pb.Operation_OPERATION_LIST_ACCESS_TOKENS, nil
+	case OperationListStreams:
+		return pb.Operation_OPERATION_LIST_STREAMS, nil
+	case OperationCreateStream:
+		return pb.Operation_OPERATION_CREATE_STREAM, nil
+	case OperationDeleteStream:
+		return pb.Operation_OPERATION_DELETE_STREAM, nil
+	case OperationGetStreamConfig:
+		return pb.Operation_OPERATION_GET_STREAM_CONFIG, nil
+	case OperationReconfigureStream:
+		return pb.Operation_OPERATION_RECONFIGURE_STREAM, nil
+	case OperationCheckTail:
+		return pb.Operation_OPERATION_CHECK_TAIL, nil
+	case OperationAppend:
+		return pb.Operation_OPERATION_APPEND, nil
+	case OperationRead:
+		return pb.Operation_OPERATION_READ, nil
+	case OperationTrim:
+		return pb.Operation_OPERATION_TRIM, nil
+	case OperationFence:
+		return pb.Operation_OPERATION_FENCE, nil
+	default:
+		return pb.Operation_OPERATION_UNSPECIFIED, fmt.Errorf("%w: %v", ErrUnknownOperation, op)
+	}
+}
+
+func operationsToProto(ops []Operation) ([]pb.Operation, error) {
+	pbOps := make([]pb.Operation, 0, len(ops))
+
+	for _, op := range ops {
+		pbOp, err := operationToProto(op)
+		if err != nil {
+			return nil, err
+		}
+
+		pbOps = append(pbOps, pbOp)
+	}
+
+	return pbOps, nil
+}
+
+func resourceSetToProto(rs ResourceSet) (*pb.ResourceSet, error) {
+	if rs == nil {
+		return &pb.ResourceSet{Matching: &pb.ResourceSet_Exact{Exact: ""}}, nil
+	}
+
+	switch v := rs.(type) {
+	case ResourceSetExact:
+		return &pb.ResourceSet{
+			Matching: &pb.ResourceSet_Exact{Exact: string(v)},
+		}, nil
+	case ResourceSetPrefix:
+		return &pb.ResourceSet{
+			Matching: &pb.ResourceSet_Prefix{Prefix: string(v)},
+		}, nil
+	default:
+		return nil, fmt.Errorf("%w: %T", ErrUnknownResourceSet, v)
+	}
+}
+
+func readWritePermissionsToProto(p *ReadWritePermissions) *pb.ReadWritePermissions {
+	if p == nil {
+		return nil
+	}
+
+	return &pb.ReadWritePermissions{
+		Read:  p.Read,
+		Write: p.Write,
+	}
+}
+
+func permittedOperationGroupsToProto(p *PermittedOperationGroups) *pb.PermittedOperationGroups {
+	if p == nil {
+		return nil
+	}
+
+	return &pb.PermittedOperationGroups{
+		Account: readWritePermissionsToProto(p.Account),
+		Basin:   readWritePermissionsToProto(p.Basin),
+		Stream:  readWritePermissionsToProto(p.Stream),
+	}
+}
+
+func accessTokenScopeToProto(s *AccessTokenScope) (*pb.AccessTokenScope, error) {
+	pbOps, err := operationsToProto(s.Ops)
+	if err != nil {
+		return nil, err
+	}
+
+	pbBasins, err := resourceSetToProto(s.Basins)
+	if err != nil {
+		return nil, err
+	}
+
+	pbStreams, err := resourceSetToProto(s.Streams)
+	if err != nil {
+		return nil, err
+	}
+
+	pbAccessTokens, err := resourceSetToProto(s.AccessTokens)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.AccessTokenScope{
+		Basins:       pbBasins,
+		Streams:      pbStreams,
+		AccessTokens: pbAccessTokens,
+		OpGroups:     permittedOperationGroupsToProto(s.OpGroups),
+		Ops:          pbOps,
+	}, nil
+}
+
+func accessTokenInfoToProto(i *AccessTokenInfo) (*pb.AccessTokenInfo, error) {
+	scope, err := accessTokenScopeToProto(i.Scope)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.AccessTokenInfo{
+		Id: i.ID,
+		ExpiresAt: optr.Map(i.ExpiresAt, func(t time.Time) uint32 {
+			return uint32(t.Unix())
+		}),
+		AutoPrefixStreams: i.AutoPrefixStreams,
+		Scope:             scope,
+	}, nil
 }

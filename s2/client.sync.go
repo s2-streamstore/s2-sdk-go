@@ -33,6 +33,21 @@ func (c *Client) GetBasinConfig(ctx context.Context, basin string) (*BasinConfig
 	return c.getBasinConfig(ctx, basin)
 }
 
+// List access tokens.
+func (c *Client) ListAccessTokens(ctx context.Context, req *ListAccessTokensRequest) (*ListAccessTokensResponse, error) {
+	return c.listAccessTokens(ctx, req)
+}
+
+// Issue a new access token.
+func (c *Client) IssueAccessToken(ctx context.Context, info *AccessTokenInfo) (string, error) {
+	return c.issueAccessToken(ctx, info)
+}
+
+// Revoke an access token.
+func (c *Client) RevokeAccessToken(ctx context.Context, id string) (*AccessTokenInfo, error) {
+	return c.revokeAccessToken(ctx, id)
+}
+
 // List streams.
 func (b *BasinClient) ListStreams(ctx context.Context, req *ListStreamsRequest) (*ListStreamsResponse, error) {
 	return b.listStreams(ctx, req)

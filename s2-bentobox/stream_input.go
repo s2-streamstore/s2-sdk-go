@@ -46,16 +46,16 @@ func newToAckMap(stream Stream, cache *seqNumCache, logger Logger) *toAckMap {
 	}
 }
 
-func (tam *toAckMap) Add(batch *s2.SequencedRecordBatch) {
-	if len(batch.Records) == 0 {
+func (tam *toAckMap) Add(records []s2.SequencedRecord) {
+	if len(records) == 0 {
 		return
 	}
 
 	tam.mu.Lock()
 	defer tam.mu.Unlock()
 
-	firstSeqNum := batch.Records[0].SeqNum
-	lastSeqNum := batch.Records[len(batch.Records)-1].SeqNum
+	firstSeqNum := records[0].SeqNum
+	lastSeqNum := records[len(records)-1].SeqNum
 
 	tam.inner.Set(firstSeqNum, batchAckStatus{
 		FirstSeqNum: firstSeqNum,
@@ -71,15 +71,15 @@ func (tam *toAckMap) Len() int {
 	return tam.inner.Len()
 }
 
-func (tam *toAckMap) MarkDone(ctx context.Context, batch *s2.SequencedRecordBatch, updateCache bool) error {
-	if len(batch.Records) == 0 {
+func (tam *toAckMap) MarkDone(ctx context.Context, records []s2.SequencedRecord, updateCache bool) error {
+	if len(records) == 0 {
 		return nil
 	}
 
 	tam.mu.Lock()
 	defer tam.mu.Unlock()
 
-	seqNum := batch.Records[0].SeqNum
+	seqNum := records[0].SeqNum
 
 	batchStatus, ok := tam.inner.Get(seqNum)
 	if !ok {
@@ -133,7 +133,7 @@ type streamInput struct {
 	Cache        *seqNumCache
 	CloseStream  context.CancelFunc
 	ToAck        *toAckMap
-	Nacks        chan *s2.SequencedRecordBatch
+	Nacks        chan []s2.SequencedRecord
 	Logger       Logger
 }
 
@@ -190,7 +190,7 @@ func connectStreamInput(
 		Cache:        cache,
 		CloseStream:  closeStream,
 		ToAck:        newToAckMap(stream, cache, logger),
-		Nacks:        make(chan *s2.SequencedRecordBatch, maxInflight),
+		Nacks:        make(chan []s2.SequencedRecord, maxInflight),
 	}, nil
 }
 
@@ -237,7 +237,7 @@ func (si *streamInput) isClosed() bool {
 	}
 }
 
-func (si *streamInput) ReadBatch(ctx context.Context) (*s2.SequencedRecordBatch, AckFunc, error) {
+func (si *streamInput) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, AckFunc, error) {
 	var readOutput s2.ReadOutput
 
 	select {
@@ -251,8 +251,8 @@ func (si *streamInput) ReadBatch(ctx context.Context) (*s2.SequencedRecordBatch,
 
 		readOutput = r.Output
 
-	case batch := <-si.Nacks:
-		readOutput = s2.ReadOutputBatch{SequencedRecordBatch: batch}
+	case records := <-si.Nacks:
+		readOutput = s2.ReadOutputBatch{Records: records}
 
 	case <-si.StreamCloser:
 		return nil, nil, ErrInputClosed
@@ -268,17 +268,17 @@ func (si *streamInput) ReadBatch(ctx context.Context) (*s2.SequencedRecordBatch,
 			}
 
 			if e == nil {
-				return si.ack(c, output.SequencedRecordBatch)
+				return si.ack(c, output.Records)
 			}
 
-			return si.nack(output.SequencedRecordBatch)
+			return si.nack(output.Records)
 		}
 
 		if len(output.Records) > 0 {
-			si.ToAck.Add(output.SequencedRecordBatch)
+			si.ToAck.Add(output.Records)
 		}
 
-		return output.SequencedRecordBatch, ackFunc, nil
+		return output.Records, ackFunc, nil
 
 	// The following are terminal messages appearing immediately in the stream
 	// that will be received once. It's safe to update the next sequence number
@@ -305,12 +305,12 @@ func (si *streamInput) ReadBatch(ctx context.Context) (*s2.SequencedRecordBatch,
 	return nil, nil, ErrInputClosed
 }
 
-func (si *streamInput) nack(batch *s2.SequencedRecordBatch) error {
+func (si *streamInput) nack(records []s2.SequencedRecord) error {
 	si.Logger.With("stream", si.Stream).Debug("Nacking batch")
 
 	// The batch is still to be acknowledged.
 	select {
-	case si.Nacks <- batch:
+	case si.Nacks <- records:
 		return nil
 
 	case <-si.StreamCloser:
@@ -318,18 +318,18 @@ func (si *streamInput) nack(batch *s2.SequencedRecordBatch) error {
 	}
 }
 
-func (si *streamInput) ack(ctx context.Context, batch *s2.SequencedRecordBatch) error {
+func (si *streamInput) ack(ctx context.Context, records []s2.SequencedRecord) error {
 	withLog := []any{"stream", si.Stream}
 
-	if len(batch.Records) > 0 {
-		firstSeqNum := batch.Records[0].SeqNum
-		lastSeqNum := batch.Records[len(batch.Records)-1].SeqNum
+	if len(records) > 0 {
+		firstSeqNum := records[0].SeqNum
+		lastSeqNum := records[len(records)-1].SeqNum
 		withLog = append(withLog, "range", fmt.Sprintf("%d..=%d", firstSeqNum, lastSeqNum))
 	}
 
 	si.Logger.With(withLog...).Debug("Acknowledging batch")
 
-	return si.ToAck.MarkDone(ctx, batch, !si.isClosed())
+	return si.ToAck.MarkDone(ctx, records, !si.isClosed())
 }
 
 func (si *streamInput) Close(ctx context.Context) error {
