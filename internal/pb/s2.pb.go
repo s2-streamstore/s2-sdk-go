@@ -2234,7 +2234,7 @@ type AppendInput struct {
 	// Enforce that the sequence number issued to the first record matches.
 	MatchSeqNum *uint64 `protobuf:"varint,3,opt,name=match_seq_num,json=matchSeqNum,proto3,oneof" json:"match_seq_num,omitempty"`
 	// Enforce a fencing token which must have been previously set by a `fence` command record.
-	FencingToken  []byte `protobuf:"bytes,4,opt,name=fencing_token,json=fencingToken,proto3,oneof" json:"fencing_token,omitempty"`
+	FencingToken  *string `protobuf:"bytes,4,opt,name=fencing_token,json=fencingToken,proto3,oneof" json:"fencing_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2290,11 +2290,11 @@ func (x *AppendInput) GetMatchSeqNum() uint64 {
 	return 0
 }
 
-func (x *AppendInput) GetFencingToken() []byte {
-	if x != nil {
-		return x.FencingToken
+func (x *AppendInput) GetFencingToken() string {
+	if x != nil && x.FencingToken != nil {
+		return *x.FencingToken
 	}
-	return nil
+	return ""
 }
 
 // Output from append response.
@@ -3714,7 +3714,7 @@ const file_s2_proto_rawDesc = "" +
 	"\x06stream\x18\x01 \x01(\tR\x06stream\x122\n" +
 	"\arecords\x18\x02 \x03(\v2\x18.s2.v1alpha.AppendRecordR\arecords\x12'\n" +
 	"\rmatch_seq_num\x18\x03 \x01(\x04H\x00R\vmatchSeqNum\x88\x01\x01\x12(\n" +
-	"\rfencing_token\x18\x04 \x01(\fH\x01R\ffencingToken\x88\x01\x01B\x10\n" +
+	"\rfencing_token\x18\x04 \x01(\tH\x01R\ffencingToken\x88\x01\x01B\x10\n" +
 	"\x0e_match_seq_numB\x10\n" +
 	"\x0e_fencing_token\"\xe9\x01\n" +
 	"\fAppendOutput\x12\"\n" +
