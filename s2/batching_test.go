@@ -193,13 +193,13 @@ func TestAppendRecordBatchingLinger(t *testing.T) {
 
 	actualBatches := batchSender.Inputs(t)
 
-	require.Equal(t, len(expectedBatches), len(actualBatches))
+	require.Len(t, actualBatches, len(expectedBatches))
 
 	for i, input := range actualBatches {
 		expectedBatch := expectedBatches[i]
 		actualBatch := input.Records.Records()
 
-		require.Equal(t, len(expectedBatch), len(actualBatch))
+		require.Len(t, actualBatch, len(expectedBatch))
 
 		for i, record := range actualBatch {
 			require.Equal(t, expectedBatch[i], string(record.Body))
