@@ -4,35 +4,35 @@ linters:
   disable-all: true
   disable:
     - errcheck
-  enable:    
+  enable:
     - govet
     - ineffassign
     - staticcheck
-    - unused    
+    - unused
     - copyloopvar
     - dupl
-    - durationcheck        
+    - durationcheck
     - exptostd
-    - fatcontext    
+    - fatcontext
     - ginkgolinter
     - gocheckcompilerdirectives
     - gochecksumtype
-    - goconst    
+    - goconst
     - godot
     - goprintffuncname
     - grouper
     - importas
-    - intrange    
+    - intrange
     - makezero
     - mirror
-    - misspell    
+    - misspell
     - nilnil
     - nlreturn
     - nolintlint
     - nonamedreturns
     - nosprintfhostport
-    - prealloc    
-    - reassign    
+    - prealloc
+    - reassign
     - testifylint
     - unconvert
     - unparam
@@ -51,5 +51,5 @@ issues:
   exclude-rules:
     - path: _test.go
       linters:
-        - goconst        
+        - goconst
         - forcetypeassert
