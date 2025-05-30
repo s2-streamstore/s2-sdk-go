@@ -1,7 +1,7 @@
 package s2
 
 import (
-    "fmt"
+	"fmt"
 	"time"
 )
 
@@ -104,22 +104,22 @@ type RetentionPolicyAge time.Duration
 type TimestampingMode uint
 
 const (
-    // {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_UNSPECIFIED" }}
-    TimestampingModeUnspecified TimestampingMode = iota
-    // {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_CLIENT_PREFER" }}
-    TimestampingModeClientPrefer
-    // {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_CLIENT_REQUIRE" }}
-    TimestampingModeClientRequire
-    // {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_ARRIVAL" }}
-    TimestampingModeClientArrival
+	// {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_UNSPECIFIED" }}
+	TimestampingModeUnspecified TimestampingMode = iota
+	// {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_CLIENT_PREFER" }}
+	TimestampingModeClientPrefer
+	// {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_CLIENT_REQUIRE" }}
+	TimestampingModeClientRequire
+	// {{ syncDocIndent "TimestampingMode_TIMESTAMPING_MODE_ARRIVAL" }}
+	TimestampingModeClientArrival
 )
 
 // {{ syncDoc "StreamConfig.Timestamping" }}
 type Timestamping struct {
-    // {{ syncDocIndent "StreamConfig_Timestamping.Mode" }}
-    Mode TimestampingMode
-    // {{ syncDocIndent "StreamConfig_Timestamping.Uncapped" }}
-    Uncapped *bool
+	// {{ syncDocIndent "StreamConfig_Timestamping.Mode" }}
+	Mode TimestampingMode
+	// {{ syncDocIndent "StreamConfig_Timestamping.Uncapped" }}
+	Uncapped *bool
 }
 
 // {{ syncDoc "StreamConfig.RetentionPolicy" }}
@@ -240,15 +240,10 @@ type SequencedRecord struct {
 	Body []byte
 }
 
-// {{ syncDoc "SequencedRecordBatch" }}
-type SequencedRecordBatch struct {
-	// {{ syncDocIndent "SequencedRecordBatch.Records" }}
-	Records []SequencedRecord
-}
-
 // {{ syncDoc "ReadOutput_Batch.Batch" }}
 type ReadOutputBatch struct {
-	*SequencedRecordBatch
+	// {{ syncDocIndent "SequencedRecordBatch.Records" }}
+	Records []SequencedRecord
 }
 
 // {{ syncDoc "ReadOutput_NextSeqNum.NextSeqNum" }}
@@ -279,8 +274,8 @@ type ReadStartTailOffset uint64
 //   - `ReadStartTimestamp`
 //   - `ReadStartTailOffset`
 type ReadStart interface {
-    implReadStart()
-    fmt.Stringer
+	implReadStart()
+	fmt.Stringer
 }
 
 // {{ syncDoc "AppendRecord" }}
@@ -300,7 +295,7 @@ type AppendInput struct {
 	// {{ syncDocIndent "AppendInput.MatchSeqNum" }}
 	MatchSeqNum *uint64
 	// {{ syncDocIndent "AppendInput.FencingToken" }}
-	FencingToken []byte
+	FencingToken *string
 }
 
 // {{ syncDoc "AppendOutput" }}
@@ -329,8 +324,136 @@ type ReadSessionRequest struct {
 
 // {{ syncDoc "CheckTailResponse" }}
 type CheckTailResponse struct {
-    // {{ syncDocIndent "CheckTailResponse.NextSeqNum" }}
-    NextSeqNum uint64
-    // {{ syncDocIndent "CheckTailResponse.LastTimestamp" }}
-    LastTimestamp uint64
+	// {{ syncDocIndent "CheckTailResponse.NextSeqNum" }}
+	NextSeqNum uint64
+	// {{ syncDocIndent "CheckTailResponse.LastTimestamp" }}
+	LastTimestamp uint64
+}
+
+// {{ syncDoc "Operation" }}
+type Operation uint
+
+const (
+	// {{ syncDocIndent "Operation_OPERATION_UNSPECIFIED" }}
+	OperationUnspecified Operation = iota
+	// {{ syncDocIndent "Operation_OPERATION_LIST_BASINS" }}
+	OperationListBasins
+	// {{ syncDocIndent "Operation_OPERATION_CREATE_BASIN" }}
+	OperationCreateBasin
+	// {{ syncDocIndent "Operation_OPERATION_DELETE_BASIN" }}
+	OperationDeleteBasin
+	// {{ syncDocIndent "Operation_OPERATION_RECONFIGURE_BASIN" }}
+	OperationReconfigureBasin
+	// {{ syncDocIndent "Operation_OPERATION_GET_BASIN_CONFIG" }}
+	OperationGetBasinConfig
+	// {{ syncDocIndent "Operation_OPERATION_ISSUE_ACCESS_TOKEN" }}
+	OperationIssueAccessToken
+	// {{ syncDocIndent "Operation_OPERATION_REVOKE_ACCESS_TOKEN" }}
+	OperationRevokeAccessToken
+	// {{ syncDocIndent "Operation_OPERATION_LIST_ACCESS_TOKENS" }}
+	OperationListAccessTokens
+	// {{ syncDocIndent "Operation_OPERATION_LIST_STREAMS" }}
+	OperationListStreams
+	// {{ syncDocIndent "Operation_OPERATION_CREATE_STREAM" }}
+	OperationCreateStream
+	// {{ syncDocIndent "Operation_OPERATION_DELETE_STREAM" }}
+	OperationDeleteStream
+	// {{ syncDocIndent "Operation_OPERATION_GET_STREAM_CONFIG" }}
+	OperationGetStreamConfig
+	// {{ syncDocIndent "Operation_OPERATION_RECONFIGURE_STREAM" }}
+	OperationReconfigureStream
+	// {{ syncDocIndent "Operation_OPERATION_CHECK_TAIL" }}
+	OperationCheckTail
+	// {{ syncDocIndent "Operation_OPERATION_APPEND" }}
+	OperationAppend
+	// {{ syncDocIndent "Operation_OPERATION_READ" }}
+	OperationRead
+	// {{ syncDocIndent "Operation_OPERATION_TRIM" }}
+	OperationTrim
+	// {{ syncDocIndent "Operation_OPERATION_FENCE" }}
+	OperationFence
+	// {{ syncDocIndent "Operation_OPERATION_ACCOUNT_METRICS" }}
+	OperationAccountMetrics
+	// {{ syncDocIndent "Operation_OPERATION_BASIN_METRICS" }}
+	OperationBasinMetrics
+	// {{ syncDocIndent "Operation_OPERATION_STREAM_METRICS" }}
+	OperationStreamMetrics
+)
+
+// {{ syncDoc "ReadWritePermissions" }}
+type ReadWritePermissions struct {
+	// {{ syncDocIndent "ReadWritePermissions.Read" }}
+	Read bool
+	// {{ syncDocIndent "ReadWritePermissions.Write" }}
+	Write bool
+}
+
+// {{ syncDoc "PermittedOperationGroups" }}
+type PermittedOperationGroups struct {
+	// {{ syncDocIndent "PermittedOperationGroups.Account" }}
+	Account *ReadWritePermissions
+	// {{ syncDocIndent "PermittedOperationGroups.Basin" }}
+	Basin *ReadWritePermissions
+	// {{ syncDocIndent "PermittedOperationGroups.Stream" }}
+	Stream *ReadWritePermissions
+}
+
+// {{ syncDoc "ResourceSet" }}
+//
+// Valid types for ResourceSet are:
+//   - `ResourceSetExact`
+//   - `ResourceSetPrefix`
+type ResourceSet interface {
+	implResourceSet()
+	fmt.Stringer
+}
+
+// {{ syncDoc "ResourceSet_Exact.Exact" }}
+type ResourceSetExact string
+
+// {{ syncDoc "ResourceSet_Prefix.Prefix" }}
+type ResourceSetPrefix string
+
+// {{ syncDoc "AccessTokenScope" }}
+type AccessTokenScope struct {
+	// {{ syncDocIndent "AccessTokenScope.Basins" }}
+	Basins ResourceSet
+	// {{ syncDocIndent "AccessTokenScope.Streams" }}
+	Streams ResourceSet
+	// {{ syncDocIndent "AccessTokenScope.AccessTokens" }}
+	AccessTokens ResourceSet
+	// {{ syncDocIndent "AccessTokenScope.OpGroups" }}
+	OpGroups *PermittedOperationGroups
+	// {{ syncDocIndent "AccessTokenScope.Ops" }}
+	Ops []Operation
+}
+
+// {{ syncDoc "AccessTokenInfo" }}
+type AccessTokenInfo struct {
+	// {{ syncDocIndent "AccessTokenInfo.Id" }}
+	ID string
+	// {{ syncDocIndent "AccessTokenInfo.ExpiresAt" }}
+	ExpiresAt *time.Time
+	// {{ syncDocIndent "AccessTokenInfo.AutoPrefixStreams" }}
+	AutoPrefixStreams bool
+	// {{ syncDocIndent "AccessTokenInfo.Scope" }}
+	Scope *AccessTokenScope
+}
+
+// {{ syncDoc "ListAccessTokensRequest" }}
+type ListAccessTokensRequest struct {
+	// {{ syncDocIndent "ListAccessTokensRequest.Prefix" }}
+	Prefix string
+	// {{ syncDocIndent "ListAccessTokensRequest.StartAfter" }}
+	StartAfter string
+	// {{ syncDocIndent "ListAccessTokensRequest.Limit" }}
+	Limit *uint64
+}
+
+// {{ syncDoc "ListAccessTokensResponse" }}
+type ListAccessTokensResponse struct {
+	// {{ syncDocIndent "ListAccessTokensResponse.AccessTokens" }}
+	AccessTokens []AccessTokenInfo
+	// {{ syncDocIndent "ListAccessTokensResponse.HasMore" }}
+	HasMore bool
 }

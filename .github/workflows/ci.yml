@@ -42,7 +42,7 @@ jobs:
           version: 3.40.x
       - uses: arduino/setup-protoc@v3
         with:
-          version: 30.2
+          version: 29.3
       - name: Setup protoc
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -88,9 +88,9 @@ jobs:
         with:
           go-version: "1.23"
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.63
+          version: v2.1.6
 
   gen-lint:
     name: Code Generation Lint

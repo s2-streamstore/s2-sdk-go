@@ -15,7 +15,7 @@ func ExampleClient_CreateBasin() {
 		panic(err)
 	}
 
-	basinName := "my-basin"
+	const basinName = "my-basin"
 
 	defaultStreamConfig := s2.StreamConfig{
 		// Set default basin retention policy to 10 days
@@ -43,7 +43,7 @@ func ExampleBasinClient_CreateStream() {
 		panic(err)
 	}
 
-	streamName := "my-stream"
+	const streamName = "my-stream"
 
 	streamConfig := s2.StreamConfig{
 		StorageClass: s2.StorageClassExpress,
@@ -66,7 +66,7 @@ func ExampleClient_DeleteBasin() {
 		panic(err)
 	}
 
-	basinName := "my-basin"
+	const basinName = "my-basin"
 
 	if err := client.DeleteBasin(context.TODO(), &s2.DeleteBasinRequest{
 		Basin: basinName,
@@ -85,7 +85,7 @@ func ExampleBasinClient_DeleteStream() {
 		panic(err)
 	}
 
-	streamName := "my-stream"
+	const streamName = "my-stream"
 
 	if err := basinClient.DeleteStream(context.TODO(), &s2.DeleteStreamRequest{
 		Stream: streamName,
@@ -366,14 +366,17 @@ func ExampleStreamClient_AppendSession() {
 		// ...
 	}
 
+	fencingToken := "my-fencing-token"
 	recordSender, err := s2.NewAppendRecordBatchingSender(
 		sender,
-		s2.WithFencingToken([]byte("my-fencing-token")),
+		s2.WithFencingToken(&fencingToken),
 		s2.WithMaxBatchRecords(100),
 	)
+
 	if err != nil {
 		panic(err)
 	}
+
 	defer recordSender.Close()
 
 	send := make(chan error)
@@ -439,6 +442,38 @@ func ExampleStreamClient_ReadSession() {
 	}
 }
 
+func ExampleClient_IssueAccessToken() {
+	client, err := s2.NewClient("my-auth-token")
+	if err != nil {
+		panic(err)
+	}
+
+	tokenScope := &s2.AccessTokenScope{
+		Basins:  s2.ResourceSetPrefix("my-"),
+		Streams: s2.ResourceSetPrefix(""),
+		OpGroups: &s2.PermittedOperationGroups{
+			Stream: &s2.ReadWritePermissions{
+				Read:  true,
+				Write: true,
+			},
+		},
+	}
+
+	tokenInfo := &s2.AccessTokenInfo{
+		ID:                "my-access-token-id",
+		ExpiresAt:         optr.Some(time.Now().Add(24 * time.Hour)),
+		AutoPrefixStreams: false,
+		Scope:             tokenScope,
+	}
+
+	accessToken, err := client.IssueAccessToken(context.TODO(), tokenInfo)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Created access token: %s\n", accessToken)
+}
+
 func ExampleAppendRecordBatchingSender() {
 	streamClient, err := s2.NewStreamClient("my-basin", "my-stream", "my-auth-token")
 	if err != nil {
@@ -450,14 +485,17 @@ func ExampleAppendRecordBatchingSender() {
 		panic(err)
 	}
 
+	fencingToken := "my-fencing-token"
 	recordSender, err := s2.NewAppendRecordBatchingSender(
 		sender,
-		s2.WithFencingToken([]byte("my-fencing-token")),
+		s2.WithFencingToken(&fencingToken),
 		s2.WithMaxBatchRecords(100),
 	)
+
 	if err != nil {
 		panic(err)
 	}
+
 	defer recordSender.Close()
 
 	records := []s2.AppendRecord{
