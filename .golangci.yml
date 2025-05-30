@@ -1,7 +1,7 @@
 version: "2"
 
 linters:
-  disable-all: true
+  default: none
   disable:
     - errcheck
   enable:
@@ -40,16 +40,3 @@ linters:
     - wastedassign
     - whitespace
     - wsl
-
-linters-settings:
-  exhaustive:
-    default-signifies-exhaustive: true
-  gochecksumtype:
-    default-signifies-exhaustive: false
-
-issues:
-  exclude-rules:
-    - path: _test.go
-      linters:
-        - goconst
-        - forcetypeassert
