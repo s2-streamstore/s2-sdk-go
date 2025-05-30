@@ -440,6 +440,38 @@ func ExampleStreamClient_ReadSession() {
 	}
 }
 
+func ExampleClient_IssueAccessToken() {
+	client, err := s2.NewClient("my-auth-token")
+	if err != nil {
+		panic(err)
+	}
+
+	tokenScope := &s2.AccessTokenScope{
+		Basins:  s2.ResourceSetPrefix("my-"),
+		Streams: s2.ResourceSetPrefix(""),
+		OpGroups: &s2.PermittedOperationGroups{
+			Stream: &s2.ReadWritePermissions{
+				Read:  true,
+				Write: true,
+			},
+		},
+	}
+
+	tokenInfo := &s2.AccessTokenInfo{
+		ID:                "my-access-token-id",
+		ExpiresAt:         optr.Some(time.Now().Add(24 * time.Hour)),
+		AutoPrefixStreams: false,
+		Scope:             tokenScope,
+	}
+
+	accessToken, err := client.IssueAccessToken(context.TODO(), tokenInfo)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Created access token: %s\n", accessToken)
+}
+
 func ExampleAppendRecordBatchingSender() {
 	streamClient, err := s2.NewStreamClient("my-basin", "my-stream", "my-auth-token")
 	if err != nil {
