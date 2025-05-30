@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.0] - 2025-05-30
+
+### Features
+
+- *(sdk)* Access token requests ([#88](https://github.com/s2-streamstore/s2-sdk-go/issues/88))
+
+### Miscellaneous Tasks
+
+- Update protos ([#86](https://github.com/s2-streamstore/s2-sdk-go/issues/86))
+
 ## [v0.7.0] - 2025-03-26
 
 ### Features
