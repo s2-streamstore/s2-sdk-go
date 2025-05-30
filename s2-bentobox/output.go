@@ -19,7 +19,7 @@ type OutputConfig struct {
 	*Config
 	Stream       string
 	MaxInFlight  int
-	FencingToken []byte
+	FencingToken *string
 }
 
 type Output struct {

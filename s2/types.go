@@ -722,6 +722,12 @@ func operationFromProto(pbOp pb.Operation) (Operation, error) {
 		return OperationTrim, nil
 	case pb.Operation_OPERATION_FENCE:
 		return OperationFence, nil
+	case pb.Operation_OPERATION_ACCOUNT_METRICS:
+		return OperationAccountMetrics, nil
+	case pb.Operation_OPERATION_BASIN_METRICS:
+		return OperationAccountMetrics, nil
+	case pb.Operation_OPERATION_STREAM_METRICS:
+		return OperationAccountMetrics, nil
 	default:
 		return OperationUnspecified, fmt.Errorf("%w: %v", ErrUnknownOperation, pbOp)
 	}

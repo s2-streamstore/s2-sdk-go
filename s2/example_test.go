@@ -366,9 +366,10 @@ func ExampleStreamClient_AppendSession() {
 		// ...
 	}
 
+	fencingToken := "my-fencing-token"
 	recordSender, err := s2.NewAppendRecordBatchingSender(
 		sender,
-		s2.WithFencingToken([]byte("my-fencing-token")),
+		s2.WithFencingToken(&fencingToken),
 		s2.WithMaxBatchRecords(100),
 	)
 	if err != nil {
@@ -450,9 +451,10 @@ func ExampleAppendRecordBatchingSender() {
 		panic(err)
 	}
 
+	fencingToken := "my-fencing-token"
 	recordSender, err := s2.NewAppendRecordBatchingSender(
 		sender,
-		s2.WithFencingToken([]byte("my-fencing-token")),
+		s2.WithFencingToken(&fencingToken),
 		s2.WithMaxBatchRecords(100),
 	)
 	if err != nil {

@@ -232,7 +232,7 @@ func TestAppendRecordBatchingAppendInputOpts(t *testing.T) {
 		records = append(records, testRecord)
 	}
 
-	expectedFencingToken := []byte("hello")
+	expectedFencingToken := "hello"
 	expectedMatchSeqNum := uint64(10)
 
 	numBatchRecords := uint(3)
@@ -241,7 +241,7 @@ func TestAppendRecordBatchingAppendInputOpts(t *testing.T) {
 
 	recordSender, err := NewAppendRecordBatchingSender(
 		&batchSender,
-		WithFencingToken(expectedFencingToken),
+		WithFencingToken(&expectedFencingToken),
 		WithMatchSeqNum(expectedMatchSeqNum),
 		WithMaxBatchRecords(numBatchRecords),
 	)
@@ -264,7 +264,7 @@ func TestAppendRecordBatchingAppendInputOpts(t *testing.T) {
 
 	for _, input := range batches {
 		require.Equal(t, expectedRecords, input.Records.Records())
-		require.Equal(t, expectedFencingToken, input.FencingToken)
+		require.Equal(t, &expectedFencingToken, input.FencingToken)
 		require.NotNil(t, input.MatchSeqNum)
 		require.Equal(t, expectedMatchSeqNum, *input.MatchSeqNum)
 		expectedMatchSeqNum += uint64(numBatchRecords)

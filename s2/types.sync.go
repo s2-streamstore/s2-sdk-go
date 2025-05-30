@@ -328,7 +328,7 @@ type AppendInput struct {
 	// Enforce that the sequence number issued to the first record matches.
 	MatchSeqNum *uint64
 	// Enforce a fencing token which must have been previously set by a `fence` command record.
-	FencingToken []byte
+	FencingToken *string
 }
 
 // Output from append response.
@@ -413,6 +413,12 @@ const (
 	OperationTrim
 	// Set a fencing token for a stream.
 	OperationFence
+	// Retrieve account-level metrics.
+	OperationAccountMetrics
+	// Retrieve basin-level metrics.
+	OperationBasinMetrics
+	// Retrieve stream-level metrics.
+	OperationStreamMetrics
 )
 
 // Read/Write permissions.

@@ -295,7 +295,7 @@ type AppendInput struct {
 	// {{ syncDocIndent "AppendInput.MatchSeqNum" }}
 	MatchSeqNum *uint64
 	// {{ syncDocIndent "AppendInput.FencingToken" }}
-	FencingToken []byte
+	FencingToken *string
 }
 
 // {{ syncDoc "AppendOutput" }}
@@ -372,6 +372,12 @@ const (
 	OperationTrim
 	// {{ syncDocIndent "Operation_OPERATION_FENCE" }}
 	OperationFence
+	// {{ syncDocIndent "Operation_OPERATION_ACCOUNT_METRICS" }}
+	OperationAccountMetrics
+	// {{ syncDocIndent "Operation_OPERATION_BASIN_METRICS" }}
+	OperationBasinMetrics
+	// {{ syncDocIndent "Operation_OPERATION_STREAM_METRICS" }}
+	OperationStreamMetrics
 )
 
 // {{ syncDoc "ReadWritePermissions" }}

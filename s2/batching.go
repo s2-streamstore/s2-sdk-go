@@ -19,7 +19,7 @@ var (
 
 type appendRecordBatchingConfig struct {
 	MatchSeqNum     *uint64
-	FencingToken    []byte
+	FencingToken    *string
 	LingerDuration  time.Duration
 	MaxBatchRecords uint
 	MaxBatchBytes   uint
@@ -48,7 +48,7 @@ func WithMatchSeqNum(matchSeqNum uint64) AppendRecordBatchingConfigParam {
 }
 
 // Enforce a fencing token.
-func WithFencingToken(fencingToken []byte) AppendRecordBatchingConfigParam {
+func WithFencingToken(fencingToken *string) AppendRecordBatchingConfigParam {
 	return applyAppendRecordBatchingConfigParamFunc(func(arbc *appendRecordBatchingConfig) error {
 		arbc.FencingToken = fencingToken
 
