@@ -2696,7 +2696,11 @@ type ReadRequest struct {
 	// Limit how many records can be returned.
 	// This will get capped at the default limit,
 	// which is up to 1000 records or 1MiB of metered bytes.
-	Limit         *ReadLimit `protobuf:"bytes,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Limit *ReadLimit `protobuf:"bytes,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	// Exclusive timestamp to read until.
+	// If provided, this is applied as an additional constraint on top of the `limit`,
+	// and will guarantee that all records returned have timestamps < the provided `until`.
+	Until         *uint64 `protobuf:"varint,6,opt,name=until,proto3,oneof" json:"until,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2777,6 +2781,13 @@ func (x *ReadRequest) GetLimit() *ReadLimit {
 		return x.Limit
 	}
 	return nil
+}
+
+func (x *ReadRequest) GetUntil() uint64 {
+	if x != nil && x.Until != nil {
+		return *x.Until
+	}
+	return 0
 }
 
 type isReadRequest_Start interface {
@@ -2928,7 +2939,11 @@ type ReadSessionRequest struct {
 	// Heartbeats can be enabled to monitor end-to-end session health.
 	// A heartbeat will be sent when the initial switch to real-time tailing happens,
 	// as well as when no records are available at a randomized interval between 5 and 15 seconds.
-	Heartbeats    bool `protobuf:"varint,4,opt,name=heartbeats,proto3" json:"heartbeats,omitempty"`
+	Heartbeats bool `protobuf:"varint,4,opt,name=heartbeats,proto3" json:"heartbeats,omitempty"`
+	// Exclusive timestamp to read until.
+	// If provided, this is applied as an additional constraint on top of the `limit`,
+	// and will guarantee that all records returned have timestamps < the provided `until`.
+	Until         *uint64 `protobuf:"varint,7,opt,name=until,proto3,oneof" json:"until,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3016,6 +3031,13 @@ func (x *ReadSessionRequest) GetHeartbeats() bool {
 		return x.Heartbeats
 	}
 	return false
+}
+
+func (x *ReadSessionRequest) GetUntil() uint64 {
+	if x != nil && x.Until != nil {
+		return *x.Until
+	}
+	return 0
 }
 
 type isReadSessionRequest_Start interface {
@@ -3750,22 +3772,24 @@ const file_s2_proto_rawDesc = "" +
 	"\x05batch\x18\x01 \x01(\v2 .s2.v1alpha.SequencedRecordBatchH\x00R\x05batch\x12\"\n" +
 	"\fnext_seq_num\x18\x03 \x01(\x04H\x00R\n" +
 	"nextSeqNumB\b\n" +
-	"\x06outputJ\x04\b\x02\x10\x03\"\xb9\x01\n" +
+	"\x06outputJ\x04\b\x02\x10\x03\"\xde\x01\n" +
 	"\vReadRequest\x12\x16\n" +
 	"\x06stream\x18\x01 \x01(\tR\x06stream\x12\x19\n" +
 	"\aseq_num\x18\x02 \x01(\x04H\x00R\x06seqNum\x12\x1e\n" +
 	"\ttimestamp\x18\x04 \x01(\x04H\x00R\ttimestamp\x12!\n" +
 	"\vtail_offset\x18\x05 \x01(\x04H\x00R\n" +
 	"tailOffset\x12+\n" +
-	"\x05limit\x18\x03 \x01(\v2\x15.s2.v1alpha.ReadLimitR\x05limitB\a\n" +
-	"\x05start\">\n" +
+	"\x05limit\x18\x03 \x01(\v2\x15.s2.v1alpha.ReadLimitR\x05limit\x12\x19\n" +
+	"\x05until\x18\x06 \x01(\x04H\x01R\x05until\x88\x01\x01B\a\n" +
+	"\x05startB\b\n" +
+	"\x06_until\">\n" +
 	"\fReadResponse\x12.\n" +
 	"\x06output\x18\x01 \x01(\v2\x16.s2.v1alpha.ReadOutputR\x06output\"U\n" +
 	"\tReadLimit\x12\x19\n" +
 	"\x05count\x18\x01 \x01(\x04H\x00R\x05count\x88\x01\x01\x12\x19\n" +
 	"\x05bytes\x18\x02 \x01(\x04H\x01R\x05bytes\x88\x01\x01B\b\n" +
 	"\x06_countB\b\n" +
-	"\x06_bytes\"\xe0\x01\n" +
+	"\x06_bytes\"\x85\x02\n" +
 	"\x12ReadSessionRequest\x12\x16\n" +
 	"\x06stream\x18\x01 \x01(\tR\x06stream\x12\x19\n" +
 	"\aseq_num\x18\x02 \x01(\x04H\x00R\x06seqNum\x12\x1e\n" +
@@ -3775,8 +3799,10 @@ const file_s2_proto_rawDesc = "" +
 	"\x05limit\x18\x03 \x01(\v2\x15.s2.v1alpha.ReadLimitR\x05limit\x12\x1e\n" +
 	"\n" +
 	"heartbeats\x18\x04 \x01(\bR\n" +
-	"heartbeatsB\a\n" +
-	"\x05start\"U\n" +
+	"heartbeats\x12\x19\n" +
+	"\x05until\x18\a \x01(\x04H\x01R\x05until\x88\x01\x01B\a\n" +
+	"\x05startB\b\n" +
+	"\x06_until\"U\n" +
 	"\x13ReadSessionResponse\x123\n" +
 	"\x06output\x18\x01 \x01(\v2\x16.s2.v1alpha.ReadOutputH\x00R\x06output\x88\x01\x01B\t\n" +
 	"\a_output\"\xbc\x02\n" +
