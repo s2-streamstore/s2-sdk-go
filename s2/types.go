@@ -749,7 +749,7 @@ func operationsFromProto(pbOps []pb.Operation) ([]Operation, error) {
 }
 
 func resourceSetFromProto(pbSet *pb.ResourceSet) (ResourceSet, error) {
-	if pbSet == nil {
+	if pbSet == nil || pbSet.Matching == nil {
 		// Most restrictive when nil.
 		return ResourceSetExact(""), nil
 	}
