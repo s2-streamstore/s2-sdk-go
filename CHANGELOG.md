@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.0] - 2025-06-16
+
+### Bug Fixes
+
+- Revoking access token error ([#95](https://github.com/s2-streamstore/s2-sdk-go/issues/95))
+
 ## [v0.8.0] - 2025-05-30
 
 ### Features
