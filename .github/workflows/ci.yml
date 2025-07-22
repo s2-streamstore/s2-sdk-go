@@ -40,6 +40,7 @@ jobs:
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: arduino/setup-protoc@v3
         with:
           version: 29.3
@@ -67,6 +68,7 @@ jobs:
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: arduino/setup-protoc@v3
         with:
           version: 29.3
@@ -105,6 +107,7 @@ jobs:
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: arduino/setup-protoc@v3
         with:
           version: 29.3
@@ -113,4 +116,4 @@ jobs:
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
       - name: Lint
-        run: task lint:gen
+        run: task lint:gen 
