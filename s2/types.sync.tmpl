@@ -218,6 +218,10 @@ type ReadRequest struct {
 	Start ReadStart
 	// {{ syncDocIndent "ReadRequest.Limit" }}
 	Limit ReadLimit
+	// {{ syncDocIndent "ReadRequest.Until" }}
+	Until *uint64
+	// {{ syncDocIndent "ReadRequest.Clamp" }}
+	Clamp bool
 }
 
 // {{ syncDoc "Header" }}
@@ -320,6 +324,12 @@ type ReadSessionRequest struct {
 	Start ReadStart
 	// {{ syncDocIndent "ReadSessionRequest.Limit" }}
 	Limit ReadLimit
+	// {{ syncDocIndent "ReadSessionRequest.Heartbeats" }}
+	Heartbeats bool
+	// {{ syncDocIndent "ReadSessionRequest.Until" }}
+	Until *uint64
+	// {{ syncDocIndent "ReadSessionRequest.Clamp" }}
+	Clamp bool
 }
 
 // {{ syncDoc "CheckTailResponse" }}

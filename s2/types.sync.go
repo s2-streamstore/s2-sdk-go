@@ -241,6 +241,12 @@ type ReadRequest struct {
 	// This will get capped at the default limit,
 	// which is up to 1000 records or 1MiB of metered bytes.
 	Limit ReadLimit
+	// Exclusive timestamp to read until.
+	// If provided, this is applied as an additional constraint on top of the `limit`,
+	// and will guarantee that all records returned have timestamps < the provided `until`.
+	Until *uint64
+	// Clamp the start position at the tail position.
+	Clamp bool
 }
 
 // Headers add structured information to a record as name-value pairs.
@@ -359,6 +365,16 @@ type ReadSessionRequest struct {
 	// If no limit is specified, the session will remain open after catching up to the tail, and continue tailing as
 	// new messages are written to the stream.
 	Limit ReadLimit
+	// Heartbeats can be enabled to monitor end-to-end session health.
+	// A heartbeat will be sent when the initial switch to real-time tailing happens,
+	// as well as when no records are available at a randomized interval between 5 and 15 seconds.
+	Heartbeats bool
+	// Exclusive timestamp to read until.
+	// If provided, this is applied as an additional constraint on top of the `limit`,
+	// and will guarantee that all records returned have timestamps < the provided `until`.
+	Until *uint64
+	// Clamp the start position at the tail position.
+	Clamp bool
 }
 
 // Check tail response.
