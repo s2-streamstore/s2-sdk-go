@@ -148,6 +148,8 @@ func (r *readServiceRequest) Send(ctx context.Context) (ReadOutput, error) {
 	req := &pb.ReadRequest{
 		Stream: r.Stream,
 		Limit:  limit,
+		Until:  r.Req.Until,
+		Clamp:  r.Req.Clamp,
 	}
 
 	switch s := r.Req.Start.(type) {
@@ -204,7 +206,9 @@ func (r *readSessionServiceRequest) Send(ctx context.Context) (Receiver[ReadOutp
 	req := &pb.ReadSessionRequest{
 		Stream:     r.Stream,
 		Limit:      limit,
-		Heartbeats: false,
+		Heartbeats: r.Req.Heartbeats,
+		Until:      r.Req.Until,
+		Clamp:      r.Req.Clamp,
 	}
 
 	switch s := r.Req.Start.(type) {

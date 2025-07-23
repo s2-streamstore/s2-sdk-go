@@ -40,6 +40,7 @@ jobs:
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: arduino/setup-protoc@v3
         with:
           version: 29.3
@@ -67,9 +68,10 @@ jobs:
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: arduino/setup-protoc@v3
         with:
-          version: 30.2
+          version: 29.3
       - name: Setup protoc
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -105,9 +107,10 @@ jobs:
       - uses: arduino/setup-task@v2
         with:
           version: 3.40.x
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: arduino/setup-protoc@v3
         with:
-          version: 30.2
+          version: 29.3
       - name: Setup protoc
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
