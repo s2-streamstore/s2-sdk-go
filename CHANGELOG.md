@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.10.0] - 2025-07-23
+
+### Features
+
+- Clamp ([#99](https://github.com/s2-streamstore/s2-sdk-go/issues/99))
+
 ## [v0.9.0] - 2025-06-16
 
 ### Bug Fixes
