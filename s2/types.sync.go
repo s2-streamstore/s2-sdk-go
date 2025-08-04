@@ -246,6 +246,7 @@ type ReadRequest struct {
 	// and will guarantee that all records returned have timestamps < the provided `until`.
 	Until *uint64
 	// Clamp the start position at the tail position.
+	// If set, the read will start at the tail of the stream if the requested position is greater than it.
 	Clamp bool
 }
 
