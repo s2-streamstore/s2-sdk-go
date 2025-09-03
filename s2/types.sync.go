@@ -104,7 +104,7 @@ const (
 )
 
 // Age in seconds for automatic trimming of records older than this threshold.
-// If set to 0, the stream will have infinite retention.
+// (While S2 is in public preview, this is capped at 28 days. Let us know if you'd like the cap removed.)
 type RetentionPolicyAge time.Duration
 
 // Timestamping mode.
@@ -246,6 +246,7 @@ type ReadRequest struct {
 	// and will guarantee that all records returned have timestamps < the provided `until`.
 	Until *uint64
 	// Clamp the start position at the tail position.
+	// If set, the read will start at the tail of the stream if the requested position is greater than it.
 	Clamp bool
 }
 
