@@ -104,7 +104,8 @@ const (
 )
 
 // Age in seconds for automatic trimming of records older than this threshold.
-// If set to 0, the stream will have infinite retention.
+// This must be set to a value greater than 0 seconds.
+// (While S2 is in public preview, this is capped at 28 days. Let us know if you'd like the cap removed.)
 type RetentionPolicyAge time.Duration
 
 // Timestamping mode.
@@ -245,7 +246,8 @@ type ReadRequest struct {
 	// If provided, this is applied as an additional constraint on top of the `limit`,
 	// and will guarantee that all records returned have timestamps < the provided `until`.
 	Until *uint64
-	// Clamp the start position at the tail position.
+	// Start reading from the tail if the requested position is beyond it.
+	// Otherwise, the next sequence number will be returned.
 	Clamp bool
 }
 
@@ -362,18 +364,19 @@ type ReadSessionRequest struct {
 	Start ReadStart
 	// Limit on how many records can be returned. When a limit is specified, the session will be terminated as soon as
 	// the limit is met, or when the current tail of the stream is reached -- whichever occurs first.
-	// If no limit is specified, the session will remain open after catching up to the tail, and continue tailing as
-	// new messages are written to the stream.
+	// If no limit is specified, the session will remain open after catching up to the tail, and continue following
+	// in real-time as new messages are written to the stream.
 	Limit ReadLimit
 	// Heartbeats can be enabled to monitor end-to-end session health.
-	// A heartbeat will be sent when the initial switch to real-time tailing happens,
+	// A heartbeat will be sent when the initial switch to following in real-time happens,
 	// as well as when no records are available at a randomized interval between 5 and 15 seconds.
 	Heartbeats bool
 	// Exclusive timestamp to read until.
 	// If provided, this is applied as an additional constraint on top of the `limit`,
 	// and will guarantee that all records returned have timestamps < the provided `until`.
 	Until *uint64
-	// Clamp the start position at the tail position.
+	// Start reading from the tail if the requested position is beyond it.
+	// Otherwise, the next sequence number will be returned.
 	Clamp bool
 }
 
