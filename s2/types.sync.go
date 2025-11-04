@@ -105,7 +105,6 @@ const (
 
 // Age in seconds for automatic trimming of records older than this threshold.
 // This must be set to a value greater than 0 seconds.
-// (While S2 is in public preview, this is capped at 28 days. Let us know if you'd like the cap removed.)
 type RetentionPolicyAge time.Duration
 
 // Timestamping mode.
