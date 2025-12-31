@@ -25,70 +25,87 @@
 </div>
 
 The Go SDK provides ergonomic wrappers and utilities to interact with the
-[S2 API](https://s2.dev/docs/interface/grpc).
+[S2 API](https://s2.dev/docs).
 
 ## Getting started
 
 1. Create a new Go project:
    ```bash
-   mkdir s2-sdk-test
-   cd s2-sdk-test
-   go mod init example.com/s2-sdk-test
-   touch main.go
+   mkdir s2-example
+   cd s2-example
+   go mod init example.com/s2-example
    ```
 
-1. Add the `s2` dependency to your project:
+2. Add the SDK dependency:
    ```bash
    go get github.com/s2-streamstore/s2-sdk-go/s2@latest
    ```
 
-1. Generate an authentication token by logging onto the web console at
+3. Generate an authentication token by logging onto the web console at
    [s2.dev](https://s2.dev/dashboard).
 
-1. Make a request using SDK client.
-   ```go
-   // main.go
+4. Set the token as an environment variable:
+   ```bash
+   export S2_ACCESS_TOKEN="<your auth token>"
+   ```
 
+5. Create a simple program:
+   ```go
    package main
 
    import (
-     "context"
-     "fmt"
+       "context"
+       "fmt"
+       "log"
+       "os"
 
-     "github.com/s2-streamstore/s2-sdk-go/s2"
+       "github.com/s2-streamstore/s2-sdk-go/s2"
    )
 
    func main() {
-     client, err := s2.NewClient("<YOUR AUTH TOKEN>")
-     if err != nil {
-       panic(err)
-     }
+       client := s2.New(os.Getenv("S2_ACCESS_TOKEN"), nil)
 
-     basins, err := client.ListBasins(context.TODO(), &s2.ListBasinsRequest{})
-     if err != nil {
-       panic(err)
-     }
-
-     fmt.Println(basins)
+       basins := client.Basins.Iter(context.Background(), nil)
+       for basins.Next() {
+           fmt.Printf("Basin: %s\n", basins.Value().Name)
+       }
+       if err := basins.Err(); err != nil {
+           log.Fatal(err)
+       }
    }
    ```
 
-   Run the above program using `go run main.go`.
+   Run with `go run main.go`.
 
 ## Examples
 
-The [`s2/example_test.go`](./s2/example_test.go) contains a variety of example
-use cases demonstrating how to use the SDK effectively.
+The [`examples/`](./examples) directory contains various examples:
+
+| Example | Description |
+|---------|-------------|
+| [`unary`](./examples/unary) | Simple append and read operations |
+| [`append_session`](./examples/append_session) | High-throughput streaming appends |
+| [`batched_append_session`](./examples/batched_append_session) | Batched appends |
+| [`read_session`](./examples/read_session) | Streaming reads with backpressure |
+| [`list_iter`](./examples/list_iter) | Iterating over basins, streams, and tokens |
+| [`access_tokens`](./examples/access_tokens) | Issuing and revoking access tokens |
+| [`starwars`](./examples/starwars) | Stream Star Wars ASCII animation through S2 |
+
+Run any example:
+```bash
+# edit the code to set an appropriate basin and stream
+export S2_ACCESS_TOKEN="<your auth token>"
+go run ./examples/unary
+```
 
 ### Starwars
 
-For a more practical example, try out the SDK by running the Starwars example:
+For a fun demo, try streaming the Star Wars ASCII animation through S2:
 
 ```bash
-go run ./examples/starwars \
-  -basin "<basin name>"    \
-  -stream "<stream name>"  \
-  -token "<auth token>"
+# edit the code to set an appropriate basin and stream
+export S2_ACCESS_TOKEN="<your auth token>"
+go run ./examples/starwars -basin "<basin name>" -stream "<stream name>"
 ```
 
 ## SDK Docs and Reference
@@ -117,4 +134,4 @@ You can also email us at [hi@s2.dev](mailto:hi@s2.dev).
 
 ## License
 
-This project is licensed under the [Apache-2.0 License](./LICENSE).
+This project is licensed under the [MIT License](./LICENSE).

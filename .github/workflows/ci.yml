@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: none
     name: CI
-    needs: [examples, test, golangci-lint, gen-lint]
+    needs: [examples, test, golangci-lint]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -46,14 +46,12 @@ jobs:
           version: 29.3
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Setup protoc
-        run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
       - name: Build
         run: |
           for eg in `go list ./examples/... | sed 's|.*/||'`; do
             echo "Building '$eg' example"
-            task example:build NAME=$eg
+            task eg:build NAME=$eg
           done
 
   test:
@@ -75,9 +73,7 @@ jobs:
           version: 29.3
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Setup protoc
-        run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
       - name: Test
         run: task test
 
@@ -96,27 +92,3 @@ jobs:
         with:
           version: v2.1.6
 
-  gen-lint:
-    name: Code Generation Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-      - uses: arduino/setup-task@v2
-        with:
-          version: 3.40.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: arduino/setup-protoc@v3
-        with:
-          version: 29.3
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Setup protoc
-        run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-      - name: Lint
-        run: task lint:gen

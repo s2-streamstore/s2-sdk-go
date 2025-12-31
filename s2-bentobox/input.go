@@ -1,4 +1,4 @@
-package s2bentobox
+package bentobox
 
 import (
 	"context"
@@ -6,10 +6,15 @@ import (
 	"time"
 
 	cmap "github.com/orcaman/concurrent-map/v2"
-	"github.com/s2-streamstore/s2-sdk-go/s2"
+	s2 "github.com/s2-streamstore/s2-sdk-go/s2"
 )
 
 var ErrInputClosed = errors.New("input closed")
+
+type (
+	Stream  = string
+	AckFunc = func(ctx context.Context, err error) error
+)
 
 type SeqNumCache interface {
 	Get(ctx context.Context, stream string) (uint64, error)
@@ -31,9 +36,12 @@ func newSeqNumCache(inner SeqNumCache) *seqNumCache {
 }
 
 func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
-	seqNum, ok := s.mem.Get(stream)
-	if ok {
-		return seqNum, nil
+	if val, ok := s.mem.Get(stream); ok {
+		return val, nil
+	}
+
+	if s.inner == nil {
+		return 0, nil
 	}
 
 	cached, err := s.inner.Get(ctx, stream)
@@ -47,24 +55,24 @@ func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 }
 
 func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum uint64) error {
-	if err := s.inner.Set(ctx, stream, seqNum); err != nil {
-		return err
+	if s.inner != nil {
+		if err := s.inner.Set(ctx, stream, seqNum); err != nil {
+			return err
+		}
 	}
-
 	s.mem.Set(stream, seqNum)
-
 	return nil
 }
 
 type InputStreams interface {
-	list(ctx context.Context, client *s2.BasinClient) ([]string, error)
+	list(ctx context.Context, basin *s2.BasinClient) ([]string, error)
 }
 
 type StaticInputStreams struct {
 	Streams []string
 }
 
-func (s StaticInputStreams) list(context.Context, *s2.BasinClient) ([]string, error) { //nolint:unparam
+func (s StaticInputStreams) list(context.Context, *s2.BasinClient) ([]string, error) {
 	return s.Streams, nil
 }
 
@@ -72,30 +80,18 @@ type PrefixedInputStreams struct {
 	Prefix string
 }
 
-func (p PrefixedInputStreams) list(ctx context.Context, client *s2.BasinClient) ([]string, error) {
-	var (
-		hasMore    = true
-		streams    []string
-		startAfter string
-	)
+func (p PrefixedInputStreams) list(ctx context.Context, basin *s2.BasinClient) ([]string, error) {
+	var streams []string
 
-	for hasMore {
-		list, err := client.ListStreams(ctx, &s2.ListStreamsRequest{Prefix: p.Prefix, StartAfter: startAfter})
-		if err != nil {
-			return nil, err
+	iter := basin.Streams.Iter(ctx, &s2.ListStreamsArgs{Prefix: p.Prefix})
+	for iter.Next() {
+		info := iter.Value()
+		if info.DeletedAt == nil {
+			streams = append(streams, string(info.Name))
 		}
-
-		for _, stream := range list.Streams {
-			if stream.DeletedAt != nil {
-				// The stream is deleted.
-				continue
-			}
-
-			streams = append(streams, stream.Name)
-			startAfter = stream.Name
-		}
-
-		hasMore = list.HasMore
+	}
+	if err := iter.Err(); err != nil {
+		return nil, err
 	}
 
 	return streams, nil
@@ -114,16 +110,15 @@ type InputConfig struct {
 	MaxInFlight           int
 	UpdateStreamsInterval time.Duration
 	Cache                 SeqNumCache
-	Logger                Logger
 	BackoffDuration       time.Duration
 	StartSeqNum           InputStartSeqNum
 }
 
 type recvOutput struct {
-	Stream string
-	Batch  []s2.SequencedRecord
-	AckFunc
-	Err error
+	Stream  string
+	Batch   []s2.SequencedRecord
+	AckFunc AckFunc
+	Err     error
 }
 
 type streamWorker struct {

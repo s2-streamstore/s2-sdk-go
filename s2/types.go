@@ -1,974 +1,524 @@
 package s2
 
 import (
-	"encoding/binary"
-	"errors"
-	"fmt"
-	"math/rand/v2"
 	"time"
+)
 
-	"github.com/s2-streamstore/optr"
-	"github.com/s2-streamstore/s2-sdk-go/internal/pb"
+// Access token ID.
+type AccessTokenID string
+
+// Basin name which must be globally unique.
+// It can be between 8 and 48 characters in length, and comprise lowercase letters, numbers and hyphens.
+// It cannot begin or end with a hyphen.
+type BasinName string
+type StreamName string
+type BasinScope string
+type BasinState string
+type MetricUnit string
+type TimeseriesInterval string
+type AccountMetricSet string
+type BasinMetricSet string
+type StreamMetricSet string
+type MetricSample [2]float64
+type StorageClass string
+type TimestampingMode string
+
+const (
+	BasinScopeAwsUsEast1 BasinScope = "aws:us-east-1"
 )
 
 const (
-	mibBytes uint = 1024 * 1024
-
-	// Maximum metered bytes of a record.
-	MaxRecordBytes = mibBytes
-	// Maximum metered bytes of a batch.
-	MaxBatchBytes = mibBytes
-	// Maximum number of records that a batch can hold.
-	MaxBatchRecords = 1000
-
-	unspecifiedEnumVariant = "unspecified"
+	BasinStateActive   BasinState = "active"
+	BasinStateCreating BasinState = "creating"
+	BasinStateDeleting BasinState = "deleting"
 )
 
-// Type conversion errors.
-var (
-	ErrUnknownBasinState       = errors.New("unknown basin state")
-	ErrUnknownBasinScope       = errors.New("unknown basin scope")
-	ErrUnknownStorageClass     = errors.New("unknown storage class")
-	ErrUnknownTimestampingMode = errors.New("unknown timestamping mode")
-	ErrUnknownRetentionPolicy  = errors.New("unknown retention policy")
-	ErrUnknownReadOutput       = errors.New("unknown read output")
-	ErrUnknownOperation        = errors.New("unknown operation")
-	ErrUnknownResourceSet      = errors.New("unknown resource set")
-
-	// Sentinel error to signify a heartbeat message.
-	errHeartbeatMessage = errors.New("heartbeat")
+const (
+	MetricUnitBytes      MetricUnit = "bytes"
+	MetricUnitOperations MetricUnit = "operations"
 )
 
-// Metered size of the object in bytes.
-//
-// Bytes are calculated using the “metered bytes” formula:
-//
-//	metered_bytes = lambda record: 8 + 2 * len(record.headers) \
-//	 + sum((len(h.key) + len(h.value)) for h in record.headers) \
-//	 + len(record.body)
-type MeteredBytes interface {
-	MeteredBytes() uint
+const (
+	TimeseriesIntervalMinute TimeseriesInterval = "minute"
+	TimeseriesIntervalHour   TimeseriesInterval = "hour"
+	TimeseriesIntervalDay    TimeseriesInterval = "day"
+)
+
+const (
+	AccountMetricSetActiveBasins AccountMetricSet = "active-basins"
+	AccountMetricSetAccountOps   AccountMetricSet = "account-ops"
+)
+
+const (
+	BasinMetricSetStorage          BasinMetricSet = "storage"
+	BasinMetricSetAppendOps        BasinMetricSet = "append-ops"
+	BasinMetricSetReadOps          BasinMetricSet = "read-ops"
+	BasinMetricSetReadThroughput   BasinMetricSet = "read-throughput"
+	BasinMetricSetAppendThroughput BasinMetricSet = "append-throughput"
+	BasinMetricSetBasinOps         BasinMetricSet = "basin-ops"
+)
+
+const (
+	StreamMetricSetStorage StreamMetricSet = "storage"
+)
+
+const (
+	StorageClassStandard StorageClass = "standard"
+	StorageClassExpress  StorageClass = "express"
+)
+
+const (
+	TimestampingModeClientPrefer  TimestampingMode = "client-prefer"
+	TimestampingModeClientRequire TimestampingMode = "client-require"
+	TimestampingModeArrival       TimestampingMode = "arrival"
+)
+
+type AccessTokenInfo struct {
+	// Access token ID.
+	// It must be unique to the account and between 1 and 96 bytes in length.
+	ID AccessTokenID `json:"id"`
+	// Access token scope.
+	Scope AccessTokenScope `json:"scope"`
+	// Namespace streams based on the configured stream-level scope, which must be a prefix.
+	// Stream name arguments will be automatically prefixed, and the prefix will be stripped when listing streams.
+	AutoPrefixStreams bool `json:"auto_prefix_streams,omitempty"`
+	// Expiration time.
+	// If not set, the expiration will be set to that of the requestor's token.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
-// Metered bytes for an AppendRecord.
-func (r *AppendRecord) MeteredBytes() uint {
-	bytes := 8 + (2 * uint(len(r.Headers))) + uint(len(r.Body))
-	for _, header := range r.Headers {
-		bytes += uint(len(header.Name)) + uint(len(header.Value))
-	}
-
-	return bytes
+// Access token scope.
+type AccessTokenScope struct {
+	// Token IDs allowed.
+	AccessTokens *ResourceSet `json:"access_tokens,omitempty"`
+	// Basin names allowed.
+	Basins *ResourceSet `json:"basins,omitempty"`
+	// Access permissions at operation group level.
+	OpGroups *PermittedOperationGroups `json:"op_groups,omitempty"`
+	// Operations allowed for the token.
+	// A union of allowed operations and groups is used as an effective set of allowed operations.
+	Ops []string `json:"ops,omitempty"`
+	// Stream names allowed.
+	Streams *ResourceSet `json:"streams,omitempty"`
 }
 
-// Metered bytes for a SequencedRecord.
-func (r *SequencedRecord) MeteredBytes() uint {
-	bytes := 8 + (2 * uint(len(r.Headers))) + uint(len(r.Body))
-	for _, header := range r.Headers {
-		bytes += uint(len(header.Name)) + uint(len(header.Value))
-	}
+const (
+	OperationListBasins        = "list-basins"
+	OperationCreateBasin       = "create-basin"
+	OperationDeleteBasin       = "delete-basin"
+	OperationReconfigureBasin  = "reconfigure-basin"
+	OperationGetBasinConfig    = "get-basin-config"
+	OperationIssueAccessToken  = "issue-access-token"
+	OperationRevokeAccessToken = "revoke-access-token"
+	OperationListAccessTokens  = "list-access-tokens"
+	OperationListStreams       = "list-streams"
+	OperationCreateStream      = "create-stream"
+	OperationDeleteStream      = "delete-stream"
+	OperationGetStreamConfig   = "get-stream-config"
+	OperationReconfigureStream = "reconfigure-stream"
+	OperationCheckTail         = "check-tail"
+	OperationAppend            = "append"
+	OperationRead              = "read"
+	OperationTrim              = "trim"
+	OperationFence             = "fence"
+	OperationAccountMetrics    = "account-metrics"
+	OperationBasinMetrics      = "basin-metrics"
+	OperationStreamMetrics     = "stream-metrics"
+)
 
-	return bytes
+type ResourceSet struct {
+	// Match only the resource with this exact name.
+	// Use an empty string to match no resources.
+	Exact *string `json:"exact,omitempty"`
+	// Match all resources that start with this prefix.
+	// Use an empty string to match all resource.
+	Prefix *string `json:"prefix,omitempty"`
 }
 
-// Metered bytes for a SequencedRecordBatch.
-func (b *ReadOutputBatch) MeteredBytes() uint {
-	var bytes uint
-	for i := range len(b.Records) {
-		bytes += b.Records[i].MeteredBytes()
-	}
-
-	return bytes
+// Access permissions at operation group level.
+type PermittedOperationGroups struct {
+	// Account-level access permissions.
+	Account *ReadWritePermissions `json:"account,omitempty"`
+	// Basin-level access permissions.
+	Basin *ReadWritePermissions `json:"basin,omitempty"`
+	// Stream-level access permissions.
+	Stream *ReadWritePermissions `json:"stream,omitempty"`
 }
 
-// A collection of append records that can be sent together in a batch.
-type AppendRecordBatch struct {
-	records      []AppendRecord
-	meteredBytes uint
-	maxCapacity  uint
-	maxBytes     uint
+type ReadWritePermissions struct {
+	// Read permission.
+	Read bool `json:"read,omitempty"`
+	// Write permission.
+	Write bool `json:"write,omitempty"`
 }
 
-func newAppendRecordBatch(maxCapacity, maxBytes uint, records ...AppendRecord) (*AppendRecordBatch, []AppendRecord) {
-	var (
-		i            uint
-		meteredBytes uint
-	)
-
-	for range uint(len(records)) {
-		recordBytes := records[i].MeteredBytes()
-
-		if i >= maxCapacity || meteredBytes+recordBytes > maxBytes {
-			break
-		}
-
-		i++
-		meteredBytes += recordBytes
-	}
-
-	return &AppendRecordBatch{
-		records:      records[:i],
-		meteredBytes: meteredBytes,
-		maxCapacity:  maxCapacity,
-		maxBytes:     maxBytes,
-	}, records[i:]
+type BasinInfo struct {
+	// Basin name.
+	Name BasinName `json:"name"`
+	// Basin scope.
+	Scope BasinScope `json:"scope"`
+	// Basin state.
+	State BasinState `json:"state"`
 }
 
-func newEmptyAppendRecordBatch(maxCapacity, maxBytes uint) *AppendRecordBatch {
-	batch, leftOver := newAppendRecordBatch(maxCapacity, maxBytes)
-	if len(leftOver) != 0 {
-		panic("empty append record batch should not have any left-overs")
-	}
-
-	return batch
+type BasinConfig struct {
+	// Create stream on append if it doesn't exist, using the default stream configuration.
+	CreateStreamOnAppend *bool `json:"create_stream_on_append,omitempty"`
+	// Create stream on read if it doesn't exist, using the default stream configuration.
+	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
+	// Default stream configuration.
+	DefaultStreamConfig *StreamConfig `json:"default_stream_config,omitempty"`
 }
 
-// Try creating a record batch from records.
-//
-// If all the items of the iterator cannot be drained into the batch, a non-empty slice of records is returned along
-// with the batch containing all the records it could fit.
-//
-//	batch, leftOver := NewAppendRecordBatch(records...)
-//	batches := []*AppendRecordBatch{batch}
-//	for len(leftOver) > 0 {
-//		batch, leftOver = NewAppendRecordBatch(leftOver...)
-//		batches = append(batches, batch)
-//	}
-func NewAppendRecordBatch(records ...AppendRecord) (*AppendRecordBatch, []AppendRecord) {
-	return newAppendRecordBatch(MaxBatchRecords, MaxBatchBytes, records...)
+type StreamInfo struct {
+	Name StreamName `json:"name"`
+	// Creation time.
+	CreatedAt time.Time `json:"created_at"`
+	// Deletion time, if the stream is being deleted.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
-// Try creating a record batch with custom max capacity from records.
-//
-// See NewAppendRecordBatch for more details.
-func NewAppendRecordBatchWithMaxCapacity(
-	maxCapacity uint,
-	records ...AppendRecord,
-) (*AppendRecordBatch, []AppendRecord) {
-	return newAppendRecordBatch(maxCapacity, MaxBatchBytes, records...)
+type StreamConfig struct {
+	// Delete-on-empty configuration.
+	DeleteOnEmpty *DeleteOnEmptyConfig `json:"delete_on_empty,omitempty"`
+	// Retention policy for the stream.
+	// If unspecified, the default is to retain records for 7 days.
+	RetentionPolicy *RetentionPolicy `json:"retention_policy,omitempty"`
+	// Storage class for recent writes.
+	StorageClass *StorageClass `json:"storage_class,omitempty"`
+	// Timestamping behavior.
+	Timestamping *TimestampingConfig `json:"timestamping,omitempty"`
 }
 
-// Try appending a record in the batch. Returns false if we cannot append the record.
-func (b *AppendRecordBatch) Append(record AppendRecord) bool {
-	recordBytes := record.MeteredBytes()
-	if uint(len(b.records)) == b.maxCapacity || b.meteredBytes+recordBytes > b.maxBytes {
-		return false
-	}
-
-	b.records = append(b.records, record)
-	b.meteredBytes += recordBytes
-
-	return true
+type DeleteOnEmptyConfig struct {
+	// Minimum age in seconds before an empty stream can be deleted.
+	// Set to 0 (default) to disable delete-on-empty (don't delete automatically).
+	MinAgeSecs *int64 `json:"min_age_secs,omitempty"`
 }
 
-// Number of records in the batch.
-func (b *AppendRecordBatch) Len() uint {
-	return uint(len(b.records))
+type RetentionPolicy struct {
+	// Age limits records to a specific age window (seconds).
+	Age *int64 `json:"age,omitempty"`
+	// Retain records unless explicitly trimmed.
+	Infinite *InfiniteRetention `json:"infinite,omitempty"`
 }
 
-// Returns true if there are no records in the batch.
-func (b *AppendRecordBatch) IsEmpty() bool {
-	return b.Len() == 0
+// Retain records unless explicitly trimmed.
+type InfiniteRetention struct{}
+
+// Timestamping behavior.
+type TimestampingConfig struct {
+	// Timestamping mode for appends that influences how timestamps are handled.
+	Mode *TimestampingMode `json:"mode,omitempty"`
+	// "Allow client-specified timestamps to exceed the arrival time.
+	// If this is `false` or not set, client timestamps will be capped at the arrival time.
+	Uncapped *bool `json:"uncapped,omitempty"`
 }
 
-// Returns true if the batch is at its maximum capacity.
-func (b *AppendRecordBatch) IsFull() bool {
-	return uint(len(b.records)) == b.maxCapacity || b.meteredBytes == b.maxBytes
+// Position of a record in a stream.
+type StreamPosition struct {
+	// Sequence number assigned by the service.
+	SeqNum uint64 `json:"seq_num"`
+	// Timestamp, which may be client-specified or assigned by the service.
+	// If it is assigned by the service, it will represent milliseconds since Unix epoch.
+	Timestamp uint64 `json:"timestamp"`
 }
 
-// Returns the records stored in the batch.
-func (b *AppendRecordBatch) Records() []AppendRecord {
-	return b.records
+type TailResponse struct {
+	// Sequence number that will be assigned to the next record on the stream, and timestamp of the last record.
+	Tail StreamPosition `json:"tail"`
 }
 
-// Returns metered bytes for the batch.
-func (b *AppendRecordBatch) MeteredBytes() uint {
-	return b.meteredBytes
+type BasinReconfiguration struct {
+	// Create a stream on append.
+	CreateStreamOnAppend *bool `json:"create_stream_on_append,omitempty"`
+	// Create a stream on read.
+	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
+	// Basin configuration.
+	DefaultStreamConfig *StreamReconfiguration `json:"default_stream_config,omitempty"`
 }
 
-// A command record is a special kind of AppendRecord that can be used to send command messages.
-//
-// Such a record is signalled by a sole header with empty name. The header value represents the operation and record
-// body acts as the payload.
-//
-// Valid CommandRecord variants are:
-//   - CommandRecordFence
-//   - CommandRecordTrim
-type CommandRecord interface {
-	commandRecordParts() (string, []byte)
+type StreamReconfiguration struct {
+	// Delete-on-empty configuration.
+	DeleteOnEmpty *DeleteOnEmptyReconfiguration `json:"delete_on_empty,omitempty"`
+	// Retention policy for the stream.
+	// If unspecified, the default is to retain records for 7 days.
+	RetentionPolicy *RetentionPolicy `json:"retention_policy,omitempty"`
+	// Storage class for recent writes.
+	StorageClass *StorageClass `json:"storage_class,omitempty"`
+	// Timestamping behavior.
+	Timestamping *TimestampingReconfiguration `json:"timestamping,omitempty"`
 }
 
-// Enforce a fencing token.
-//
-// Fencing is strongly consistent, and subsequent appends that specify a fencing token will be rejected if it
-// does not match.
-type CommandRecordFence struct {
-	// Fencing token to enforce.
-	//
-	// Set empty to clear the token.
-	FencingToken []byte
+type DeleteOnEmptyReconfiguration struct {
+	// Minimum age in seconds before an empty stream can be deleted.
+	// Set to 0 to disable delete-on-empty (don't delete automatically).
+	MinAgeSecs *int64 `json:"min_age_secs,omitempty"`
 }
 
-func (c CommandRecordFence) commandRecordParts() (string, []byte) {
-	return "fence", c.FencingToken
+type TimestampingReconfiguration struct {
+	// Timestamping mode for appends that influences how timestamps are handled.
+	Mode *TimestampingMode `json:"mode,omitempty"`
+	// "Allow client-specified timestamps to exceed the arrival time.
+	Uncapped *bool `json:"uncapped,omitempty"`
 }
 
-// Request a trim till the sequence number.
-//
-// Trimming is eventually consistent, and trimmed records may be visible for a brief period.
-type CommandRecordTrim struct {
-	// Trim point.
-	//
-	// This sequence number is only allowed to advance, and any regression will be ignored.
+type ScalarMetric struct {
+	// Metric name.
+	Name string `json:"name"`
+	// Unit of the metric.
+	Unit MetricUnit `json:"unit"`
+	// Metric value.
+	Value float64 `json:"value"`
+}
+
+// Set of string labels.
+type LabelMetric struct {
+	// Label name.
+	Name string `json:"name"`
+	// Label values.
+	Values []string `json:"values"`
+}
+
+// Named series of `(timestamp, value)` points each representing an instantaneous value.
+type GaugeMetric struct {
+	// Timeseries name.
+	Name string `json:"name"`
+	// Unit of the metric.
+	Unit MetricUnit `json:"unit"`
+	// Timeseries values.
+	// Each element is a tuple of a timestamp in Unix epoch seconds and a data point.
+	// The data point represents the value at the instant of the timestamp.
+	Values []MetricSample `json:"values"`
+}
+
+type AccumulationMetric struct {
+	// The duration of bucket for the accumulation.
+	BucketLength TimeseriesInterval `json:"bucket_length"`
+	// Timeseries name.
+	Name string `json:"name"`
+	// Unit of the metric.
+	Unit MetricUnit `json:"unit"`
+	// Timeseries values.
+	// Each element is a tuple of a timestamp in Unix epoch seconds and a data point.
+	// The data point represents the accumulated value for a bucket of time starting at the provided timestamp,
+	// lasting for the duration of the `BucketLength` parameter.
+	Values []MetricSample `json:"values"`
+}
+
+type Metric struct {
+	// Single named value.
+	Scalar *ScalarMetric `json:"scalar,omitempty"`
+	// Named series of `(timestamp, value)` points representing an accumulation over a specified bucket.
+	Accumulation *AccumulationMetric `json:"accumulation,omitempty"`
+	// Named series of `(timestamp, value)` points each representing an instantaneous value.
+	Gauge *GaugeMetric `json:"gauge,omitempty"`
+	// Set of string labels.
+	Label *LabelMetric `json:"label,omitempty"`
+}
+
+type MetricSetResponse struct {
+	// Metrics comprising the set.
+	Values []Metric `json:"values"`
+}
+
+type ListAccessTokensResponse struct {
+	// Matching access tokens.
+	AccessTokens []AccessTokenInfo `json:"access_tokens"`
+	// Indicates that there are more access tokens that match the criteria.
+	HasMore bool `json:"has_more"`
+}
+
+type IssueAccessTokenResponse struct {
+	// Created access token.
+	AccessToken string `json:"access_token"`
+}
+
+type ListBasinsResponse struct {
+	// Matching basins.
+	Basins []BasinInfo `json:"basins"`
+	// Indicates that there are more basins that match the criteria.
+	HasMore bool `json:"has_more"`
+}
+
+type ListStreamsResponse struct {
+	// Matching streams.
+	Streams []StreamInfo `json:"streams"`
+	// Indicates that there are more results that match the criteria.
+	HasMore bool `json:"has_more"`
+}
+
+// Header adds structured information to a record as a name-value pair.
+type Header struct {
+	// Header name.
+	// The name cannot be empty, with the exception of an S2 command record.
+	Name []byte
+	// Header value.
+	Value []byte
+}
+
+// Creates a Header from string name and value.
+func NewHeader(name, value string) Header {
+	return Header{Name: []byte(name), Value: []byte(value)}
+}
+
+type SequencedRecord struct {
+	// Body of the record.
+	Body []byte
+	// Series of name-value pairs for this record.
+	Headers []Header
+	// Sequence number assigned by the service.
 	SeqNum uint64
+	// Timestamp for this record.
+	Timestamp uint64
 }
 
-func (c CommandRecordTrim) commandRecordParts() (string, []byte) {
-	seqNum := make([]byte, 0, 8)
-	seqNum = binary.BigEndian.AppendUint64(seqNum, c.SeqNum)
-
-	return "trim", seqNum
+type ReadBatch struct {
+	// Records that are durably sequenced on the stream, retrieved based on the requested criteria.
+	// This can only be empty in response to a unary read (i.e. not SSE),
+	// if the request cannot be satisfied without violating an explicit bound (`count`, `bytes`, or `until`).
+	Records []SequencedRecord `json:"records"`
+	// Sequence number that will be assigned to the next record on the stream, and timestamp of the last record.
+	// This will only be present when reading recent records.
+	Tail *StreamPosition `json:"tail,omitempty"`
 }
 
-func AppendRecordFromCommand(c CommandRecord) AppendRecord {
-	headerVal, body := c.commandRecordParts()
-
-	return AppendRecord{
-		Headers: []Header{{Value: []byte(headerVal)}},
-		Body:    body,
-	}
+// Record to be appended to a stream.
+type AppendRecord struct {
+	// Timestamp for this record.
+	// The service will always ensure monotonicity by adjusting it up if necessary to the maximum observed timestamp.
+	// Refer to stream timestamping configuration for the finer semantics around whether a client-specified timestamp is required,
+	// and whether it will be capped at the arrival time.
+	Timestamp *uint64 `json:"timestamp,omitempty"`
+	// Series of name-value pairs for this record.
+	Headers []Header `json:"headers,omitempty"`
+	// Body of the record.
+	Body []byte `json:"body,omitempty"`
 }
 
-// Generate a random fencing token.
-//
-// Panics if n > 16.
-func GenerateFencingToken(n uint8) []byte {
-	if n > 16 {
-		panic("fencing token cannot be > 16 bytes")
-	}
-
-	fencingToken := make([]byte, 16)
-	for i := range fencingToken {
-		fencingToken[i] = byte(rand.UintN(256))
-	}
-
-	return fencingToken
+// Payload of an `append` request.
+type AppendInput struct {
+	// Batch of records to append atomically, which must contain at least one record, and no more than 1000.
+	// The total size of a batch of records may not exceed 1 MiB of metered bytes.
+	Records []AppendRecord `json:"records"`
+	// Enforce that the sequence number assigned to the first record matches.
+	MatchSeqNum *uint64 `json:"match_seq_num,omitempty"`
+	// Enforce a fencing token, which starts out as an empty string that can be overridden by a `fence` command record.
+	FencingToken *string `json:"fencing_token,omitempty"`
 }
 
-// A listener on streaming responses for next item.
-type Receiver[T any] interface {
-	// Block until there's another item available or error response.
-	Recv() (T, error)
+// Success response to an `append` request.
+type AppendAck struct {
+	// Sequence number and timestamp of the first record that was appended.
+	Start StreamPosition `json:"start"`
+	// Sequence number of the last record that was appended `+ 1`, and timestamp of the last record that was appended.
+	// The difference between `end.seq_num` and `start.seq_num` will be the number of records appended.
+	End StreamPosition `json:"end"`
+	// Sequence number that will be assigned to the next record on the stream, and timestamp of the last record on the stream.
+	// This can be greater than the `end` position in case of concurrent appends.
+	Tail StreamPosition `json:"tail"`
 }
 
-// An item sender for streaming requests.
-type Sender[T any] interface {
-	// Block until the item has been sent.
-	Send(T) error
-	// Close the sender.
-	Close() error
+type BatchingOptions struct {
+	// Duration to wait before flushing a batch (default: 5ms)
+	Linger time.Duration
+	// Maximum number of records in a batch (default: 1000, max: 1000)
+	MaxRecords int
+	// Maximum batch size in metered bytes (default: 1 MiB, max: 1 MiB)
+	MaxMeteredBytes uint64
+	// Optional sequence number to match for first batch (auto-increments for subsequent batches)
+	MatchSeqNum *uint64
+	// Optional fencing token to enforce (remains static across batches)
+	FencingToken *string
+	// Buffer size for the internal batches channel (default: 16)
+	ChannelBuffer int
 }
 
-type recvInner[F, T any] struct {
-	Client interface {
-		Recv() (*F, error)
-	}
-	ConvertFn func(*F) (T, error)
+type AppendSessionOptions struct {
+	// Aggregate size of records, to allow in-flight before applying backpressure (default: 10 MiB).
+	MaxInflightBytes uint64
+	// Maximum number of batches allowed in-flight before applying backpressure.
+	MaxInflightBatches uint32
+	// Retry configuration for handling transient failures.
+	// Applies to management operations (basins, streams, tokens) and stream operations (read, append).
+	RetryConfig *RetryConfig
 }
 
-func (r recvInner[F, T]) Recv() (T, error) {
-	f, err := r.Client.Recv()
-	if err != nil {
-		var v T
-
-		return v, err
-	}
-
-	return r.ConvertFn(f)
+type ListAccessTokensArgs struct {
+	// Filter to access tokens whose ID begins with this prefix.
+	Prefix string `json:"prefix,omitempty"`
+	// Filter to access tokens whose ID lexicographically starts after this string.
+	StartAfter string `json:"start_after,omitempty"`
+	// Number of results, up to a maximum of 1000.
+	Limit *int `json:"limit,omitempty"`
 }
 
-type sendInner[F, T any] struct {
-	Client interface {
-		Send(*T) error
-		CloseSend() error
-	}
-	ConvertFn func(F) (*T, error)
+type IssueAccessTokenArgs struct {
+	// Access token ID.
+	// It must be unique to the account and between 1 and 96 bytes in length.
+	ID AccessTokenID `json:"id"`
+	// Access token scope.
+	Scope AccessTokenScope `json:"scope"`
+	// Namespace streams based on the configured stream-level scope, which must be a prefix.
+	// Stream name arguments will be automatically prefixed, and the prefix will be stripped when listing streams.
+	AutoPrefixStreams bool `json:"auto_prefix_streams,omitempty"`
+	// Expiration time. If not set, the expiration will be set to that of the requestor's token.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
-func (r sendInner[F, T]) Send(f F) error {
-	t, err := r.ConvertFn(f)
-	if err != nil {
-		return err
-	}
-
-	return r.Client.Send(t)
+type RevokeAccessTokenArgs struct {
+	// Access token ID.
+	ID AccessTokenID `json:"id"`
 }
 
-func (r sendInner[F, T]) Close() error {
-	return r.Client.CloseSend()
+type ListBasinsArgs struct {
+	// Filter to basins whose names begin with this prefix.
+	Prefix string `json:"prefix,omitempty"`
+	// Filter to basins whose names lexicographically start after this string.
+	// It must be greater than or equal to the `prefix` if specified.
+	StartAfter string `json:"start_after,omitempty"`
+	// Number of results, up to a maximum of 1000.
+	Limit *int `json:"limit,omitempty"`
 }
 
-func (a RetentionPolicyAge) implRetentionPolicy() {}
-
-func (s StorageClass) String() string {
-	switch s {
-	case StorageClassUnspecified:
-		return unspecifiedEnumVariant
-	case StorageClassStandard:
-		return "standard"
-	case StorageClassExpress:
-		return "express"
-	default:
-		return "<unknown storage class>"
-	}
+type CreateBasinArgs struct {
+	// Basin name which must be globally unique.
+	// It can be between 8 and 48 characters in length, and comprise lowercase letters, numbers and hyphens.
+	// It cannot begin or end with a hyphen.
+	Basin BasinName `json:"basin"`
+	// Basin configuration.
+	Config *BasinConfig `json:"config,omitempty"`
+	// Basin scope.
+	Scope *BasinScope `json:"scope,omitempty"`
 }
 
-func (s BasinScope) String() string {
-	switch s {
-	case BasinScopeUnspecified:
-		return unspecifiedEnumVariant
-	case BasinScopeAwsUSEast1:
-		return "aws:us-east-1"
-	default:
-		return "<unknown basin scope>"
-	}
+type ReconfigureBasinArgs struct {
+	// Basin name.
+	Basin BasinName
+	// Basin configuration.
+	Config BasinReconfiguration
 }
 
-func (r ResourceSetExact) implResourceSet() {}
-
-func (r ResourceSetExact) String() string {
-	return fmt.Sprintf("Exact(%s)", string(r))
+type ListStreamsArgs struct {
+	// Filter to streams whose name begins with this prefix.
+	Prefix string `json:"prefix,omitempty"`
+	// Filter to streams whose name begins with this prefix.
+	// It must be greater than or equal to the `prefix` if specified.
+	StartAfter string `json:"start_after,omitempty"`
+	// Number of results, up to a maximum of 1000.
+	Limit *int `json:"limit,omitempty"`
 }
 
-func (r ResourceSetPrefix) implResourceSet() {}
-
-func (r ResourceSetPrefix) String() string {
-	return fmt.Sprintf("Prefix(%s)", string(r))
+type CreateStreamArgs struct {
+	// Stream name.
+	Stream StreamName `json:"stream"`
+	// Stream configuration.
+	Config *StreamConfig `json:"config,omitempty"`
 }
 
-func basinScopeFromProto(pbScope pb.BasinScope) (BasinScope, error) {
-	switch pbScope {
-	case pb.BasinScope_BASIN_SCOPE_UNSPECIFIED:
-		return BasinScopeUnspecified, nil
-	case pb.BasinScope_BASIN_SCOPE_AWS_US_EAST_1:
-		return BasinScopeAwsUSEast1, nil
-	default:
-		return 0, fmt.Errorf("%w: %d", ErrUnknownBasinScope, pbScope)
-	}
-}
-
-func basinScopeIntoProto(scope BasinScope) (pb.BasinScope, error) {
-	switch scope {
-	case BasinScopeUnspecified:
-		return pb.BasinScope_BASIN_SCOPE_UNSPECIFIED, nil
-	case BasinScopeAwsUSEast1:
-		return pb.BasinScope_BASIN_SCOPE_AWS_US_EAST_1, nil
-	default:
-		return 0, fmt.Errorf("%w: %d", ErrUnknownBasinScope, scope)
-	}
-}
-
-func (s BasinState) String() string {
-	switch s {
-	case BasinStateUnspecified:
-		return unspecifiedEnumVariant
-	case BasinStateActive:
-		return "active"
-	case BasinStateCreating:
-		return "creating"
-	case BasinStateDeleting:
-		return "deleting"
-	default:
-		return "<unknown basin state>"
-	}
-}
-
-func basinInfoFromProto(pbInfo *pb.BasinInfo) (BasinInfo, error) {
-	var state BasinState
-
-	switch pbInfo.GetState() {
-	case pb.BasinState_BASIN_STATE_UNSPECIFIED:
-		state = BasinStateUnspecified
-	case pb.BasinState_BASIN_STATE_ACTIVE:
-		state = BasinStateActive
-	case pb.BasinState_BASIN_STATE_CREATING:
-		state = BasinStateCreating
-	case pb.BasinState_BASIN_STATE_DELETING:
-		state = BasinStateCreating
-	default:
-		return BasinInfo{}, fmt.Errorf("%w: %d", ErrUnknownBasinState, pbInfo.GetState())
-	}
-
-	scope, err := basinScopeFromProto(pbInfo.GetScope())
-	if err != nil {
-		return BasinInfo{}, err
-	}
-
-	return BasinInfo{
-		Name:  pbInfo.GetName(),
-		Scope: scope,
-		State: state,
-	}, nil
-}
-
-func streamInfoFromProto(pbInfo *pb.StreamInfo) StreamInfo {
-	deletedAt := optr.Map(pbInfo.DeletedAt, func(timestamp uint32) time.Time {
-		return time.Unix(int64(timestamp), 0)
-	})
-
-	return StreamInfo{
-		Name:      pbInfo.GetName(),
-		CreatedAt: time.Unix(int64(pbInfo.GetCreatedAt()), 0),
-		DeletedAt: deletedAt,
-	}
-}
-
-func streamConfigFromProto(pbConfig *pb.StreamConfig) (*StreamConfig, error) {
-	var storageClass StorageClass
-
-	switch pbConfig.GetStorageClass() {
-	case pb.StorageClass_STORAGE_CLASS_UNSPECIFIED:
-		storageClass = StorageClassUnspecified
-	case pb.StorageClass_STORAGE_CLASS_STANDARD:
-		storageClass = StorageClassStandard
-	case pb.StorageClass_STORAGE_CLASS_EXPRESS:
-		storageClass = StorageClassExpress
-	default:
-		return nil, fmt.Errorf("%w: %d", ErrUnknownStorageClass, pbConfig.GetStorageClass())
-	}
-
-	var retentionPolicy RetentionPolicy
-	switch r := pbConfig.GetRetentionPolicy().(type) {
-	case *pb.StreamConfig_Age:
-		retentionPolicy = RetentionPolicyAge(r.Age * uint64(time.Second))
-	case nil:
-		retentionPolicy = nil
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnknownRetentionPolicy, r)
-	}
-
-	pbTimestamping := pbConfig.GetTimestamping()
-
-	var timestampingMode TimestampingMode
-
-	switch pbTimestamping.GetMode() {
-	case pb.TimestampingMode_TIMESTAMPING_MODE_UNSPECIFIED:
-		timestampingMode = TimestampingModeUnspecified
-	case pb.TimestampingMode_TIMESTAMPING_MODE_CLIENT_PREFER:
-		timestampingMode = TimestampingModeClientPrefer
-	case pb.TimestampingMode_TIMESTAMPING_MODE_CLIENT_REQUIRE:
-		timestampingMode = TimestampingModeClientRequire
-	case pb.TimestampingMode_TIMESTAMPING_MODE_ARRIVAL:
-		timestampingMode = TimestampingModeClientArrival
-	default:
-		return nil, fmt.Errorf("%w: %d", ErrUnknownTimestampingMode, pbTimestamping.GetMode())
-	}
-
-	timestamping := &Timestamping{
-		Mode:     timestampingMode,
-		Uncapped: pbTimestamping.Uncapped,
-	}
-
-	return &StreamConfig{
-		StorageClass:    storageClass,
-		RetentionPolicy: retentionPolicy,
-		Timestamping:    timestamping,
-	}, nil
-}
-
-func streamConfigIntoProto(config *StreamConfig) (*pb.StreamConfig, error) {
-	pbConfig := new(pb.StreamConfig)
-
-	switch config.StorageClass {
-	case StorageClassUnspecified:
-		pbConfig.StorageClass = pb.StorageClass_STORAGE_CLASS_UNSPECIFIED
-	case StorageClassStandard:
-		pbConfig.StorageClass = pb.StorageClass_STORAGE_CLASS_STANDARD
-	case StorageClassExpress:
-		pbConfig.StorageClass = pb.StorageClass_STORAGE_CLASS_EXPRESS
-	default:
-		return nil, fmt.Errorf("%w: %d", ErrUnknownStorageClass, config.StorageClass)
-	}
-
-	switch r := config.RetentionPolicy.(type) {
-	case RetentionPolicyAge:
-		pbConfig.RetentionPolicy = &pb.StreamConfig_Age{Age: uint64(time.Duration(r) / time.Second)}
-	case nil:
-		pbConfig.RetentionPolicy = nil
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnknownRetentionPolicy, r)
-	}
-
-	var timestampingMode pb.TimestampingMode
-
-	switch config.Timestamping.Mode {
-	case TimestampingModeUnspecified:
-		timestampingMode = pb.TimestampingMode_TIMESTAMPING_MODE_UNSPECIFIED
-	case TimestampingModeClientPrefer:
-		timestampingMode = pb.TimestampingMode_TIMESTAMPING_MODE_CLIENT_PREFER
-	case TimestampingModeClientRequire:
-		timestampingMode = pb.TimestampingMode_TIMESTAMPING_MODE_CLIENT_REQUIRE
-	case TimestampingModeClientArrival:
-		timestampingMode = pb.TimestampingMode_TIMESTAMPING_MODE_ARRIVAL
-	default:
-		return nil, fmt.Errorf("%w: %d", ErrUnknownTimestampingMode, config.Timestamping.Mode)
-	}
-
-	pbConfig.Timestamping = &pb.StreamConfig_Timestamping{
-		Mode:     timestampingMode,
-		Uncapped: config.Timestamping.Uncapped,
-	}
-
-	return pbConfig, nil
-}
-
-func basinConfigFromProto(pbConfig *pb.BasinConfig) (*BasinConfig, error) {
-	var defaultStreamConfig *StreamConfig
-
-	pbDefaultStreamConfig := pbConfig.GetDefaultStreamConfig()
-	if pbDefaultStreamConfig != nil {
-		var err error
-
-		defaultStreamConfig, err = streamConfigFromProto(pbDefaultStreamConfig)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return &BasinConfig{
-		DefaultStreamConfig:  defaultStreamConfig,
-		CreateStreamOnAppend: pbConfig.GetCreateStreamOnAppend(),
-		CreateStreamOnRead:   pbConfig.GetCreateStreamOnRead(),
-	}, nil
-}
-
-func basinConfigIntoProto(config *BasinConfig) (*pb.BasinConfig, error) {
-	pbConfig := new(pb.BasinConfig)
-
-	if config.DefaultStreamConfig != nil {
-		var err error
-
-		pbConfig.DefaultStreamConfig, err = streamConfigIntoProto(config.DefaultStreamConfig)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	pbConfig.CreateStreamOnAppend = config.CreateStreamOnAppend
-	pbConfig.CreateStreamOnRead = config.CreateStreamOnRead
-
-	return pbConfig, nil
-}
-
-func (ReadOutputBatch) implReadOutput()      {}
-func (ReadOutputNextSeqNum) implReadOutput() {}
-
-func (ReadStartSeqNum) implReadStart() {}
-
-func (r ReadStartSeqNum) String() string {
-	return fmt.Sprintf("SeqNum(%d)", uint64(r))
-}
-
-func (ReadStartTimestamp) implReadStart() {}
-
-func (r ReadStartTimestamp) String() string {
-	return fmt.Sprintf("Timestamp(%d)", uint64(r))
-}
-
-func (ReadStartTailOffset) implReadStart() {}
-
-func (r ReadStartTailOffset) String() string {
-	return fmt.Sprintf("TailOffset(%d)", uint64(r))
-}
-
-func headerFromProto(pbHeader *pb.Header) Header {
-	return Header{
-		Name:  pbHeader.GetName(),
-		Value: pbHeader.GetValue(),
-	}
-}
-
-func sequencedRecordFromProto(pbRecord *pb.SequencedRecord) SequencedRecord {
-	pbHeaders := pbRecord.GetHeaders()
-	headers := make([]Header, 0, len(pbHeaders))
-
-	for _, h := range pbHeaders {
-		headers = append(headers, headerFromProto(h))
-	}
-
-	return SequencedRecord{
-		SeqNum:    pbRecord.GetSeqNum(),
-		Timestamp: pbRecord.GetTimestamp(),
-		Headers:   headers,
-		Body:      pbRecord.GetBody(),
-	}
-}
-
-func sequencedRecordBatchFromProto(pbBatch *pb.SequencedRecordBatch) []SequencedRecord {
-	pbRecords := pbBatch.GetRecords()
-	records := make([]SequencedRecord, 0, len(pbRecords))
-
-	for _, r := range pbRecords {
-		records = append(records, sequencedRecordFromProto(r))
-	}
-
-	return records
-}
-
-func readOutputFromProto(pbOutput *pb.ReadOutput, acceptHeartbeats bool) (ReadOutput, error) {
-	if acceptHeartbeats && pbOutput.GetOutput() == nil {
-		// Heartbeat message.
-		return nil, errHeartbeatMessage
-	}
-
-	var output ReadOutput
-	switch o := pbOutput.GetOutput().(type) {
-	case *pb.ReadOutput_Batch:
-		output = ReadOutputBatch{
-			Records: sequencedRecordBatchFromProto(o.Batch),
-		}
-	case *pb.ReadOutput_NextSeqNum:
-		output = ReadOutputNextSeqNum(o.NextSeqNum)
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnknownReadOutput, o)
-	}
-
-	return output, nil
-}
-
-func headerIntoProto(header Header) *pb.Header {
-	return &pb.Header{
-		Name:  header.Name,
-		Value: header.Value,
-	}
-}
-
-func appendRecordIntoProto(record *AppendRecord) *pb.AppendRecord {
-	headers := make([]*pb.Header, 0, len(record.Headers))
-	for _, h := range record.Headers {
-		headers = append(headers, headerIntoProto(h))
-	}
-
-	return &pb.AppendRecord{
-		Timestamp: record.Timestamp,
-		Headers:   headers,
-		Body:      record.Body,
-	}
-}
-
-func appendInputIntoProto(stream string, input *AppendInput) *pb.AppendInput {
-	inputRecords := input.Records.Records()
-	records := make([]*pb.AppendRecord, 0, len(inputRecords))
-
-	for i := range inputRecords {
-		records = append(records, appendRecordIntoProto(&inputRecords[i]))
-	}
-
-	return &pb.AppendInput{
-		Stream:       stream,
-		Records:      records,
-		MatchSeqNum:  input.MatchSeqNum,
-		FencingToken: input.FencingToken,
-	}
-}
-
-func appendOutputFromProto(pbOutput *pb.AppendOutput) *AppendOutput {
-	return &AppendOutput{
-		StartSeqNum:    pbOutput.GetStartSeqNum(),
-		StartTimestamp: pbOutput.GetStartTimestamp(),
-		EndSeqNum:      pbOutput.GetEndSeqNum(),
-		EndTimestamp:   pbOutput.GetEndTimestamp(),
-		NextSeqNum:     pbOutput.GetNextSeqNum(),
-		LastTimestamp:  pbOutput.GetLastTimestamp(),
-	}
-}
-
-func operationFromProto(pbOp pb.Operation) (Operation, error) {
-	switch pbOp {
-	case pb.Operation_OPERATION_UNSPECIFIED:
-		return OperationUnspecified, nil
-	case pb.Operation_OPERATION_LIST_BASINS:
-		return OperationListBasins, nil
-	case pb.Operation_OPERATION_CREATE_BASIN:
-		return OperationCreateBasin, nil
-	case pb.Operation_OPERATION_DELETE_BASIN:
-		return OperationDeleteBasin, nil
-	case pb.Operation_OPERATION_RECONFIGURE_BASIN:
-		return OperationReconfigureBasin, nil
-	case pb.Operation_OPERATION_GET_BASIN_CONFIG:
-		return OperationGetBasinConfig, nil
-	case pb.Operation_OPERATION_ISSUE_ACCESS_TOKEN:
-		return OperationIssueAccessToken, nil
-	case pb.Operation_OPERATION_REVOKE_ACCESS_TOKEN:
-		return OperationRevokeAccessToken, nil
-	case pb.Operation_OPERATION_LIST_ACCESS_TOKENS:
-		return OperationListAccessTokens, nil
-	case pb.Operation_OPERATION_LIST_STREAMS:
-		return OperationListStreams, nil
-	case pb.Operation_OPERATION_CREATE_STREAM:
-		return OperationCreateStream, nil
-	case pb.Operation_OPERATION_DELETE_STREAM:
-		return OperationDeleteStream, nil
-	case pb.Operation_OPERATION_GET_STREAM_CONFIG:
-		return OperationGetStreamConfig, nil
-	case pb.Operation_OPERATION_RECONFIGURE_STREAM:
-		return OperationReconfigureStream, nil
-	case pb.Operation_OPERATION_CHECK_TAIL:
-		return OperationCheckTail, nil
-	case pb.Operation_OPERATION_APPEND:
-		return OperationAppend, nil
-	case pb.Operation_OPERATION_READ:
-		return OperationRead, nil
-	case pb.Operation_OPERATION_TRIM:
-		return OperationTrim, nil
-	case pb.Operation_OPERATION_FENCE:
-		return OperationFence, nil
-	case pb.Operation_OPERATION_ACCOUNT_METRICS:
-		return OperationAccountMetrics, nil
-	case pb.Operation_OPERATION_BASIN_METRICS:
-		return OperationAccountMetrics, nil
-	case pb.Operation_OPERATION_STREAM_METRICS:
-		return OperationAccountMetrics, nil
-	default:
-		return OperationUnspecified, fmt.Errorf("%w: %v", ErrUnknownOperation, pbOp)
-	}
-}
-
-func operationsFromProto(pbOps []pb.Operation) ([]Operation, error) {
-	ops := make([]Operation, 0, len(pbOps))
-
-	for _, pbOp := range pbOps {
-		op, err := operationFromProto(pbOp)
-		if err != nil {
-			return nil, err
-		}
-
-		ops = append(ops, op)
-	}
-
-	return ops, nil
-}
-
-func resourceSetFromProto(pbSet *pb.ResourceSet) (ResourceSet, error) {
-	if pbSet == nil || pbSet.Matching == nil {
-		// Most restrictive when nil.
-		return ResourceSetExact(""), nil
-	}
-
-	switch matching := pbSet.Matching.(type) {
-	case *pb.ResourceSet_Exact:
-		return ResourceSetExact(matching.Exact), nil
-	case *pb.ResourceSet_Prefix:
-		return ResourceSetPrefix(matching.Prefix), nil
-	default:
-		return nil, fmt.Errorf("%w: %v", ErrUnknownResourceSet, matching)
-	}
-}
-
-func readWritePermissionsFromProto(pbPerms *pb.ReadWritePermissions) *ReadWritePermissions {
-	return &ReadWritePermissions{
-		Read:  pbPerms.Read,
-		Write: pbPerms.Write,
-	}
-}
-
-func permittedOperationGroupsFromProto(pbGroups *pb.PermittedOperationGroups) *PermittedOperationGroups {
-	return &PermittedOperationGroups{
-		Account: readWritePermissionsFromProto(pbGroups.Account),
-		Basin:   readWritePermissionsFromProto(pbGroups.Basin),
-		Stream:  readWritePermissionsFromProto(pbGroups.Stream),
-	}
-}
-
-func accessTokenScopeFromProto(pbScope *pb.AccessTokenScope) (*AccessTokenScope, error) {
-	ops, err := operationsFromProto(pbScope.GetOps())
-	if err != nil {
-		return nil, err
-	}
-
-	basins, err := resourceSetFromProto(pbScope.GetBasins())
-	if err != nil {
-		return nil, err
-	}
-
-	streams, err := resourceSetFromProto(pbScope.GetStreams())
-	if err != nil {
-		return nil, err
-	}
-
-	accessTokens, err := resourceSetFromProto(pbScope.GetAccessTokens())
-	if err != nil {
-		return nil, err
-	}
-
-	return &AccessTokenScope{
-		Basins:       basins,
-		Streams:      streams,
-		AccessTokens: accessTokens,
-		OpGroups:     permittedOperationGroupsFromProto(pbScope.GetOpGroups()),
-		Ops:          ops,
-	}, nil
-}
-
-func accessTokenInfoFromProto(pbInfo *pb.AccessTokenInfo) (*AccessTokenInfo, error) {
-	scope, err := accessTokenScopeFromProto(pbInfo.GetScope())
-	if err != nil {
-		return nil, err
-	}
-
-	expiresAt := time.Unix(int64(pbInfo.GetExpiresAt()), 0)
-
-	return &AccessTokenInfo{
-		ID:                pbInfo.GetId(),
-		ExpiresAt:         optr.Some(expiresAt),
-		AutoPrefixStreams: pbInfo.GetAutoPrefixStreams(),
-		Scope:             scope,
-	}, nil
-}
-
-func operationToProto(op Operation) (pb.Operation, error) {
-	switch op {
-	case OperationUnspecified:
-		return pb.Operation_OPERATION_UNSPECIFIED, nil
-	case OperationListBasins:
-		return pb.Operation_OPERATION_LIST_BASINS, nil
-	case OperationCreateBasin:
-		return pb.Operation_OPERATION_CREATE_BASIN, nil
-	case OperationDeleteBasin:
-		return pb.Operation_OPERATION_DELETE_BASIN, nil
-	case OperationReconfigureBasin:
-		return pb.Operation_OPERATION_RECONFIGURE_BASIN, nil
-	case OperationGetBasinConfig:
-		return pb.Operation_OPERATION_GET_BASIN_CONFIG, nil
-	case OperationIssueAccessToken:
-		return pb.Operation_OPERATION_ISSUE_ACCESS_TOKEN, nil
-	case OperationRevokeAccessToken:
-		return pb.Operation_OPERATION_REVOKE_ACCESS_TOKEN, nil
-	case OperationListAccessTokens:
-		return pb.Operation_OPERATION_LIST_ACCESS_TOKENS, nil
-	case OperationListStreams:
-		return pb.Operation_OPERATION_LIST_STREAMS, nil
-	case OperationCreateStream:
-		return pb.Operation_OPERATION_CREATE_STREAM, nil
-	case OperationDeleteStream:
-		return pb.Operation_OPERATION_DELETE_STREAM, nil
-	case OperationGetStreamConfig:
-		return pb.Operation_OPERATION_GET_STREAM_CONFIG, nil
-	case OperationReconfigureStream:
-		return pb.Operation_OPERATION_RECONFIGURE_STREAM, nil
-	case OperationCheckTail:
-		return pb.Operation_OPERATION_CHECK_TAIL, nil
-	case OperationAppend:
-		return pb.Operation_OPERATION_APPEND, nil
-	case OperationRead:
-		return pb.Operation_OPERATION_READ, nil
-	case OperationTrim:
-		return pb.Operation_OPERATION_TRIM, nil
-	case OperationFence:
-		return pb.Operation_OPERATION_FENCE, nil
-	default:
-		return pb.Operation_OPERATION_UNSPECIFIED, fmt.Errorf("%w: %v", ErrUnknownOperation, op)
-	}
-}
-
-func operationsToProto(ops []Operation) ([]pb.Operation, error) {
-	pbOps := make([]pb.Operation, 0, len(ops))
-
-	for _, op := range ops {
-		pbOp, err := operationToProto(op)
-		if err != nil {
-			return nil, err
-		}
-
-		pbOps = append(pbOps, pbOp)
-	}
-
-	return pbOps, nil
-}
-
-func resourceSetToProto(rs ResourceSet) (*pb.ResourceSet, error) {
-	if rs == nil {
-		return &pb.ResourceSet{Matching: &pb.ResourceSet_Exact{Exact: ""}}, nil
-	}
-
-	switch v := rs.(type) {
-	case ResourceSetExact:
-		return &pb.ResourceSet{
-			Matching: &pb.ResourceSet_Exact{Exact: string(v)},
-		}, nil
-	case ResourceSetPrefix:
-		return &pb.ResourceSet{
-			Matching: &pb.ResourceSet_Prefix{Prefix: string(v)},
-		}, nil
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnknownResourceSet, v)
-	}
-}
-
-func readWritePermissionsToProto(p *ReadWritePermissions) *pb.ReadWritePermissions {
-	if p == nil {
-		return nil
-	}
-
-	return &pb.ReadWritePermissions{
-		Read:  p.Read,
-		Write: p.Write,
-	}
-}
-
-func permittedOperationGroupsToProto(p *PermittedOperationGroups) *pb.PermittedOperationGroups {
-	if p == nil {
-		return nil
-	}
-
-	return &pb.PermittedOperationGroups{
-		Account: readWritePermissionsToProto(p.Account),
-		Basin:   readWritePermissionsToProto(p.Basin),
-		Stream:  readWritePermissionsToProto(p.Stream),
-	}
-}
-
-func accessTokenScopeToProto(s *AccessTokenScope) (*pb.AccessTokenScope, error) {
-	pbOps, err := operationsToProto(s.Ops)
-	if err != nil {
-		return nil, err
-	}
-
-	pbBasins, err := resourceSetToProto(s.Basins)
-	if err != nil {
-		return nil, err
-	}
-
-	pbStreams, err := resourceSetToProto(s.Streams)
-	if err != nil {
-		return nil, err
-	}
-
-	pbAccessTokens, err := resourceSetToProto(s.AccessTokens)
-	if err != nil {
-		return nil, err
-	}
-
-	return &pb.AccessTokenScope{
-		Basins:       pbBasins,
-		Streams:      pbStreams,
-		AccessTokens: pbAccessTokens,
-		OpGroups:     permittedOperationGroupsToProto(s.OpGroups),
-		Ops:          pbOps,
-	}, nil
-}
-
-func accessTokenInfoToProto(i *AccessTokenInfo) (*pb.AccessTokenInfo, error) {
-	scope, err := accessTokenScopeToProto(i.Scope)
-	if err != nil {
-		return nil, err
-	}
-
-	return &pb.AccessTokenInfo{
-		Id: i.ID,
-		ExpiresAt: optr.Map(i.ExpiresAt, func(t time.Time) uint32 {
-			return uint32(t.Unix())
-		}),
-		AutoPrefixStreams: i.AutoPrefixStreams,
-		Scope:             scope,
-	}, nil
+type ReconfigureStreamArgs struct {
+	// Stream name.
+	Stream StreamName
+	// Stream configuration.
+	Config StreamReconfiguration
 }

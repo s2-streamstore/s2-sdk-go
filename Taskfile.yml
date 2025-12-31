@@ -1,145 +1,67 @@
 version: '3'
 
 tasks:
-  example:
-    aliases: [eg]
+  gen:
+    desc: "Generate protobuf Go types"
+    preconditions:
+      - sh: which protoc
+        msg: "`protoc` not found. Install from https://grpc.io/docs/protoc-installation/"
+      - sh: which protoc-gen-go
+        msg: "`protoc-gen-go` not found. Install via: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest"
+    sources:
+      - s2-protos/**/*.proto
+    generates:
+      - generated/**/*.go
+    cmds:
+      - mkdir -p generated
+      - cmd: |
+          protoc --go_out=generated \
+            --go_opt=paths=import \
+            --go_opt=Ms2-protos/s2/v1/s2.proto=. \
+            s2-protos/s2/v1/s2.proto
+
+  test:
+    deps: [gen]
+    cmds:
+      - go test ./...
+
+  lint:
+    deps: [gen]
+    cmds:
+      - |
+        if command -v golangci-lint >/dev/null 2>&1; then \
+          golangci-lint run; \
+        else \
+          echo "golangci-lint not installed; skip lint" >&2; \
+        fi
+
+  eg:
+    desc: "Run an example. Usage: task eg NAME=readsession"
     requires:
       vars: [NAME]
     cmds:
-      - task: example:build
+      - task: eg:build
         vars: { NAME: '{{.NAME}}' }
       - .out/examples/{{.NAME}} {{.CLI_ARGS}}
 
-  example:build:
-    deps:
-      - gen
+  eg:build:
+    deps: [gen]
     requires:
       vars: [NAME]
     cmds:
-      - go build -v -o .out/examples/{{.NAME}} ./examples/{{.NAME}}
-
-  test:
-    deps:
-      - gen
-    cmds:
-      - go test -v ./...
-
-  lint:
-    deps:
-      - lint:gen
-      - lint:go
-
-  lint:go:
-    deps:
-      - gen
-    cmds:
-      - golangci-lint run
+      - mkdir -p .out/examples
+      - go build -o .out/examples/{{.NAME}} ./examples/{{.NAME}}
 
   lint:gen:
-    deps:
-      - gen
+    deps: [gen]
     cmds:
       - |
-        git diff --exit-code internal/pb/*.go s2/*.sync.go && echo "Up-to-date" || {
-            echo "Not up-to-date"
-            echo "Run `task gen` and update the generated code"
+        # Ignore version comment lines (protoc-gen-go and protoc versions)
+        git diff generated/*.go | grep -v '^[-+]//.*protoc' | grep -q '^[-+]' && {
+            echo "Generated code has changed (ignoring version comments)"
+            echo "Run 'task gen' and commit the generated code"
             exit 1
-        }
-
-  fmt:
-    deps:
-      - gen
-    cmds:
-      - golangci-lint run --fix --issues-exit-code 0 &> /dev/null
-
-  gomod:
-    cmds:
-      - go mod tidy -go=1.22
-
-  gen:
-    deps:
-      - gen:proto
-      - gen:sync
-
-  gen:proto:
-    preconditions:
-      - sh: which protoc
-        msg: |
-         `protoc` command not found
-         Install the proto compiler: https://grpc.io/docs/protoc-installation/
-      - sh: which protoc-gen-go
-        msg: |
-          `protoc-gen-go` command not found
-          Install the Go extension using:
-          $ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-      - sh: which protoc-gen-go-grpc
-        msg: |
-          `protoc-gen-go-grpc` command not found
-          Install the gRPC extension using:
-          $ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-    sources:
-      - proto/s2/v1alpha/s2.proto
-    generates:
-      - internal/pb/s2.pb.go
-      - internal/pb/s2_grpc.pb.go
-    cmds:
-      - test -d internal/pb || mkdir -p internal/pb
-      - cmd: |
-          protoc --proto_path=proto/s2/v1alpha \
-            --go_opt=Ms2.proto=github.com/s2-streamstore/s2-sdk-go/internal/pb \
-            --go-grpc_opt=Ms2.proto=github.com/s2-streamstore/s2-sdk-go/internal/pb \
-            --go_opt=paths=source_relative \
-            --go-grpc_opt=paths=source_relative \
-            --go_out=internal/pb \
-            --go-grpc_out=internal/pb \
-            s2.proto
-
-  gen:sync:
-    deps:
-      - gen:sync:types
-      - gen:sync:client
-
-  gen:sync:types:
-    deps:
-      - gen:sync:_bin
-      - gen:proto
-    sources:
-      - .out/sync-docs
-      - internal/pb/s2.pb.go
-      - s2/types.sync.tmpl
-    generates:
-      - s2/types.sync.go
-    cmds:
-      - cmd: |
-          .out/sync-docs \
-            -i internal/pb/s2.pb.go \
-            -t s2/types.sync.tmpl \
-            -o s2/types.sync.go
-
-  gen:sync:client:
-    deps:
-      - gen:sync:_bin
-      - gen:proto
-    sources:
-      - .out/sync-docs
-      - internal/pb/s2_grpc.pb.go
-      - s2/client.sync.tmpl
-    generates:
-      - s2/client.sync.go
-    cmds:
-      - cmd: |
-          .out/sync-docs \
-            -i internal/pb/s2_grpc.pb.go \
-            -t s2/client.sync.tmpl \
-            -o s2/client.sync.go
-
-  gen:sync:_bin:
-    sources:
-      - internal/sync-docs/*.go
-    generates:
-      - .out/sync-docs
-    cmds:
-      - go build -o .out/sync-docs ./internal/sync-docs/*.go
+        } || echo "Up-to-date"
 
   release:prepare:
     requires:
@@ -155,7 +77,7 @@ tasks:
       - git cliff --unreleased --tag {{.SEMVER}} --prepend CHANGELOG.md
       - git add CHANGELOG.md
       - 'git commit -m "chore(release): {{.SEMVER}}"'
-      - echo "Push the branch '{{.BRANCH}}'. Once merged, create tag the release using 'task release:tag'"
+      - echo "Push the branch '{{.BRANCH}}'. Once merged, tag the release using 'task release:tag'"
 
   release:tag:
     requires:

@@ -1,12 +1,12 @@
-package s2bentobox
+package bentobox
 
 import (
 	"context"
-	"errors"
-	"math/rand/v2"
+	"log/slog"
+	"math/rand"
 	"time"
 
-	"github.com/s2-streamstore/s2-sdk-go/s2"
+	s2 "github.com/s2-streamstore/s2-sdk-go/s2"
 )
 
 type MultiStreamInput struct {
@@ -16,17 +16,15 @@ type MultiStreamInput struct {
 }
 
 func ConnectMultiStreamInput(ctx context.Context, config *InputConfig) (*MultiStreamInput, error) {
-	client, err := newBasinClient(config.Config)
-	if err != nil {
-		return nil, err
-	}
+	client := newClient(config.Config)
+	basin := client.Basin(config.Basin)
 
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 
 	streamsManagerCloser := make(chan struct{})
 	inputStream := make(chan recvOutput, config.MaxInFlight)
 
-	go streamsManager(sessionCtx, client, config, inputStream, streamsManagerCloser)
+	go streamsManager(sessionCtx, basin, config, inputStream, streamsManagerCloser)
 
 	return &MultiStreamInput{
 		inputStream:          inputStream,
@@ -62,7 +60,7 @@ func (msi *MultiStreamInput) Close(ctx context.Context) error {
 
 func streamsManager(
 	ctx context.Context,
-	client *s2.BasinClient,
+	basin *s2.BasinClient,
 	config *InputConfig,
 	inputStream chan<- recvOutput,
 	closer chan<- struct{},
@@ -97,7 +95,7 @@ func streamsManager(
 
 		go streamSource(
 			workerCtx,
-			client,
+			basin,
 			config.Logger,
 			cache,
 			stream,
@@ -119,19 +117,19 @@ managerLoop:
 		case <-updateList:
 		}
 
-		// Clear the update list notifier.
+		// Clear the update list notifier
 		select {
 		case <-updateList:
 		default:
 		}
 
-		newStreams, err := config.Streams.list(ctx, client)
+		newStreams, err := config.Streams.list(ctx, basin)
 		if err != nil {
-			config.Logger.
-				With("error", err).
-				Error("Failed to list streams")
+			if config.Logger != nil {
+				config.Logger.Error("failed to list streams", "error", err)
+			}
 
-			// Try updating the update list notifier. We need a retry here.
+			// Try updating the update list notifier for retry
 			select {
 			case updateList <- struct{}{}:
 			default:
@@ -145,22 +143,25 @@ managerLoop:
 			newStreamsSet[stream] = struct{}{}
 
 			if _, found := existingWorkers[stream]; !found {
-				config.Logger.With("stream", stream).Info("Reading from S2 source")
+				if config.Logger != nil {
+					config.Logger.Info("reading from S2 source", "stream", stream)
+				}
 				spawnWorker(stream)
 			}
 		}
 
 		for stream, worker := range existingWorkers {
 			if _, found := newStreamsSet[stream]; !found {
-				// Cancel the worker that's not in the new list.
-				config.Logger.With("stream", stream).Warn("Not reading from S2 source anymore")
-				worker.Close() // Don't need to wait here.
+				if config.Logger != nil {
+					config.Logger.Warn("not reading from S2 source anymore", "stream", stream)
+				}
+				worker.Close()
 				delete(existingWorkers, stream)
 			}
 		}
 	}
 
-	// Close and wait for all to exit.
+	// Close and wait for all workers to exit
 	for _, worker := range existingWorkers {
 		worker.Close()
 		worker.Wait()
@@ -169,8 +170,8 @@ managerLoop:
 
 func streamSource(
 	ctx context.Context,
-	client *s2.BasinClient,
-	logger Logger,
+	basin *s2.BasinClient,
+	logger *slog.Logger,
 	cache *seqNumCache,
 	stream string,
 	maxInflight int,
@@ -181,7 +182,7 @@ func streamSource(
 ) {
 	defer close(closer)
 
-	backoff := make(<-chan time.Time)
+	var backoff <-chan time.Time
 
 	for {
 		select {
@@ -191,14 +192,16 @@ func streamSource(
 		default:
 		}
 
-		// Never receive (reset)
-		backoff = make(<-chan time.Time)
+		// Reset backoff
+		backoff = nil
 
-		input, err := connectStreamInput(ctx, client, cache, logger, stream, maxInflight, inputStartSeqNum)
+		input, err := connectStreamInput(ctx, basin, cache, logger, stream, maxInflight, inputStartSeqNum)
 		if err != nil {
-			logger.With("error", err, "stream", stream).Error("Failed to connect, retrying.")
+			if logger != nil {
+				logger.Error("failed to connect, retrying", "error", err, "stream", stream)
+			}
 
-			jitter := time.Duration(rand.Int64N(int64(10 * time.Millisecond)))
+			jitter := time.Duration(rand.Int63n(int64(10 * time.Millisecond)))
 			backoff = time.After(backoffDuration + jitter)
 
 			continue
@@ -213,7 +216,7 @@ func streamSourceRecvLoop(
 	input *streamInput,
 	stream string,
 	inputStream chan<- recvOutput,
-	logger Logger,
+	logger *slog.Logger,
 ) {
 	defer input.Close(ctx)
 
@@ -226,9 +229,10 @@ func streamSourceRecvLoop(
 
 		batch, aFn, err := input.ReadBatch(ctx)
 		if err != nil {
-			if errors.Is(err, ErrInputClosed) {
-				logger.With("stream", stream).Debug("Restarting source")
-
+			if err == ErrInputClosed {
+				if logger != nil {
+					logger.Debug("restarting source", "stream", stream)
+				}
 				return
 			}
 

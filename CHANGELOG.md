@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.0] - 2025-12-31
+
+### Added
+
+- AppendSession for streaming appends with automatic retries
+- ReadSession for streaming reads with automatic retries
+- Producer API with batching support
+- Batcher with configurable size, count, and time thresholds
+- Iterator support for basins, streams, and access tokens
+- Metrics API support
+- Configurable retry policies
+
+### Changed
+
+- Migrated from gRPC to REST
+- Simplified API surface
+
 ## [v0.10.0] - 2025-07-23
 
 ### Features
