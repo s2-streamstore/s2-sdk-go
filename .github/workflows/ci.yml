@@ -1,0 +1,94 @@
+name: CI
+permissions:
+  contents: read
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  CLICOLOR: 1
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    permissions:
+      contents: none
+    name: CI
+    needs: [examples, test, golangci-lint]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Failed
+        run: exit 1
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+
+  examples:
+    name: Build examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.40.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: 29.3
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup protoc
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
+      - name: Build
+        run: |
+          for eg in `go list ./examples/... | sed 's|.*/||'`; do
+            echo "Building '$eg' example"
+            task eg:build NAME=$eg
+          done
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.40.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: 29.3
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup protoc
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
+      - name: Test
+        run: task test
+
+  golangci-lint:
+    name: GolangCI Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.1.6
+
