@@ -4,6 +4,12 @@ linters:
   default: none
   disable:
     - errcheck
+    - wsl
+    - dupl
+    - godot
+    - nilnil
+    - nlreturn
+    - unparam
   enable:
     - govet
     - ineffassign
@@ -39,4 +45,3 @@ linters:
     - usestdlibvars
     - wastedassign
     - whitespace
-    - wsl

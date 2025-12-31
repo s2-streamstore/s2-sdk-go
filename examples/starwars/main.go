@@ -3,124 +3,103 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"os"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
 )
 
-func append(tx s2.Sender[*s2.AppendInput], tail uint64) error {
-	conn, err := net.Dial("tcp", "towel.blinkenlights.nl:23")
+func main() {
+	basin := flag.String("basin", "", "Basin name")
+	stream := flag.String("stream", "", "Stream name")
+	flag.Parse()
+
+	if *basin == "" || *stream == "" {
+		fmt.Fprintln(os.Stderr, "Usage: starwars -basin <name> -stream <name>")
+		os.Exit(1)
+	}
+
+	if err := run(context.Background(), *basin, *stream); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, basinName, streamName string) error {
+	client := s2.NewFromEnvironment(nil)
+	stream := client.Basin(basinName).Stream(s2.StreamName(streamName))
+
+	tail, err := stream.CheckTail(ctx)
+	if err != nil {
+		return fmt.Errorf("check tail: %w", err)
+	}
+
+	readSession, err := stream.ReadSession(ctx, &s2.ReadOptions{
+		SeqNum: &tail.Tail.SeqNum,
+	})
+	if err != nil {
+		return fmt.Errorf("read session: %w", err)
+	}
+	defer readSession.Close()
+
+	appendSession, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("append session: %w", err)
+	}
+	defer appendSession.Close()
+
+	go func() {
+		if err := appendFrames(ctx, appendSession); err != nil {
+			fmt.Fprintln(os.Stderr, "Append error:", err)
+		}
+	}()
+
+	for readSession.Next() {
+		os.Stdout.Write(readSession.Record().Body)
+		os.Stdout.Write([]byte("\r\n"))
+	}
+
+	return readSession.Err()
+}
+
+func appendFrames(ctx context.Context, session *s2.AppendSession) error {
+	conn, err := net.Dial("tcp", "starwars.s2.dev:23")
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	rtx, err := s2.NewAppendRecordBatchingSender(tx, s2.WithLinger(0), s2.WithMatchSeqNum(tail))
-	if err != nil {
-		return err
-	}
-	defer rtx.Close()
-
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
-		if err := rtx.Send(s2.AppendRecord{Body: scanner.Bytes()}); err != nil {
-			return err
-		}
-	}
-
-	return scanner.Err()
-}
-
-func ack(rx s2.Receiver[*s2.AppendOutput]) error {
-	for {
-		if _, err := rx.Recv(); err != nil {
-			return err
-		}
-	}
-}
-
-func read(rx s2.Receiver[s2.ReadOutput]) error {
-	for {
-		output, err := rx.Recv()
+		future, err := session.Submit(&s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: scanner.Bytes()}},
+		})
 		if err != nil {
 			return err
 		}
 
-		if batch, ok := output.(s2.ReadOutputBatch); ok {
-			for _, record := range batch.Records {
-				fmt.Println(string(record.Body))
+		go func() {
+			ticket, err := future.Wait(ctx)
+			if err != nil {
+				log.Printf("error enqueueing: %v", err)
+
+				return
 			}
-		}
-	}
-}
+			ack, err := ticket.Ack(ctx)
+			if err != nil {
+				log.Printf("error waiting: %v", err)
 
-func run(ctx context.Context) error {
-	basin := flag.String("basin", "", "Basin name")
-	stream := flag.String("stream", "", "Stream name")
+				return
+			}
 
-	authToken := os.Getenv("S2_AUTH_TOKEN")
-	if authToken == "" {
-		flag.StringVar(&authToken, "token", "", "S2 Authentication token")
-	}
-
-	flag.Parse()
-
-	if *basin == "" {
-		return fmt.Errorf("basin name cannot be empty")
+			b, _ := json.Marshal(ack)
+			log.Printf("ack: %s", b)
+		}()
 	}
 
-	if *stream == "" {
-		return fmt.Errorf("stream name cannot be empty")
-	}
-
-	client, err := s2.NewStreamClient(
-		*basin,
-		*stream,
-		authToken,
-	)
-	if err != nil {
-		return fmt.Errorf("client create: %w", err)
-	}
-
-	tail, err := client.CheckTail(ctx)
-	if err != nil {
-		return fmt.Errorf("check tail: %w", err)
-	}
-
-	recRx, err := client.ReadSession(ctx, &s2.ReadSessionRequest{
-		Start: s2.ReadStartSeqNum(tail.NextSeqNum),
-	})
-	if err != nil {
-		return err
-	}
-
-	appTx, appRx, err := client.AppendSession(ctx)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		if err := append(appTx, tail.NextSeqNum); err != nil {
-			fmt.Fprintln(os.Stderr, "Append Error:", err)
-			os.Exit(1)
-		}
-	}()
-
-	go func() {
-		if err := ack(appRx); err != nil {
-			fmt.Fprintln(os.Stderr, "Append Ack Error:", err)
-			os.Exit(1)
-		}
-	}()
-
-	return read(recRx)
-}
-
-func main() {
-	if err := run(context.TODO()); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-	}
+	return scanner.Err()
 }
