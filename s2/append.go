@@ -154,11 +154,9 @@ func (p *transportAppendSession) start(ctx context.Context) error {
 
 	if resp.StatusCode >= 400 {
 		pipeWriter.Close()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		resp.Body.Close()
-		return &S2Error{
-			Message: fmt.Sprintf("HTTP %d", resp.StatusCode),
-			Status:  resp.StatusCode,
-		}
+		return decodeAPIError(resp.StatusCode, body)
 	}
 
 	p.conn = resp
