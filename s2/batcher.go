@@ -178,6 +178,8 @@ func (b *Batcher) Flush() {
 
 // Flushes any remaining records and closes the batcher.
 func (b *Batcher) Close() {
+	b.cancel() // Cancel first to unblock any flushLocked waiting on channel send
+
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
@@ -191,6 +193,5 @@ func (b *Batcher) Close() {
 	}
 	b.mu.Unlock()
 
-	b.cancel()
 	close(b.batchesCh)
 }
