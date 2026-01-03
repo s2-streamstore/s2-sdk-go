@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/proto"
@@ -18,11 +19,13 @@ import (
 )
 
 type StreamClient struct {
-	name        StreamName
-	basinClient *BasinClient
-	httpClient  *http.Client
-	connMgr     *connectionManager
-	logger      *slog.Logger
+	name           StreamName
+	basinClient    *BasinClient
+	httpClient     *http.Client
+	httpClientOnce sync.Once
+	httpClientErr  error
+	connMgr        *connectionManager
+	logger         *slog.Logger
 }
 
 func (b *BasinClient) Stream(name StreamName) *StreamClient {
@@ -44,17 +47,14 @@ func (s *StreamClient) Name() StreamName {
 }
 
 func (s *StreamClient) getHTTPClient() (*http.Client, error) {
-	if s.httpClient != nil {
-		return s.httpClient, nil
-	}
-
-	client, err := s.connMgr.getOrCreateHTTP2Client(s.basinClient.baseURL, s.basinClient.allowH2C, s.basinClient.connectionTimeout)
-	if err != nil {
-		return nil, err
-	}
-
-	s.httpClient = client
-	return client, nil
+	s.httpClientOnce.Do(func() {
+		s.httpClient, s.httpClientErr = s.connMgr.getOrCreateHTTP2Client(
+			s.basinClient.baseURL,
+			s.basinClient.allowH2C,
+			s.basinClient.connectionTimeout,
+		)
+	})
+	return s.httpClient, s.httpClientErr
 }
 
 // Check the tail of the stream.
