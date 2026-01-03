@@ -115,6 +115,7 @@ func (p *Producer) resolveBatchError(meta []recordMeta, err error) {
 
 func (p *Producer) Close() error {
 	p.batcher.Close()
+	p.cancel()
 	p.wg.Wait()
 	return nil
 }
