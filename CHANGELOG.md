@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.1] - 2026-01-04
+
+### Bug Fixes
+
+- Race in StreamClient.getHTTPClient initialization ([#113](https://github.com/s2-streamstore/s2-sdk-go/issues/113))
+- Producer close should cancel ctx ([#114](https://github.com/s2-streamstore/s2-sdk-go/issues/114))
+- Append session error body ([#115](https://github.com/s2-streamstore/s2-sdk-go/issues/115))
+- Batcher close logic ([#116](https://github.com/s2-streamstore/s2-sdk-go/issues/116))
+- Connection management + user-agent ([#117](https://github.com/s2-streamstore/s2-sdk-go/issues/117))
+
 ## [v0.11.0] - 2025-12-31
 
 ### Added
