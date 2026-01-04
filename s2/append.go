@@ -39,13 +39,8 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 	path := fmt.Sprintf("/streams/%s/records", url.PathEscape(string(s.name)))
 	pbInput := convertAppendInputToProto(prepared)
 
-	pooledClient, err := s.getHTTPClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get HTTP client: %w", err)
-	}
-
 	httpClient := &httpClient{
-		client:      pooledClient,
+		client:      s.getHTTPClient(),
 		baseURL:     s.basinClient.baseURL,
 		accessToken: s.basinClient.accessToken,
 		logger:      s.logger,
@@ -82,21 +77,8 @@ func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppen
 	logDebug(s.logger, "transport: creating append session",
 		"stream", string(s.name))
 
-	pooledClient, err := s.getHTTPClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get HTTP client: %w", err)
-	}
-
-	sessionStreamClient := &StreamClient{
-		name:        s.name,
-		basinClient: s.basinClient,
-		httpClient:  pooledClient,
-		connMgr:     s.connMgr,
-		logger:      s.logger,
-	}
-
 	session := &transportAppendSession{
-		streamClient: sessionStreamClient,
+		streamClient: s,
 		acksCh:       make(chan *AppendAck, appendAckChannelBuffer),
 		errorsCh:     make(chan error, 1),
 		closed:       make(chan struct{}),
@@ -134,10 +116,9 @@ func (p *transportAppendSession) start(ctx context.Context) error {
 		req.Header.Set("s2-basin", basinName)
 	}
 
-	resp, err := p.streamClient.httpClient.Do(req)
+	resp, err := p.streamClient.getHTTPClient().Do(req)
 	if err != nil {
 		pipeWriter.Close()
-		p.streamClient.connMgr.markClientUnhealthy(p.streamClient.basinClient.baseURL, err)
 
 		if isStreamResetError(err) {
 			return makeStreamResetError(err, "pipelined session")
@@ -149,8 +130,6 @@ func (p *transportAppendSession) start(ctx context.Context) error {
 
 		return fmt.Errorf("failed to connect: %w", err)
 	}
-
-	p.streamClient.connMgr.markClientHealthy(p.streamClient.basinClient.baseURL)
 
 	if resp.StatusCode >= 400 {
 		pipeWriter.Close()
