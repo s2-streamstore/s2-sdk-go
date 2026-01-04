@@ -8,6 +8,7 @@ import (
 
 // Basin client.
 type BasinClient struct {
+	client             *Client // Reference to parent Client for shared resources
 	name               string
 	baseURL            string
 	accessToken        string

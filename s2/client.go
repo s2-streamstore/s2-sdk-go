@@ -1,6 +1,8 @@
 package s2
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -8,12 +10,21 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"golang.org/x/net/http2"
 )
 
 const (
 	DefaultBaseURL           = "https://aws.s2.dev/v1"
 	defaultRequestTimeout    = 30 * time.Second
 	defaultConnectionTimeout = 10 * time.Second
+
+	// HTTP/2 transport settings for streaming operations
+	http2MaxReadFrameSize  = 16 * 1024 * 1024
+	http2MaxHeaderListSize = 10 * 1024 * 1024
+	http2ReadIdleTimeout   = 30 * time.Second
+	http2PingTimeout       = 15 * time.Second
+	http2WriteByteTimeout  = 30 * time.Second
 )
 
 type ClientOptions struct {
@@ -46,6 +57,7 @@ type Client struct {
 	accessToken        string
 	baseURL            string
 	httpClient         *http.Client
+	streamingClient    *http.Client // HTTP/2 client for streaming operations (AppendSession, ReadSession)
 	makeBasinBaseURL   func(basin string) string
 	retryConfig        *RetryConfig
 	logger             *slog.Logger
@@ -131,6 +143,7 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		accessToken:        accessToken,
 		baseURL:            baseURL,
 		httpClient:         httpClient,
+		streamingClient:    createStreamingClient(opts.AllowH2C, connectionTimeout),
 		makeBasinBaseURL:   makeBasinBaseURL,
 		retryConfig:        retryConfig,
 		logger:             opts.Logger,
@@ -145,6 +158,45 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	c.Metrics = &MetricsClient{client: c}
 
 	return c
+}
+
+func createStreamingClient(allowH2C bool, connectionTimeout time.Duration) *http.Client {
+	dialer := &net.Dialer{
+		Timeout: connectionTimeout,
+	}
+
+	transport := &http2.Transport{
+		AllowHTTP:                  allowH2C,
+		MaxReadFrameSize:           http2MaxReadFrameSize,
+		MaxHeaderListSize:          http2MaxHeaderListSize,
+		ReadIdleTimeout:            http2ReadIdleTimeout,
+		PingTimeout:                http2PingTimeout,
+		WriteByteTimeout:           http2WriteByteTimeout,
+		StrictMaxConcurrentStreams: false,
+		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+			if allowH2C {
+				return dialer.DialContext(ctx, network, addr)
+			}
+			conn, err := dialer.DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			tlsConn := tls.Client(conn, cfg)
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				conn.Close()
+				return nil, err
+			}
+			return tlsConn, nil
+		},
+	}
+
+	return &http.Client{
+		Transport: userAgentRoundTripper{
+			base:      transport,
+			userAgent: defaultUserAgent(),
+		},
+		Timeout: 0, // No timeout for streaming
+	}
 }
 
 // Create a client using configuration from environment variables.
@@ -193,6 +245,7 @@ func (c *Client) Basin(name string) *BasinClient {
 		panic("basin name cannot be empty")
 	}
 	basin := &BasinClient{
+		client:             c,
 		name:               name,
 		baseURL:            c.makeBasinBaseURL(name),
 		accessToken:        c.accessToken,

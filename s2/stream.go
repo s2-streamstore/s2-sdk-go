@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 
 	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/proto"
@@ -19,13 +18,9 @@ import (
 )
 
 type StreamClient struct {
-	name           StreamName
-	basinClient    *BasinClient
-	httpClient     *http.Client
-	httpClientOnce sync.Once
-	httpClientErr  error
-	connMgr        *connectionManager
-	logger         *slog.Logger
+	name        StreamName
+	basinClient *BasinClient
+	logger      *slog.Logger
 }
 
 func (b *BasinClient) Stream(name StreamName) *StreamClient {
@@ -36,8 +31,6 @@ func (b *BasinClient) Stream(name StreamName) *StreamClient {
 	return &StreamClient{
 		name:        name,
 		basinClient: b,
-		httpClient:  nil, // Will be set lazily via connection manager
-		connMgr:     globalConnectionManager,
 		logger:      b.logger,
 	}
 }
@@ -46,15 +39,8 @@ func (s *StreamClient) Name() StreamName {
 	return s.name
 }
 
-func (s *StreamClient) getHTTPClient() (*http.Client, error) {
-	s.httpClientOnce.Do(func() {
-		s.httpClient, s.httpClientErr = s.connMgr.getOrCreateHTTP2Client(
-			s.basinClient.baseURL,
-			s.basinClient.allowH2C,
-			s.basinClient.connectionTimeout,
-		)
-	})
-	return s.httpClient, s.httpClientErr
+func (s *StreamClient) getHTTPClient() *http.Client {
+	return s.basinClient.client.streamingClient
 }
 
 // Check the tail of the stream.
@@ -365,6 +351,11 @@ func isRetryableReadError(err error) bool {
 	}
 
 	return false
+}
+
+func isStreamResetError(err error) bool {
+	var se http2.StreamError
+	return errors.As(err, &se)
 }
 
 func shouldRetryError(err error, config *RetryConfig, input *AppendInput) bool {

@@ -92,13 +92,8 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 	}
 
 	batch, err := withRetries(s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
-		pooledClient, err := s.getHTTPClient()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get HTTP client: %w", err)
-		}
-
 		httpClient := &httpClient{
-			client:      pooledClient,
+			client:      s.getHTTPClient(),
 			baseURL:     s.basinClient.baseURL,
 			accessToken: s.basinClient.accessToken,
 			logger:      s.logger,
@@ -153,19 +148,6 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 		ctx = context.Background()
 	}
 
-	pooledClient, err := s.getHTTPClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get HTTP client: %w", err)
-	}
-
-	sessionStreamClient := &StreamClient{
-		name:        s.name,
-		basinClient: s.basinClient,
-		httpClient:  pooledClient,
-		connMgr:     s.connMgr,
-		logger:      s.logger,
-	}
-
 	var retryCfg *RetryConfig
 	if s.basinClient.retryConfig != nil {
 		cfgCopy := *s.basinClient.retryConfig
@@ -178,7 +160,7 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
 
 	session := &streamReader{
-		streamClient: sessionStreamClient,
+		streamClient: s,
 		recordsCh:    make(chan SequencedRecord, readSessionRecordsBuffer),
 		errorCh:      make(chan error, 1),
 		closed:       make(chan struct{}),
@@ -420,10 +402,8 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		req.Header.Set("s2-basin", basinName)
 	}
 
-	resp, err := r.streamClient.httpClient.Do(req)
+	resp, err := r.streamClient.getHTTPClient().Do(req)
 	if err != nil {
-		r.streamClient.connMgr.markClientUnhealthy(r.streamClient.basinClient.baseURL, err)
-
 		if isStreamResetError(err) {
 			logError(r.logger, "s2 read session stream reset", "stream", string(r.streamClient.name), "error", err)
 			return makeStreamResetError(err, "read session")
@@ -432,8 +412,6 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		logError(r.logger, "s2 read session connect error", "stream", string(r.streamClient.name), "error", err)
 		return fmt.Errorf("failed to connect: %w", err)
 	}
-
-	r.streamClient.connMgr.markClientHealthy(r.streamClient.basinClient.baseURL)
 	if resp.StatusCode >= 400 {
 		logError(r.logger, "s2 read session http status", "stream", string(r.streamClient.name), "status", resp.StatusCode)
 		return parseHTTPError(resp)
