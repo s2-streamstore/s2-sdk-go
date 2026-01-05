@@ -8,11 +8,15 @@ import (
 
 const defaultMaxInflightBytes = 10 * 1024 * 1024 // 10 MiB
 
+// Represents a pending batch submission to an [AppendSession].
+// Call [SubmitFuture.Wait] to block until the batch is accepted.
 type SubmitFuture struct {
 	ticketCh <-chan *BatchSubmitTicket
 	errCh    <-chan error
 }
 
+// Blocks until the batch is accepted by the [AppendSession] and returns
+// a [BatchSubmitTicket] that can be used to wait for the append acknowledgment.
 func (f *SubmitFuture) Wait(ctx context.Context) (*BatchSubmitTicket, error) {
 	if ctx == nil {
 		ctx = context.Background()

@@ -28,6 +28,8 @@ const (
 	defaultMaxDelay    = 1 * time.Second
 )
 
+// Default retry configuration.
+// It retries up to 3 times with exponential backoff between 100ms and 1s.
 var DefaultRetryConfig = &RetryConfig{
 	MaxAttempts:       defaultMaxAttempts,
 	MinDelay:          defaultMinDelay,

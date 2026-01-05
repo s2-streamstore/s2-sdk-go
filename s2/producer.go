@@ -113,6 +113,7 @@ func (p *Producer) resolveBatchError(meta []recordMeta, err error) {
 	}
 }
 
+// Stops the producer, flushes pending batches, and waits for completion.
 func (p *Producer) Close() error {
 	p.batcher.Close()
 	p.cancel()
@@ -120,11 +121,13 @@ func (p *Producer) Close() error {
 	return nil
 }
 
+// Represents a pending single-record submission to a [Producer].
 type RecordSubmitFuture struct {
 	ticketCh <-chan *RecordSubmitTicket
 	errCh    <-chan error
 }
 
+// Blocks until the record is accepted and returns a [RecordSubmitTicket].
 func (f *RecordSubmitFuture) Wait(ctx context.Context) (*RecordSubmitTicket, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -139,10 +142,13 @@ func (f *RecordSubmitFuture) Wait(ctx context.Context) (*RecordSubmitTicket, err
 	}
 }
 
+// Returned after a record is accepted by the [Producer].
+// Use [RecordSubmitTicket.Ack] to wait for the record to become durable.
 type RecordSubmitTicket struct {
 	ackCh <-chan *producerOutcome
 }
 
+// Blocks until the record is durable and returns the [IndexedAppendAck].
 func (t *RecordSubmitTicket) Ack(ctx context.Context) (*IndexedAppendAck, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -161,15 +167,18 @@ func (t *RecordSubmitTicket) Ack(ctx context.Context) (*IndexedAppendAck, error)
 	}
 }
 
+// Represents the acknowledgment for a single record within a batch.
 type IndexedAppendAck struct {
 	batchAck *AppendAck
 	index    uint64
 }
 
+// Returns the underlying batch [AppendAck].
 func (a *IndexedAppendAck) BatchAppendAck() *AppendAck {
 	return a.batchAck
 }
 
+// Returns the sequence number assigned to this specific record.
 func (a *IndexedAppendAck) SeqNum() uint64 {
 	return a.batchAck.Start.SeqNum + a.index
 }
