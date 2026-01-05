@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 )
 
-// Access tokens client.
 type AccessTokensClient struct {
 	client *Client
 }
