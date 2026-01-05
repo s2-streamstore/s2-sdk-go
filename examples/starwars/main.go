@@ -75,7 +75,7 @@ func appendFrames(ctx context.Context, session *s2.AppendSession) error {
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
-		future, err := session.Submit(&s2.AppendInput{
+		fut, err := session.Submit(&s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: scanner.Bytes()}},
 		})
 		if err != nil {
@@ -83,7 +83,7 @@ func appendFrames(ctx context.Context, session *s2.AppendSession) error {
 		}
 
 		go func() {
-			ticket, err := future.Wait(ctx)
+			ticket, err := fut.Wait(ctx)
 			if err != nil {
 				log.Printf("error enqueueing: %v", err)
 

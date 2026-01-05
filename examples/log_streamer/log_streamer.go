@@ -162,7 +162,7 @@ func (ls *LogStreamer) sendLogs(producer *s2.Producer, session *s2.AppendSession
 				continue
 			}
 
-			future, err := producer.Submit(record)
+			fut, err := producer.Submit(record)
 			if err != nil {
 				ls.logger.Error("failed to submit log record to producer",
 					"error", err,
@@ -172,7 +172,7 @@ func (ls *LogStreamer) sendLogs(producer *s2.Producer, session *s2.AppendSession
 			}
 
 			go func(msg string) {
-				ticket, err := future.Wait(ls.ctx)
+				ticket, err := fut.Wait(ls.ctx)
 				if err != nil {
 					ls.logger.Error("failed to enqueue log record",
 						"error", err,

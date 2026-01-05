@@ -12,7 +12,7 @@ type BasinsClient struct {
 	client *Client
 }
 
-// Iterates over basins returned by [BasinsClient.Iter].
+// Iterator over basins returned by [BasinsClient.Iter].
 // Use Next to advance, Value to get the current item, and Err to check for errors.
 type BasinsIterator struct {
 	pager *pager[BasinInfo]

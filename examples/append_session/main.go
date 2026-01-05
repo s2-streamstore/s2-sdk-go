@@ -63,21 +63,21 @@ func main() {
 		go func() {
 			defer wg.Done()
 
-			ack, err := result.Wait(ctx)
+			fut, err := result.Wait(ctx)
 			if err != nil {
 				log.Printf("ack error: %v", err)
 
 				return
 			}
 
-			ack2, err := ack.Ack(ctx)
+			ack, err := fut.Ack(ctx)
 			if err != nil {
 				log.Printf("ack error: %v", err)
 
 				return
 			}
 
-			log.Printf("ack: end=%d tail=%d", ack2.End.SeqNum, ack2.Tail.SeqNum)
+			log.Printf("ack: end=%d tail=%d", ack.End.SeqNum, ack.Tail.SeqNum)
 		}()
 	}
 
