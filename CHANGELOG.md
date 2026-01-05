@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.2] - 2026-01-05
+
+### Bug Fixes
+
+- Read session wait elapsed time track for retries ([#119](https://github.com/s2-streamstore/s2-sdk-go/issues/119))
+- *(bento)* Cache invalidation ([#120](https://github.com/s2-streamstore/s2-sdk-go/issues/120))
+- I/o timeout not getting retried ([#121](https://github.com/s2-streamstore/s2-sdk-go/issues/121))
+
+### Miscellaneous Tasks
+
+- Update protos + docs ([#122](https://github.com/s2-streamstore/s2-sdk-go/issues/122))
+
 ## [v0.11.1] - 2026-01-04
 
 ### Bug Fixes
@@ -12,22 +24,15 @@ All notable changes to this project will be documented in this file.
 - Batcher close logic ([#116](https://github.com/s2-streamstore/s2-sdk-go/issues/116))
 - Connection management + user-agent ([#117](https://github.com/s2-streamstore/s2-sdk-go/issues/117))
 
+### Miscellaneous Tasks
+
+- *(release)* V0.11.1 ([#118](https://github.com/s2-streamstore/s2-sdk-go/issues/118))
+
 ## [v0.11.0] - 2025-12-31
 
-### Added
+### Miscellaneous Tasks
 
-- AppendSession for streaming appends with automatic retries
-- ReadSession for streaming reads with automatic retries
-- Producer API with batching support
-- Batcher with configurable size, count, and time thresholds
-- Iterator support for basins, streams, and access tokens
-- Metrics API support
-- Configurable retry policies
-
-### Changed
-
-- Migrated from gRPC to REST
-- Simplified API surface
+- *(release)* V0.11.0 ([#112](https://github.com/s2-streamstore/s2-sdk-go/issues/112))
 
 ## [v0.10.0] - 2025-07-23
 
@@ -35,11 +40,19 @@ All notable changes to this project will be documented in this file.
 
 - Clamp ([#99](https://github.com/s2-streamstore/s2-sdk-go/issues/99))
 
+### Miscellaneous Tasks
+
+- *(release)* V0.10.0 ([#100](https://github.com/s2-streamstore/s2-sdk-go/issues/100))
+
 ## [v0.9.0] - 2025-06-16
 
 ### Bug Fixes
 
 - Revoking access token error ([#95](https://github.com/s2-streamstore/s2-sdk-go/issues/95))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.9.0 ([#96](https://github.com/s2-streamstore/s2-sdk-go/issues/96))
 
 ## [v0.8.0] - 2025-05-30
 
@@ -50,6 +63,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Update protos ([#86](https://github.com/s2-streamstore/s2-sdk-go/issues/86))
+- *(release)* V0.8.0 ([#92](https://github.com/s2-streamstore/s2-sdk-go/issues/92))
 
 ## [v0.7.0] - 2025-03-26
 
@@ -60,6 +74,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - *(sdk)* Proto update ([#60](https://github.com/s2-streamstore/s2-sdk-go/issues/60))
+- *(release)* V0.7.0 ([#64](https://github.com/s2-streamstore/s2-sdk-go/issues/64))
 
 ## [v0.6.0] - 2025-02-25
 
@@ -72,11 +87,19 @@ All notable changes to this project will be documented in this file.
 
 - *(sdk)* Retry `CANCELLED` gRPC status code ([#53](https://github.com/s2-streamstore/s2-sdk-go/issues/53))
 
+### Miscellaneous Tasks
+
+- *(release)* V0.6.0 ([#55](https://github.com/s2-streamstore/s2-sdk-go/issues/55))
+
 ## [v0.5.2] - 2025-02-06
 
 ### Features
 
 - Enable GZIP compression ([#49](https://github.com/s2-streamstore/s2-sdk-go/issues/49))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.5.2 ([#51](https://github.com/s2-streamstore/s2-sdk-go/issues/51))
 
 ## [v0.5.1] - 2025-02-04
 
@@ -84,11 +107,16 @@ All notable changes to this project will be documented in this file.
 
 - *(sdk)* Return empty leftovers when whole batch is valid ([#47](https://github.com/s2-streamstore/s2-sdk-go/issues/47))
 
+### Miscellaneous Tasks
+
+- *(release)* V0.5.1 ([#48](https://github.com/s2-streamstore/s2-sdk-go/issues/48))
+
 ## [v0.5.0] - 2025-02-03
 
 ### Miscellaneous Tasks
 
 - Update minimum Go version to 1.22 ([#45](https://github.com/s2-streamstore/s2-sdk-go/issues/45))
+- *(release)* V0.5.0 ([#46](https://github.com/s2-streamstore/s2-sdk-go/issues/46))
 
 ## [v0.4.1] - 2025-01-30
 
@@ -96,11 +124,19 @@ All notable changes to this project will be documented in this file.
 
 - *(bento)* Only ack continuous batches ([#43](https://github.com/s2-streamstore/s2-sdk-go/issues/43))
 
+### Miscellaneous Tasks
+
+- *(release)* V0.4.1 ([#44](https://github.com/s2-streamstore/s2-sdk-go/issues/44))
+
 ## [v0.4.0] - 2025-01-29
 
 ### Features
 
 - *(bento)* Simplify input plugin ([#41](https://github.com/s2-streamstore/s2-sdk-go/issues/41))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.4.0 ([#42](https://github.com/s2-streamstore/s2-sdk-go/issues/42))
 
 ## [v0.3.0] - 2025-01-28
 
@@ -113,11 +149,19 @@ All notable changes to this project will be documented in this file.
 
 - *(bento)* Handle acks without restarting the read session ([#39](https://github.com/s2-streamstore/s2-sdk-go/issues/39))
 
+### Miscellaneous Tasks
+
+- *(release)* V0.3.0 ([#40](https://github.com/s2-streamstore/s2-sdk-go/issues/40))
+
 ## [v0.2.1] - 2025-01-21
 
 ### Features
 
 - Use `optr` for optional pointer handling ([#29](https://github.com/s2-streamstore/s2-sdk-go/issues/29))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.2.1 ([#35](https://github.com/s2-streamstore/s2-sdk-go/issues/35))
 
 ## [v0.2.0] - 2025-01-16
 
@@ -128,12 +172,14 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Update proto ([#26](https://github.com/s2-streamstore/s2-sdk-go/issues/26))
+- *(release)* V0.2.0 ([#27](https://github.com/s2-streamstore/s2-sdk-go/issues/27))
 
 ## [v0.1.2] - 2025-01-13
 
 ### Miscellaneous Tasks
 
 - Update protos ([#22](https://github.com/s2-streamstore/s2-sdk-go/issues/22))
+- *(release)* V0.1.2 ([#23](https://github.com/s2-streamstore/s2-sdk-go/issues/23))
 
 ## [v0.1.1] - 2025-01-13
 
@@ -154,6 +200,10 @@ All notable changes to this project will be documented in this file.
 - Support read session resumption ([#7](https://github.com/s2-streamstore/s2-sdk-go/issues/7))
 - Append record batching ([#8](https://github.com/s2-streamstore/s2-sdk-go/issues/8))
 
+### Bug Fixes
+
+- CHANGELOG header ([#18](https://github.com/s2-streamstore/s2-sdk-go/issues/18))
+
 ### Documentation
 
 - Add documentation comments for exported functions/types ([#11](https://github.com/s2-streamstore/s2-sdk-go/issues/11))
@@ -167,3 +217,5 @@ All notable changes to this project will be documented in this file.
 - Add github actions for CI ([#6](https://github.com/s2-streamstore/s2-sdk-go/issues/6))
 - *(refactor)* Rearrange files ([#15](https://github.com/s2-streamstore/s2-sdk-go/issues/15))
 - *(release)* Create release v0.1.0 ([#17](https://github.com/s2-streamstore/s2-sdk-go/issues/17))
+
+<!-- generated by git-cliff -->
