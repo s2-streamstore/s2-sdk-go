@@ -503,7 +503,7 @@ func ExampleAccessTokensClient_Revoke() {
 func ExampleMetricsClient_Account() {
 	client := s2.New("your-access-token", nil)
 
-	metrics, err := client.Metrics.Account(&s2.AccountMetricsArgs{
+	metrics, err := client.Metrics.Account(context.Background(), &s2.AccountMetricsArgs{
 		Set: s2.AccountMetricSetActiveBasins,
 	})
 	if err != nil {
@@ -520,7 +520,7 @@ func ExampleMetricsClient_Account() {
 func ExampleMetricsClient_Basin() {
 	client := s2.New("your-access-token", nil)
 
-	metrics, err := client.Metrics.Basin(&s2.BasinMetricsArgs{
+	metrics, err := client.Metrics.Basin(context.Background(), &s2.BasinMetricsArgs{
 		Basin: "my-basin",
 		Set:   s2.BasinMetricSetStorage,
 	})
@@ -538,7 +538,7 @@ func ExampleMetricsClient_Basin() {
 func ExampleMetricsClient_Stream() {
 	client := s2.New("your-access-token", nil)
 
-	metrics, err := client.Metrics.Stream(&s2.StreamMetricsArgs{
+	metrics, err := client.Metrics.Stream(context.Background(), &s2.StreamMetricsArgs{
 		Basin:  "my-basin",
 		Stream: "my-stream",
 		Set:    s2.StreamMetricSetStorage,

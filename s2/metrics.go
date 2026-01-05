@@ -1,6 +1,7 @@
 package s2
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -53,14 +54,20 @@ type MetricsClient struct {
 	client *Client
 }
 
-func (m *MetricsClient) Account(args *AccountMetricsArgs) (*MetricSetResponse, error) {
+func (m *MetricsClient) Account(ctx context.Context, args *AccountMetricsArgs) (*MetricSetResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if args == nil {
 		return nil, fmt.Errorf("account metrics args cannot be nil")
 	}
-	return m.fetchMetrics(fmt.Sprintf("%s/metrics", m.client.baseURL), string(args.Set), args.Start, args.End, args.Interval)
+	return m.fetchMetrics(ctx, fmt.Sprintf("%s/metrics", m.client.baseURL), string(args.Set), args.Start, args.End, args.Interval)
 }
 
-func (m *MetricsClient) Basin(args *BasinMetricsArgs) (*MetricSetResponse, error) {
+func (m *MetricsClient) Basin(ctx context.Context, args *BasinMetricsArgs) (*MetricSetResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if args == nil {
 		return nil, fmt.Errorf("basin metrics args cannot be nil")
 	}
@@ -68,10 +75,13 @@ func (m *MetricsClient) Basin(args *BasinMetricsArgs) (*MetricSetResponse, error
 		return nil, fmt.Errorf("basin name cannot be empty")
 	}
 	endpoint := fmt.Sprintf("%s/metrics/%s", m.client.baseURL, url.PathEscape(args.Basin))
-	return m.fetchMetrics(endpoint, string(args.Set), args.Start, args.End, args.Interval)
+	return m.fetchMetrics(ctx, endpoint, string(args.Set), args.Start, args.End, args.Interval)
 }
 
-func (m *MetricsClient) Stream(args *StreamMetricsArgs) (*MetricSetResponse, error) {
+func (m *MetricsClient) Stream(ctx context.Context, args *StreamMetricsArgs) (*MetricSetResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if args == nil {
 		return nil, fmt.Errorf("stream metrics args cannot be nil")
 	}
@@ -83,15 +93,15 @@ func (m *MetricsClient) Stream(args *StreamMetricsArgs) (*MetricSetResponse, err
 		url.PathEscape(args.Basin),
 		url.PathEscape(args.Stream),
 	)
-	return m.fetchMetrics(endpoint, string(args.Set), args.Start, args.End, args.Interval)
+	return m.fetchMetrics(ctx, endpoint, string(args.Set), args.Start, args.End, args.Interval)
 }
 
-func (m *MetricsClient) fetchMetrics(endpoint string, set string, start, end *int64, interval *TimeseriesInterval) (*MetricSetResponse, error) {
+func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set string, start, end *int64, interval *TimeseriesInterval) (*MetricSetResponse, error) {
 	if set == "" {
 		return nil, fmt.Errorf("metrics set must be provided")
 	}
 
-	return withRetries(m.client.retryConfig, m.client.logger, func() (*MetricSetResponse, error) {
+	return withRetries(ctx, m.client.retryConfig, m.client.logger, func() (*MetricSetResponse, error) {
 		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 		if err != nil {
 			return nil, fmt.Errorf("creating request: %w", err)

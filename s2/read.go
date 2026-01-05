@@ -91,7 +91,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		path += "?" + queryParams
 	}
 
-	batch, err := withRetries(s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
+	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
 		httpClient := &httpClient{
 			client:      s.getHTTPClient(),
 			baseURL:     s.basinClient.baseURL,
@@ -227,8 +227,8 @@ func (r *streamReader) run() {
 			consecutiveFailures++
 		}
 
-		if !isRetryableReadError(err) || consecutiveFailures >= maxAttempts {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, errSessionClosed) {
+		if !isRetryableReadError(r.ctx, err) || consecutiveFailures >= maxAttempts {
+			if r.ctx.Err() == nil && !errors.Is(err, errSessionClosed) {
 				if consecutiveFailures >= maxAttempts {
 					logError(r.logger, "s2 read session max attempts exhausted",
 						"stream", string(r.streamClient.name),

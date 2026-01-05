@@ -52,7 +52,7 @@ func (s *StreamClient) CheckTail(ctx context.Context) (*TailResponse, error) {
 
 	path := fmt.Sprintf("/streams/%s/records/tail", url.PathEscape(string(s.name)))
 
-	return withRetries(s.basinClient.retryConfig, s.logger, func() (*TailResponse, error) {
+	return withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*TailResponse, error) {
 		httpClient := &httpClient{
 			client:      s.basinClient.httpClient,
 			baseURL:     s.basinClient.baseURL,
@@ -310,11 +310,11 @@ func cloneReadSessionOptions(opts *ReadOptions) *ReadOptions {
 	return &clone
 }
 
-func isRetryableReadError(err error) bool {
+func isRetryableReadError(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errSessionClosed) {
+	if ctx.Err() != nil || errors.Is(err, errSessionClosed) {
 		return false
 	}
 
