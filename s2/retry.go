@@ -34,7 +34,7 @@ var DefaultRetryConfig = &RetryConfig{
 	AppendRetryPolicy: AppendRetryPolicyAll,
 }
 
-func withRetries[T any](config *RetryConfig, logger *slog.Logger, operation func() (T, error)) (T, error) {
+func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, operation func() (T, error)) (T, error) {
 	var zero T
 
 	if config == nil {
@@ -56,7 +56,7 @@ func withRetries[T any](config *RetryConfig, logger *slog.Logger, operation func
 
 		lastError = err
 
-		if isNetworkError(err) {
+		if isNetworkError(ctx, err) {
 			if attemptNo < maxAttempts {
 				delay := calculateRetryBackoff(config, attemptNo)
 				logInfo(logger, "s2 retrying after network error",
@@ -124,12 +124,12 @@ func calculateRetryBackoff(config *RetryConfig, attempt int) time.Duration {
 	return baseDelay + jitter
 }
 
-func isNetworkError(err error) bool {
+func isNetworkError(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
 
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+	if ctx.Err() != nil {
 		return false
 	}
 
@@ -145,13 +145,13 @@ func isNetworkError(err error) bool {
 
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
-		return isNetworkError(urlErr.Err)
+		return isNetworkError(ctx, urlErr.Err)
 	}
 
 	return false
 }
 
-func withAppendRetries(config *RetryConfig, logger *slog.Logger, input *AppendInput, operation func() (*AppendAck, error)) (*AppendAck, error) {
+func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Logger, input *AppendInput, operation func() (*AppendAck, error)) (*AppendAck, error) {
 	if config == nil {
 		config = DefaultRetryConfig
 	}
@@ -171,7 +171,7 @@ func withAppendRetries(config *RetryConfig, logger *slog.Logger, input *AppendIn
 
 		lastError = err
 
-		if isNetworkError(err) {
+		if isNetworkError(ctx, err) {
 			if attemptNo == maxAttempts {
 				logError(logger, "s2 append network error, max attempts exhausted",
 					"attempts", maxAttempts,
