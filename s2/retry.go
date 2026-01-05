@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// Retry configuration.
 type RetryConfig struct {
 	// Total number of attempts, including the initial try. Must be >= 1. A value of 1 means no retries.
 	MaxAttempts int
@@ -112,7 +113,7 @@ func calculateRetryBackoff(config *RetryConfig, attempt int) time.Duration {
 	}
 
 	// baseDelay = min((minDelay * 2^(n-1)), maxDelay)
-	baseDelay := minDelay << (attempt - 1) // minDelay * 2^(attempt-1)
+	baseDelay := minDelay << (attempt - 1)            // minDelay * 2^(attempt-1)
 	if baseDelay > maxDelay || baseDelay < minDelay { // overflow check
 		baseDelay = maxDelay
 	}

@@ -45,7 +45,7 @@ func main() {
 		go func(n int) {
 			defer wg.Done()
 
-			future, err := producer.Submit(s2.AppendRecord{
+			fut, err := producer.Submit(s2.AppendRecord{
 				Body: []byte(fmt.Sprintf("batched message #%d", n)),
 			})
 			if err != nil {
@@ -54,7 +54,7 @@ func main() {
 				return
 			}
 
-			ticket, err := future.Wait(ctx)
+			ticket, err := fut.Wait(ctx)
 			if err != nil {
 				log.Printf("enqueue error: %v", err)
 

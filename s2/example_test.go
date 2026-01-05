@@ -51,7 +51,7 @@ func ExampleStreamClient_AppendSession() {
 	}
 	defer session.Close()
 
-	future, err := session.Submit(&s2.AppendInput{
+	fut, err := session.Submit(&s2.AppendInput{
 		Records: []s2.AppendRecord{
 			{Body: []byte("hello")},
 			{Body: []byte("world")},
@@ -61,7 +61,7 @@ func ExampleStreamClient_AppendSession() {
 		log.Fatalf("submit: %v", err)
 	}
 
-	ticket, err := future.Wait(ctx)
+	ticket, err := fut.Wait(ctx)
 	if err != nil {
 		log.Fatalf("enqueue: %v", err)
 	}
@@ -95,7 +95,7 @@ func ExampleProducer() {
 	defer producer.Close()
 
 	for i := range 100 {
-		future, err := producer.Submit(s2.AppendRecord{
+		fut, err := producer.Submit(s2.AppendRecord{
 			Body: []byte(fmt.Sprintf("record %d", i)),
 		})
 		if err != nil {
@@ -114,7 +114,7 @@ func ExampleProducer() {
 				return
 			}
 			fmt.Printf("ack: seqNum=%d\n", ack.SeqNum())
-		}(future)
+		}(fut)
 	}
 
 	time.Sleep(time.Second)
@@ -133,7 +133,7 @@ func ExampleBatchSubmitTicket_Ack() {
 	}
 	defer session.Close()
 
-	future, err := session.Submit(&s2.AppendInput{
+	fut, err := session.Submit(&s2.AppendInput{
 		Records: []s2.AppendRecord{
 			{Body: []byte("first")},
 			{Body: []byte("second")},
@@ -143,7 +143,7 @@ func ExampleBatchSubmitTicket_Ack() {
 		log.Fatalf("submit append: %v", err)
 	}
 
-	ticket, err := future.Wait(ctx)
+	ticket, err := fut.Wait(ctx)
 	if err != nil {
 		log.Fatalf("enqueue failed: %v", err)
 	}

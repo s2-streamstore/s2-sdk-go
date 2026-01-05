@@ -293,16 +293,16 @@ type GaugeMetric struct {
 }
 
 type AccumulationMetric struct {
-	// The duration of bucket for the accumulation.
-	BucketLength TimeseriesInterval `json:"bucket_length"`
+	// The interval at which data points are accumulated.
+	Interval TimeseriesInterval `json:"interval"`
 	// Timeseries name.
 	Name string `json:"name"`
 	// Unit of the metric.
 	Unit MetricUnit `json:"unit"`
 	// Timeseries values.
 	// Each element is a tuple of a timestamp in Unix epoch seconds and a data point.
-	// The data point represents the accumulated value for a bucket of time starting at the provided timestamp,
-	// lasting for the duration of the `BucketLength` parameter.
+	// The data point represents the accumulated value for the time period starting at the timestamp,
+	// spanning one interval.
 	Values []MetricSample `json:"values"`
 }
 
