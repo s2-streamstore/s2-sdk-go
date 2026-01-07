@@ -74,7 +74,7 @@ tasks:
       - git fetch origin -t
       - git checkout origin/main
       - git switch -c {{.BRANCH}}
-      - git cliff -o CHANGELOG.md
+      - git cliff -o CHANGELOG.md --tag {{.SEMVER}}
       - git add CHANGELOG.md
       - 'git commit -m "chore(release): {{.SEMVER}}"'
       - echo "Push the branch '{{.BRANCH}}'. Once merged, tag the release using 'task release:tag'"

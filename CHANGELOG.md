@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.3] - 2026-01-07
+
+### Bug Fixes
+
+- Incorrect user-agent ([#124](https://github.com/s2-streamstore/s2-sdk-go/issues/124))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.11.3
+
 ## [v0.11.2] - 2026-01-05
 
 ### Bug Fixes
@@ -13,6 +23,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Update protos + docs ([#122](https://github.com/s2-streamstore/s2-sdk-go/issues/122))
+- *(release)* V0.11.2 ([#123](https://github.com/s2-streamstore/s2-sdk-go/issues/123))
 
 ## [v0.11.1] - 2026-01-04
 
