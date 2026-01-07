@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -278,7 +279,16 @@ func defaultUserAgent() string {
 	if ver == "" {
 		ver = "dev"
 	}
-	return fmt.Sprintf("s2-go-sdk/%s (%s)", ver, runtime.Version())
+	return fmt.Sprintf("s2-sdk-go/%s (%s)", ver, runtime.Version())
 }
 
-var moduleVersion = ""
+var moduleVersion = func() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, dep := range info.Deps {
+			if dep.Path == "github.com/s2-streamstore/s2-sdk-go" {
+				return dep.Version
+			}
+		}
+	}
+	return ""
+}()
