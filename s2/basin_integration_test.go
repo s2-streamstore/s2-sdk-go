@@ -60,11 +60,9 @@ func ptr[T any](v T) *T {
 
 func isFreeTierLimitation(err error) bool {
 	var s2Err *s2.S2Error
-	if errors.As(err, &s2Err) && s2Err.Code == "invalid_basin_config" {
+	if errors.As(err, &s2Err) && (s2Err.Code == "invalid_basin_config" || s2Err.Code == "bad_config") {
 		msg := strings.ToLower(s2Err.Message)
-		return strings.Contains(msg, "free tier") ||
-			strings.Contains(msg, "retention") ||
-			strings.Contains(msg, "express")
+		return strings.Contains(msg, "free tier")
 	}
 	return false
 }
