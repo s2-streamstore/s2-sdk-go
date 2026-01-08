@@ -78,7 +78,7 @@ jobs:
         run: task test
 
   integration:
-    name: Integration (real backend)
+    name: Integration
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,12 +102,7 @@ jobs:
           S2_ACCESS_TOKEN: ${{ secrets.S2_ACCESS_TOKEN }}
           S2_ACCOUNT_ENDPOINT: ${{ secrets.S2_ACCOUNT_ENDPOINT }}
           S2_BASIN_ENDPOINT: ${{ secrets.S2_BASIN_ENDPOINT }}          
-        run: |
-          if [ -z "${S2_ACCESS_TOKEN}" ]; then
-            echo "S2_ACCESS_TOKEN not set; skipping integration tests"
-            exit 0
-          fi
-          task test:integration
+        run:  task test:integration
 
   golangci-lint:
     name: GolangCI Lint
