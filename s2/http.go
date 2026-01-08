@@ -52,7 +52,9 @@ func (h *httpClient) requestWithHeaders(ctx context.Context, method, path string
 	}
 
 	req.Header.Set("Authorization", "Bearer "+h.accessToken)
-	req.Header.Set("Accept-Encoding", "zstd, gzip")
+	// Note: Don't set Accept-Encoding manually for JSON requests.
+	// Go's http.Transport automatically handles gzip compression/decompression.
+	// Setting it manually disables auto-decompression and we'd need to handle zstd ourselves.
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -124,7 +126,7 @@ func (h *httpClient) requestProto(ctx context.Context, method, path string, body
 	}
 
 	req.Header.Set("Authorization", "Bearer "+h.accessToken)
-	req.Header.Set("Accept-Encoding", "zstd, gzip")
+	// Note: Don't set Accept-Encoding manually - let Go handle gzip automatically
 	if body != nil {
 		req.Header.Set("Content-Type", protoContentType)
 	}
