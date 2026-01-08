@@ -82,8 +82,17 @@ func (h *httpClient) requestWithHeaders(ctx context.Context, method, path string
 	}
 
 	if result != nil && resp.StatusCode != http.StatusNoContent {
-		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-			logError(h.logger, "s2 http decode response error", "error", err, "method", method, "path", path)
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logError(h.logger, "s2 http read response error", "error", err, "method", method, "path", path)
+			return fmt.Errorf("read response: %w", err)
+		}
+		if err := json.Unmarshal(bodyBytes, result); err != nil {
+			preview := string(bodyBytes)
+			if len(preview) > 500 {
+				preview = preview[:500] + "..."
+			}
+			logError(h.logger, "s2 http decode response error", "error", err, "method", method, "path", path, "status", resp.StatusCode, "body_preview", preview)
 			return fmt.Errorf("decode response: %w", err)
 		}
 	}

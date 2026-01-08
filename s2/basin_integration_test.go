@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -22,6 +23,7 @@ func testClient(t *testing.T) *s2.Client {
 	}
 	return s2.NewFromEnvironment(&s2.ClientOptions{
 		IncludeBasinHeader: true,
+		Logger:             slog.Default(),
 	})
 }
 

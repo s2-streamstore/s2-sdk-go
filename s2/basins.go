@@ -39,7 +39,6 @@ func (b *BasinsClient) List(ctx context.Context, args *ListBasinsArgs) (*ListBas
 
 		var result ListBasinsResponse
 		err := httpClient.request(ctx, "GET", path, nil, &result)
-		fmt.Println(err)
 		if err != nil {
 			return nil, err
 		}
