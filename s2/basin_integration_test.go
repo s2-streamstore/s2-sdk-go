@@ -58,6 +58,17 @@ func ptr[T any](v T) *T {
 	return &v
 }
 
+func isFreeTierLimitation(err error) bool {
+	var s2Err *s2.S2Error
+	if errors.As(err, &s2Err) && s2Err.Code == "invalid_basin_config" {
+		msg := strings.ToLower(s2Err.Message)
+		return strings.Contains(msg, "free tier") ||
+			strings.Contains(msg, "retention") ||
+			strings.Contains(msg, "express")
+	}
+	return false
+}
+
 // --- List Basins Tests ---
 
 func TestListBasins_All(t *testing.T) {
@@ -495,6 +506,10 @@ func TestCreateBasin_StorageClassExpress(t *testing.T) {
 		},
 	})
 	if err != nil {
+		if isFreeTierLimitation(err) {
+			t.Log("Skipped: express storage class not available on free tier")
+			return
+		}
 		t.Fatalf("Create failed: %v", err)
 	}
 
@@ -577,6 +592,10 @@ func TestCreateBasin_RetentionPolicyInfinite(t *testing.T) {
 		},
 	})
 	if err != nil {
+		if isFreeTierLimitation(err) {
+			t.Log("Skipped: infinite retention not available on free tier")
+			return
+		}
 		t.Fatalf("Create failed: %v", err)
 	}
 
@@ -1227,6 +1246,10 @@ func TestReconfigureBasin_ChangeStorageClass(t *testing.T) {
 				},
 			})
 			if err != nil {
+				if isFreeTierLimitation(err) {
+					t.Logf("Skipped: %s storage class not available on free tier", tc.from)
+					return
+				}
 				t.Fatalf("Create failed: %v", err)
 			}
 			waitForBasinActive(ctx, t, client, basinName)
@@ -1241,6 +1264,10 @@ func TestReconfigureBasin_ChangeStorageClass(t *testing.T) {
 				},
 			})
 			if err != nil {
+				if isFreeTierLimitation(err) {
+					t.Logf("Skipped: %s storage class not available on free tier", tc.to)
+					return
+				}
 				t.Fatalf("Reconfigure failed: %v", err)
 			}
 
@@ -1275,6 +1302,10 @@ func TestReconfigureBasin_ChangeRetentionToAge(t *testing.T) {
 		},
 	})
 	if err != nil {
+		if isFreeTierLimitation(err) {
+			t.Log("Skipped: infinite retention not available on free tier")
+			return
+		}
 		t.Fatalf("Create failed: %v", err)
 	}
 	waitForBasinActive(ctx, t, client, basinName)
@@ -1340,6 +1371,10 @@ func TestReconfigureBasin_ChangeRetentionToInfinite(t *testing.T) {
 		},
 	})
 	if err != nil {
+		if isFreeTierLimitation(err) {
+			t.Log("Skipped: infinite retention not available on free tier")
+			return
+		}
 		t.Fatalf("Reconfigure failed: %v", err)
 	}
 

@@ -444,12 +444,24 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ---
 
+## Free Tier Limitations
+
+When running against an account on the Free tier, certain configurations will be rejected with `invalid_basin_config`. Tests should accept these failures as valid outcomes:
+
+| Limitation | Example Message |
+|------------|-----------------|
+| Retention > 28 days | "Retention is currently limited to 28 days for free tier" |
+| Infinite retention | "Retention is currently limited to 28 days for free tier" |
+| Express storage class | "Express storage class is not available on free tier" |
+
+---
+
 ## Error Codes Reference
 
 | HTTP Code | Error Code | Scenario |
 |-----------|------------|----------|
 | 400 | `invalid_argument` | Invalid parameter format/value |
-| 400 | `invalid_basin_config` | Basin config validation failed |
+| 400 | `invalid_basin_config` | Basin config validation failed (including tier limits) |
 | 400 | `basin_scope_mismatch` | Attempted to change basin scope |
 | 400 | `bad_config` | Reconfiguration validation failed |
 | 403 | `permission_denied` | Token lacks required permissions or account frozen |
@@ -461,3 +473,4 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 | 429 | `too_many_basin_creations` | Concurrent creation conflict, retry |
 | 503 | `basin_creating` | Basin still in creating state |
 | 500 | `internal` | Internal server error |
+
