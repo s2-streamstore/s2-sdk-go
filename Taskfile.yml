@@ -25,6 +25,12 @@ tasks:
     cmds:
       - go test ./...
 
+  test:integration:
+    desc: "Run integration tests"
+    deps: [gen]
+    cmds:
+      - go test -v -timeout 10m -count=1 -run 'Test(List|Create|Get|Delete|Reconfigure)Basin' ./s2
+
   lint:
     deps: [gen]
     cmds:
