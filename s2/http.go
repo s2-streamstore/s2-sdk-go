@@ -82,6 +82,7 @@ func (h *httpClient) requestWithHeaders(ctx context.Context, method, path string
 
 	if result != nil && resp.StatusCode != http.StatusNoContent {
 		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+			logError(h.logger, "s2 http decode response error", "error", err, "method", method, "path", path)
 			return fmt.Errorf("decode response: %w", err)
 		}
 	}
