@@ -46,6 +46,19 @@
 > - Avoid creating test-only abstractions when the SDK already provides clean APIs
 > - Keep test code simple and direct - call SDK methods inline rather than through helper layers
 > - If the SDK provides a method for an operation, use it instead of constructing requests manually
+>
+> **Linter and formatter compliance:**
+> - Always run the project's linter and formatter after generating code
+> - Fix ALL linter warnings and errors - do not leave any unresolved
+> - Follow the project's existing code style (check existing test files for patterns)
+> - Common tools by language:
+>   - **Go:** `go fmt`, `golangci-lint`, `goimports`
+>   - **Rust:** `cargo fmt`, `cargo clippy`
+>   - **Python:** `ruff`, `black`, `mypy`
+>   - **TypeScript/JavaScript:** `eslint`, `prettier`
+> - If the project has a `Makefile`, `justfile`, or CI config, check for lint/format commands
+> - Unused imports, unused variables, and dead code should be removed
+> - Follow naming conventions specific to the language (e.g., `snake_case` in Python/Rust, `camelCase` in Go/JS)
 
 ---
 

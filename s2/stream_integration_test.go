@@ -204,7 +204,7 @@ func TestListStreams_Pagination(t *testing.T) {
 
 	basin := getSharedBasin(t)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		name := s2.StreamName(fmt.Sprintf("page-test-%d", i))
 		_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: name})
 		if err != nil {
@@ -1216,7 +1216,7 @@ func TestRead_FromBeginning(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err := stream.Append(ctx, &s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
 		})
@@ -1254,7 +1254,7 @@ func TestRead_WithCountLimit(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_, err := stream.Append(ctx, &s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
 		})
@@ -1988,7 +1988,7 @@ func TestRead_FromTail(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err := stream.Append(ctx, &s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
 		})
@@ -2024,7 +2024,7 @@ func TestRead_WithTailOffset(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_, err := stream.Append(ctx, &s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
 		})
@@ -2109,7 +2109,7 @@ func TestRead_WithBytesLimit(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_, err := stream.Append(ctx, &s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(strings.Repeat("x", 100))}},
 		})
@@ -2295,7 +2295,7 @@ func TestTrim_Stream(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err := stream.Append(ctx, &s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
 		})
@@ -2306,7 +2306,7 @@ func TestTrim_Stream(t *testing.T) {
 
 	trimSeqNum := uint64(3)
 	trimBody := make([]byte, 8)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		trimBody[7-i] = byte(trimSeqNum >> (8 * i))
 	}
 
@@ -2341,7 +2341,7 @@ func TestTrim_CommandAccepted(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err := stream.Append(ctx, &s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
 		})
@@ -2352,7 +2352,7 @@ func TestTrim_CommandAccepted(t *testing.T) {
 
 	trimSeqNum := uint64(3)
 	trimBody := make([]byte, 8)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		trimBody[7-i] = byte(trimSeqNum >> (8 * i))
 	}
 
@@ -2396,7 +2396,7 @@ func TestTrim_ToFutureSeqNum(t *testing.T) {
 
 	trimSeqNum := uint64(999999)
 	trimBody := make([]byte, 8)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		trimBody[7-i] = byte(trimSeqNum >> (8 * i))
 	}
 
@@ -2718,7 +2718,7 @@ func TestClient_Reuse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := client.Basins.List(ctx, nil)
 		if err != nil {
 			t.Fatalf("Operation %d failed: %v", i, err)
@@ -2773,7 +2773,7 @@ func TestAppendSession_MultipleBatches(t *testing.T) {
 	}
 	defer session.Close()
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		future, err := session.Submit(&s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("batch-%d", i))}},
 		})
@@ -2857,7 +2857,7 @@ func TestReadSession_Open(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err := stream.Append(ctx, &s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
 		})
@@ -2874,10 +2874,7 @@ func TestReadSession_Open(t *testing.T) {
 
 	count := 0
 	for session.Next() {
-		rec := session.Record()
-		if rec.SeqNum < 0 {
-			t.Error("Invalid seq_num")
-		}
+		_ = session.Record()
 		count++
 		if count >= 5 {
 			break
@@ -2907,7 +2904,7 @@ func TestReadSession_Cancel(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_, err := stream.Append(ctx, &s2.AppendInput{
 			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
 		})
