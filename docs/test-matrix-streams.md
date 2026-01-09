@@ -81,6 +81,22 @@ Many read test cases depend on the stream having records. Before testing reads:
   defer deleteStream(streamName)
   ```
 
+**Basin readiness:**
+- After creating a basin, you MUST wait for it to become active before performing stream operations
+- A newly created basin returns 503 (`basin_creating`) for stream operations until ready
+- Implement a polling loop that calls `GetBasinConfig` until it succeeds (or check state)
+- Pattern:
+  ```
+  createBasin(name)
+  while true:
+    try:
+      getBasinConfig(name)  // or check state != creating
+      break
+    catch 503 basin_creating:
+      sleep(500ms)
+  // Basin is now ready for stream operations
+  ```
+
 **Common test pattern mistakes to avoid:**
 
 1. **"Read empty stream returns empty array"** - WRONG. Reading `seq_num=0` on an empty stream returns 416, not 200 with empty records. The correct test should verify 416 is returned.
@@ -88,6 +104,10 @@ Many read test cases depend on the stream having records. Before testing reads:
 2. **"clamp=true returns existing records"** - WRONG. `clamp=true` clamps to the tail, not to the last record. If the stream has 1 record (tail=1), reading with `seq_num=999999, clamp=true` clamped to position 1, but there's no record at position 1. Test should expect 416 OR use `wait` to long-poll.
 
 3. **"Read from seq_num=0 on non-empty stream"** - CORRECT. If the stream has records, reading from `seq_num=0` returns records starting from the beginning.
+
+4. **"Deleted stream is immediately inaccessible"** - WRONG. After DELETE returns 202, the stream enters "being deleted" state. Operations on it return 409 (`stream_being_deleted`) for ~60 seconds. It may still appear in list results with `deleted_at` set.
+
+5. **"Trimmed records are immediately unavailable"** - WRONG. Trim is eventually consistent. Records may still be readable for a period after trim succeeds.
 
 ---
 
@@ -154,7 +174,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 |-------|------|-------------|
 | `name` | string | Stream name |
 | `created_at` | string (ISO8601) | Creation timestamp |
-| `deleted_at` | string (ISO8601) \| null | Deletion timestamp if deleting |
+| `deleted_at` | string (ISO8601) \| null | Deletion timestamp if being deleted (stream may still appear in list for 60s+) |
 
 ### Test Cases
 
@@ -497,6 +517,14 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 > **Note:** SDKs may support different transports: JSON (unary), S2S (binary streaming). Test the transport(s) your SDK implements. The `s2-format` header only applies to JSON transport.
 
+> **Important - Timestamp behavior:**
+> - **Monotonicity guaranteed:** Timestamps are always adjusted UP to maintain monotonicity. If you provide a timestamp lower than the previous record's timestamp, it will be automatically increased.
+> - **`timestamping.mode=client-require`:** Appends WITHOUT a timestamp fail with 400 "Record timestamp missing".
+> - **`timestamping.mode=client-prefer` (default):** If timestamp is omitted, arrival time is used.
+> - **`timestamping.mode=arrival`:** Client timestamps are ignored; arrival time is always used.
+> - **`uncapped=false` (default):** Future timestamps (greater than arrival time) are capped to arrival time.
+> - **`uncapped=true`:** Future timestamps are preserved (useful for backfilling data).
+
 ### Path Parameters
 
 | Parameter | Type | Required | Constraints | Description |
@@ -572,11 +600,16 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 | Append max batch size | 1000 records | 200 |
 | Append with headers | record with headers | 200, headers preserved |
 | Append with timestamp | record with client timestamp | 200, timestamp used (client-prefer mode) |
+| Append without timestamp (client-require mode) | stream with `timestamping.mode=client-require`, no timestamp | 400 ("Record timestamp missing") |
+| Append with future timestamp (uncapped=false) | timestamp > current time | 200, timestamp capped to arrival time |
+| Append with future timestamp (uncapped=true) | timestamp > current time | 200, future timestamp preserved |
+| Append with past timestamp | timestamp < last record's timestamp | 200, timestamp adjusted up for monotonicity |
 | Append empty body | record with empty body | 200 |
 | Append with match_seq_num (success) | correct seq_num | 200 |
 | Append with match_seq_num (failure) | wrong seq_num | 412 (`seq_num_mismatch`) |
 | Append with fencing_token (success) | correct token | 200 |
 | Append with fencing_token (failure) | wrong token | 412 (`fencing_token_mismatch`) |
+| Append with fencing_token too long | token > 36 bytes | 400 (`invalid_argument`) |
 | Append too many records | > 1000 records | Error (SDK validation or 400) |
 | Append too large batch | > 1 MiB | Error (SDK validation or 400) |
 | Append empty batch | 0 records | Error (SDK validation or 400) |
@@ -700,7 +733,7 @@ Sets or updates the fencing token for a stream. Subsequent appends with `fencing
 |-------|-------|
 | Header name | `""` (empty string) |
 | Header value | `fence` |
-| Body | New fencing token (max 36 chars) |
+| Body | New fencing token (max 36 bytes, empty to clear) |
 
 ### Trim Command
 
@@ -720,11 +753,19 @@ Trims (deletes) all records before the specified sequence number.
 | Append with correct fencing token | `fencing_token="my-token"` | 200 |
 | Append with wrong fencing token | `fencing_token="wrong"` | 412 (`fencing_token_mismatch`) |
 | Clear fencing token | Append fence command with empty body | 200, token cleared |
-| Trim stream | Append trim command with seq_num | 200, records trimmed |
-| Read after trim | Read from seq_num < trim point | Records not returned |
+| Trim stream | Append trim command with seq_num | 200, trim accepted |
 | Trim to future seq_num | trim_point > tail | 200 (no-op, nothing to trim) |
 
 > **Note:** If the SDK exposes `fence()` or `trim()` helper methods, test those instead of manually constructing command records.
+
+> **Important - Trim is eventually consistent:**
+> - The trim command returns 200 immediately when accepted, but actual record deletion is asynchronous
+> - Do NOT write tests that assert records are immediately unavailable after trim
+> - Trimmed records may still be readable for a short period after the trim command succeeds
+> - If you must test trim behavior, either:
+>   - Only verify the trim command succeeds (200 response)
+>   - Add a reasonable delay and accept that records *may* still exist
+>   - Skip "read after trim" verification entirely - it's testing infrastructure behavior, not SDK correctness
 
 ---
 
@@ -785,6 +826,23 @@ When running against an account on the Free tier, certain configurations will be
 | Retention > 28 days | "Retention is currently limited to 28 days for free tier" |
 | Infinite retention | "Retention is currently limited to 28 days for free tier" |
 | Express storage class | "Express storage class is not available on free tier" |
+
+---
+
+## Eventually Consistent Operations
+
+Several operations are eventually consistent. Tests should NOT assert on immediate effects:
+
+| Operation | Behavior | What to Test |
+|-----------|----------|--------------|
+| **Delete Stream** | Returns 202 immediately, actual deletion is asynchronous (60s+ delay) | Verify 202 returned. Do NOT verify stream is immediately inaccessible. |
+| **Trim** | Returns 200 immediately, record deletion is asynchronous | Verify 200 returned. Do NOT verify records are immediately unavailable. |
+| **Delete Basin** | Returns 202 immediately, actual deletion is asynchronous | Verify 202 returned. |
+
+> **Important:** If you need to verify deletion effects, you must either:
+> - Wait a significant delay (60+ seconds) and accept that timing may vary
+> - Skip verification of deletion effects entirely (recommended for SDK tests)
+> - Use separate tests that don't assert on timing-dependent behavior
 
 ---
 
