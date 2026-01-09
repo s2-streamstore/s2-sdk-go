@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.4] - 2026-01-09
+
+### Features
+
+- Llm generated tests + encoding bugfix [P1] ([#126](https://github.com/s2-streamstore/s2-sdk-go/issues/126))
+- Llm generated tests [P2] ([#127](https://github.com/s2-streamstore/s2-sdk-go/issues/127))
+
 ## [v0.11.3] - 2026-01-07
 
 ### Bug Fixes
@@ -10,7 +17,7 @@ All notable changes to this project will be documented in this file.
 
 ### Miscellaneous Tasks
 
-- *(release)* V0.11.3
+- *(release)* V0.11.3 ([#125](https://github.com/s2-streamstore/s2-sdk-go/issues/125))
 
 ## [v0.11.2] - 2026-01-05
 
