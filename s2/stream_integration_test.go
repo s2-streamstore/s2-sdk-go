@@ -26,9 +26,7 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
-	sharedTestClient = s2.NewFromEnvironment(&s2.ClientOptions{
-		IncludeBasinHeader: true,
-	})
+	sharedTestClient = s2.NewFromEnvironment(nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	sharedTestBasinName = s2.BasinName(fmt.Sprintf("test-strm-%d", time.Now().UnixNano()))
@@ -2647,9 +2645,7 @@ func TestClient_Initialization(t *testing.T) {
 		t.Skip("S2_ACCESS_TOKEN not set")
 	}
 
-	client := s2.NewFromEnvironment(&s2.ClientOptions{
-		IncludeBasinHeader: true,
-	})
+	client := s2.NewFromEnvironment(nil)
 
 	if client == nil {
 		t.Fatal("Client should not be nil")
@@ -2691,8 +2687,8 @@ func TestClient_MultipleInstances(t *testing.T) {
 		t.Skip("S2_ACCESS_TOKEN not set")
 	}
 
-	client1 := s2.NewFromEnvironment(&s2.ClientOptions{IncludeBasinHeader: true})
-	client2 := s2.NewFromEnvironment(&s2.ClientOptions{IncludeBasinHeader: true})
+	client1 := s2.NewFromEnvironment(nil)
+	client2 := s2.NewFromEnvironment(nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
