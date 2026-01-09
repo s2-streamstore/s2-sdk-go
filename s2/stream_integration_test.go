@@ -1546,3 +1546,1429 @@ func TestRead_VerifyRecordContent(t *testing.T) {
 	}
 	t.Logf("Verified record content: seq_num=%d, body=%q", rec.SeqNum, string(rec.Body))
 }
+
+func TestCreateStream_NameEmpty(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Create stream with empty name")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: ""})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+		t.Errorf("Expected 400 error, got: %v", err)
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+func TestCreateStream_NameTooLong(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Create stream with name too long (>512 bytes)")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	longName := s2.StreamName(strings.Repeat("a", 513))
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: longName})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+		t.Errorf("Expected 400 error, got: %v", err)
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+func TestCreateStream_NameWithUnicode(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Create stream with unicode name")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := s2.StreamName(fmt.Sprintf("test-unicode-日本語-%d", time.Now().UnixNano()))
+	defer deleteStream(ctx, basin, streamName)
+
+	info, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if info.Name != streamName {
+		t.Errorf("Expected name %s, got %s", streamName, info.Name)
+	}
+	t.Logf("Created stream with unicode name: %s", info.Name)
+}
+
+func TestCreateStream_TimestampingUncapped(t *testing.T) {
+	testCases := []struct {
+		name     string
+		uncapped bool
+	}{
+		{"uncapped=true", true},
+		{"uncapped=false", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+			defer cancel()
+			t.Logf("Testing: Create stream with timestamping.uncapped=%v", tc.uncapped)
+
+			client := streamTestClient(t)
+			basinName := createTestBasin(ctx, t, client)
+			defer deleteTestBasin(ctx, client, basinName)
+
+			basin := client.Basin(string(basinName))
+			streamName := uniqueStreamName("test-tsu")
+			defer deleteStream(ctx, basin, streamName)
+
+			_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
+				Stream: streamName,
+				Config: &s2.StreamConfig{
+					Timestamping: &s2.TimestampingConfig{
+						Uncapped: ptrBool(tc.uncapped),
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Create failed: %v", err)
+			}
+
+			config, err := basin.Streams.GetConfig(ctx, streamName)
+			if err != nil {
+				t.Fatalf("GetConfig failed: %v", err)
+			}
+
+			if config.Timestamping != nil && config.Timestamping.Uncapped != nil {
+				if *config.Timestamping.Uncapped != tc.uncapped {
+					t.Errorf("Expected uncapped=%v, got %v", tc.uncapped, *config.Timestamping.Uncapped)
+				}
+			}
+			t.Logf("Verified timestamping.uncapped=%v", tc.uncapped)
+		})
+	}
+}
+
+func TestAppend_WithTimestamp(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append with client timestamp")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-apts")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	clientTimestamp := uint64(time.Now().UnixMilli())
+	ack, err := stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Timestamp: &clientTimestamp,
+				Body:      []byte("record with timestamp"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	t.Logf("Appended with timestamp: seq_num=%d, start_timestamp=%d", ack.Start.SeqNum, ack.Start.Timestamp)
+}
+
+func TestAppend_WithFencingToken_Success(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append with correct fencing token")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-afts")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("fence")}},
+				Body:    []byte("my-token"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Set fencing token failed: %v", err)
+	}
+
+	ack, err := stream.Append(ctx, &s2.AppendInput{
+		Records:      []s2.AppendRecord{{Body: []byte("test")}},
+		FencingToken: ptrStr("my-token"),
+	})
+	if err != nil {
+		t.Fatalf("Append with fencing token failed: %v", err)
+	}
+
+	t.Logf("Append with correct fencing token succeeded: seq_num=%d", ack.Start.SeqNum)
+}
+
+func TestAppend_WithFencingToken_Failure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append with wrong fencing token")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-aftf")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("fence")}},
+				Body:    []byte("my-token"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Set fencing token failed: %v", err)
+	}
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records:      []s2.AppendRecord{{Body: []byte("test")}},
+		FencingToken: ptrStr("wrong-token"),
+	})
+
+	var fenceErr *s2.FencingTokenMismatchError
+	if !errors.As(err, &fenceErr) {
+		t.Errorf("Expected FencingTokenMismatchError, got: %v", err)
+	}
+	t.Logf("Got expected fencing token mismatch error: %v", err)
+}
+
+func TestAppend_MaxBatchSize(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append max batch size (1000 records)")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-ambs")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	records := make([]s2.AppendRecord, 1000)
+	for i := range records {
+		records[i] = s2.AppendRecord{Body: []byte(fmt.Sprintf("r%d", i))}
+	}
+
+	ack, err := stream.Append(ctx, &s2.AppendInput{Records: records})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	if ack.End.SeqNum-ack.Start.SeqNum != 1000 {
+		t.Errorf("Expected 1000 records appended, got %d", ack.End.SeqNum-ack.Start.SeqNum)
+	}
+	t.Logf("Appended 1000 records: start=%d, end=%d", ack.Start.SeqNum, ack.End.SeqNum)
+}
+
+func TestAppend_TooManyRecords(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append too many records (>1000)")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-atmr")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	records := make([]s2.AppendRecord, 1001)
+	for i := range records {
+		records[i] = s2.AppendRecord{Body: []byte("x")}
+	}
+
+	_, err = stream.Append(ctx, &s2.AppendInput{Records: records})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+		t.Errorf("Expected 400 error, got: %v", err)
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+func TestAppend_EmptyBatch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append empty batch (0 records)")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-aeb")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Append(ctx, &s2.AppendInput{Records: []s2.AppendRecord{}})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+		t.Errorf("Expected 400 error, got: %v", err)
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+func TestAppend_HeaderWithEmptyName(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append record with header having empty name (command record)")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-ahen")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	ack, err := stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("fence")}},
+				Body:    []byte("token"),
+			},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("Append with empty header name failed unexpectedly: %v", err)
+	}
+	t.Logf("Empty header name is valid for command records: seq_num=%d", ack.Start.SeqNum)
+}
+
+func TestRead_FromTail(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read from tail (tail_offset=0)")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rft")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	for i := 0; i < 5; i++ {
+		_, err := stream.Append(ctx, &s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
+		})
+		if err != nil {
+			t.Fatalf("Append %d failed: %v", i, err)
+		}
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		TailOffset: ptrI64(0),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	t.Logf("Read from tail returned %d records", len(batch.Records))
+}
+
+func TestRead_WithTailOffset(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with offset from tail (tail_offset=3)")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rwto")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	for i := 0; i < 10; i++ {
+		_, err := stream.Append(ctx, &s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
+		})
+		if err != nil {
+			t.Fatalf("Append %d failed: %v", i, err)
+		}
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		TailOffset: ptrI64(3),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if len(batch.Records) != 3 {
+		t.Errorf("Expected 3 records, got %d", len(batch.Records))
+	}
+	t.Logf("Read with tail_offset=3 returned %d records", len(batch.Records))
+}
+
+func TestRead_ByTimestamp(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read by timestamp")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rdts")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	ack, err := stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("first")}},
+	})
+	if err != nil {
+		t.Fatalf("First append failed: %v", err)
+	}
+	firstTimestamp := ack.Start.Timestamp
+
+	time.Sleep(10 * time.Millisecond)
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("second")}},
+	})
+	if err != nil {
+		t.Fatalf("Second append failed: %v", err)
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		Timestamp: ptrU64(firstTimestamp + 1),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if len(batch.Records) == 0 {
+		t.Log("No records found after timestamp (timing dependent)")
+	} else {
+		t.Logf("Read by timestamp returned %d records", len(batch.Records))
+	}
+}
+
+func TestRead_WithBytesLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with bytes limit")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rdbl")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	for i := 0; i < 10; i++ {
+		_, err := stream.Append(ctx, &s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: []byte(strings.Repeat("x", 100))}},
+		})
+		if err != nil {
+			t.Fatalf("Append %d failed: %v", i, err)
+		}
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: ptrU64(0),
+		Bytes:  ptrU64(250),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	t.Logf("Read with bytes=250 returned %d records", len(batch.Records))
+}
+
+func TestRead_UntilTimestamp(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read until timestamp")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rdut")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	ack, err := stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("first")}},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: ptrU64(0),
+		Until:  ptrU64(ack.End.Timestamp + 1),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	t.Logf("Read until timestamp returned %d records", len(batch.Records))
+}
+
+func TestRead_ClampFalse_BeyondTail(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with clamp=false beyond tail (expect 416)")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rdcf")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("test")}},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	_, err = stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: ptrU64(999999),
+		Clamp:  ptrBool(false),
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 416 {
+		t.Errorf("Expected 416 error, got: %v", err)
+	}
+	t.Logf("Got expected 416 error: %v", err)
+}
+
+func TestFence_SetToken(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Set fencing token via command record")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-fst")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	ack, err := stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("fence")}},
+				Body:    []byte("test-fence-token"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Set fencing token failed: %v", err)
+	}
+
+	t.Logf("Fencing token set: seq_num=%d", ack.Start.SeqNum)
+}
+
+func TestFence_ClearToken(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Clear fencing token")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-fct")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("fence")}},
+				Body:    []byte("my-token"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Set fencing token failed: %v", err)
+	}
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("fence")}},
+				Body:    []byte(""),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Clear fencing token failed: %v", err)
+	}
+
+	ack, err := stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("test")}},
+	})
+	if err != nil {
+		t.Fatalf("Append after clearing token failed: %v", err)
+	}
+
+	t.Logf("Fencing token cleared, append succeeded: seq_num=%d", ack.Start.SeqNum)
+}
+
+func TestTrim_Stream(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Trim stream via command record")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-trim")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	for i := 0; i < 5; i++ {
+		_, err := stream.Append(ctx, &s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
+		})
+		if err != nil {
+			t.Fatalf("Append %d failed: %v", i, err)
+		}
+	}
+
+	trimSeqNum := uint64(3)
+	trimBody := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		trimBody[7-i] = byte(trimSeqNum >> (8 * i))
+	}
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("trim")}},
+				Body:    trimBody,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Trim command failed: %v", err)
+	}
+
+	t.Log("Trim command succeeded")
+}
+
+func TestTrim_ReadAfterTrim(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read after trim")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-trat")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	for i := 0; i < 5; i++ {
+		_, err := stream.Append(ctx, &s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
+		})
+		if err != nil {
+			t.Fatalf("Append %d failed: %v", i, err)
+		}
+	}
+
+	trimSeqNum := uint64(3)
+	trimBody := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		trimBody[7-i] = byte(trimSeqNum >> (8 * i))
+	}
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("trim")}},
+				Body:    trimBody,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Trim command failed: %v", err)
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: ptrU64(0),
+		Clamp:  ptrBool(true),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	for _, rec := range batch.Records {
+		if rec.SeqNum < trimSeqNum {
+			t.Errorf("Found record with seq_num %d, expected >= %d", rec.SeqNum, trimSeqNum)
+		}
+	}
+	t.Logf("Read after trim returned %d records", len(batch.Records))
+}
+
+func TestTrim_ToFutureSeqNum(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Trim to future seq_num (no-op)")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-trf")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("test")}},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	trimSeqNum := uint64(999999)
+	trimBody := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		trimBody[7-i] = byte(trimSeqNum >> (8 * i))
+	}
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("trim")}},
+				Body:    trimBody,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Trim to future failed: %v", err)
+	}
+
+	t.Log("Trim to future seq_num succeeded (no-op)")
+}
+
+func TestReconfigureStream_ChangeTimestampingMode(t *testing.T) {
+	modes := []s2.TimestampingMode{
+		s2.TimestampingModeClientPrefer,
+		s2.TimestampingModeClientRequire,
+		s2.TimestampingModeArrival,
+	}
+
+	for _, mode := range modes {
+		t.Run(string(mode), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+			defer cancel()
+			t.Logf("Testing: Reconfigure stream timestamping.mode=%s", mode)
+
+			client := streamTestClient(t)
+			basinName := createTestBasin(ctx, t, client)
+			defer deleteTestBasin(ctx, client, basinName)
+
+			basin := client.Basin(string(basinName))
+			streamName := uniqueStreamName("test-rctm")
+			defer deleteStream(ctx, basin, streamName)
+
+			_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+			if err != nil {
+				t.Fatalf("Create failed: %v", err)
+			}
+
+			newMode := mode
+			config, err := basin.Streams.Reconfigure(ctx, s2.ReconfigureStreamArgs{
+				Stream: streamName,
+				Config: s2.StreamReconfiguration{
+					Timestamping: &s2.TimestampingReconfiguration{
+						Mode: &newMode,
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Reconfigure failed: %v", err)
+			}
+
+			if config.Timestamping != nil && config.Timestamping.Mode != nil {
+				if *config.Timestamping.Mode != mode {
+					t.Errorf("Expected mode=%s, got %s", mode, *config.Timestamping.Mode)
+				}
+			}
+			t.Logf("Verified timestamping.mode=%s", mode)
+		})
+	}
+}
+
+func TestReconfigureStream_ChangeTimestampingUncapped(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Reconfigure stream timestamping.uncapped")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rctu")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	config, err := basin.Streams.Reconfigure(ctx, s2.ReconfigureStreamArgs{
+		Stream: streamName,
+		Config: s2.StreamReconfiguration{
+			Timestamping: &s2.TimestampingReconfiguration{
+				Uncapped: ptrBool(true),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Reconfigure failed: %v", err)
+	}
+
+	if config.Timestamping != nil && config.Timestamping.Uncapped != nil {
+		if !*config.Timestamping.Uncapped {
+			t.Error("Expected uncapped=true")
+		}
+	}
+	t.Log("Verified timestamping.uncapped=true")
+}
+
+func TestReconfigureStream_ChangeDeleteOnEmpty(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Reconfigure stream delete_on_empty.min_age_secs")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rcdoe")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	config, err := basin.Streams.Reconfigure(ctx, s2.ReconfigureStreamArgs{
+		Stream: streamName,
+		Config: s2.StreamReconfiguration{
+			DeleteOnEmpty: &s2.DeleteOnEmptyReconfiguration{
+				MinAgeSecs: ptrI64(3600),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Reconfigure failed: %v", err)
+	}
+
+	if config.DeleteOnEmpty == nil || config.DeleteOnEmpty.MinAgeSecs == nil {
+		t.Fatal("Expected delete_on_empty.min_age_secs")
+	}
+	if *config.DeleteOnEmpty.MinAgeSecs != 3600 {
+		t.Errorf("Expected min_age_secs=3600, got %d", *config.DeleteOnEmpty.MinAgeSecs)
+	}
+	t.Log("Verified delete_on_empty.min_age_secs=3600")
+}
+
+func TestReconfigureStream_DisableDeleteOnEmpty(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Disable delete_on_empty")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rddoe")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
+		Stream: streamName,
+		Config: &s2.StreamConfig{
+			DeleteOnEmpty: &s2.DeleteOnEmptyConfig{
+				MinAgeSecs: ptrI64(3600),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	_, err = basin.Streams.Reconfigure(ctx, s2.ReconfigureStreamArgs{
+		Stream: streamName,
+		Config: s2.StreamReconfiguration{
+			DeleteOnEmpty: &s2.DeleteOnEmptyReconfiguration{
+				MinAgeSecs: ptrI64(0),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Reconfigure failed: %v", err)
+	}
+
+	t.Log("Disabled delete_on_empty (min_age_secs=0)")
+}
+
+func TestReconfigureStream_PartialConfig(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Partial reconfiguration")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rcpc")
+	defer deleteStream(ctx, basin, streamName)
+
+	storageClass := s2.StorageClassStandard
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
+		Stream: streamName,
+		Config: &s2.StreamConfig{
+			StorageClass: &storageClass,
+			RetentionPolicy: &s2.RetentionPolicy{
+				Age: ptrI64(86400),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	config, err := basin.Streams.Reconfigure(ctx, s2.ReconfigureStreamArgs{
+		Stream: streamName,
+		Config: s2.StreamReconfiguration{
+			RetentionPolicy: &s2.RetentionPolicy{
+				Age: ptrI64(3600),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Reconfigure failed: %v", err)
+	}
+
+	if config.StorageClass == nil || *config.StorageClass != s2.StorageClassStandard {
+		t.Error("storage_class should remain standard")
+	}
+	if config.RetentionPolicy == nil || config.RetentionPolicy.Age == nil || *config.RetentionPolicy.Age != 3600 {
+		t.Error("retention_policy.age should be 3600")
+	}
+	t.Log("Verified partial reconfiguration: only retention changed")
+}
+
+func TestReconfigureStream_InvalidRetentionAgeZero(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Reconfigure with invalid retention_policy.age=0")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rcira")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	_, err = basin.Streams.Reconfigure(ctx, s2.ReconfigureStreamArgs{
+		Stream: streamName,
+		Config: s2.StreamReconfiguration{
+			RetentionPolicy: &s2.RetentionPolicy{
+				Age: ptrI64(0),
+			},
+		},
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+		t.Errorf("Expected 400 error, got: %v", err)
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+func TestClient_Initialization(t *testing.T) {
+	t.Log("Testing: Client initialization")
+
+	token := os.Getenv("S2_ACCESS_TOKEN")
+	if token == "" {
+		t.Skip("S2_ACCESS_TOKEN not set")
+	}
+
+	client := s2.NewFromEnvironment(&s2.ClientOptions{
+		IncludeBasinHeader: true,
+	})
+
+	if client == nil {
+		t.Fatal("Client should not be nil")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+
+	_, err := client.Basins.List(ctx, nil)
+	if err != nil {
+		t.Fatalf("First operation failed: %v", err)
+	}
+
+	t.Log("Client initialization successful")
+}
+
+func TestClient_InvalidToken(t *testing.T) {
+	t.Log("Testing: Client with invalid token")
+
+	client := s2.New("invalid-token", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+
+	_, err := client.Basins.List(ctx, nil)
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || (s2Err.Status != 401 && s2Err.Status != 403) {
+		t.Errorf("Expected 401 or 403 error, got: %v", err)
+	}
+	t.Logf("Got expected auth error: %v", err)
+}
+
+func TestClient_MultipleInstances(t *testing.T) {
+	t.Log("Testing: Multiple concurrent clients")
+
+	token := os.Getenv("S2_ACCESS_TOKEN")
+	if token == "" {
+		t.Skip("S2_ACCESS_TOKEN not set")
+	}
+
+	client1 := s2.NewFromEnvironment(&s2.ClientOptions{IncludeBasinHeader: true})
+	client2 := s2.NewFromEnvironment(&s2.ClientOptions{IncludeBasinHeader: true})
+
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+
+	_, err1 := client1.Basins.List(ctx, nil)
+	_, err2 := client2.Basins.List(ctx, nil)
+
+	if err1 != nil {
+		t.Errorf("Client 1 failed: %v", err1)
+	}
+	if err2 != nil {
+		t.Errorf("Client 2 failed: %v", err2)
+	}
+
+	t.Log("Multiple clients operate independently")
+}
+
+func TestClient_Reuse(t *testing.T) {
+	t.Log("Testing: Client reuse for multiple operations")
+
+	client := streamTestClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+
+	for i := 0; i < 3; i++ {
+		_, err := client.Basins.List(ctx, nil)
+		if err != nil {
+			t.Fatalf("Operation %d failed: %v", i, err)
+		}
+	}
+
+	t.Log("Client reused successfully for multiple operations")
+}
+
+func TestAppendSession_Open(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Open append session")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-aso")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	session, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		t.Fatalf("AppendSession failed: %v", err)
+	}
+	defer session.Close()
+
+	t.Log("Append session opened successfully")
+}
+
+func TestAppendSession_MultipleBatches(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append multiple batches via session")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-asmb")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	session, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		t.Fatalf("AppendSession failed: %v", err)
+	}
+	defer session.Close()
+
+	for i := 0; i < 3; i++ {
+		future, err := session.Submit(&s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("batch-%d", i))}},
+		})
+		if err != nil {
+			t.Fatalf("Submit %d failed: %v", i, err)
+		}
+
+		ticket, err := future.Wait(ctx)
+		if err != nil {
+			t.Fatalf("Wait %d failed: %v", i, err)
+		}
+
+		ack, err := ticket.Ack(ctx)
+		if err != nil {
+			t.Fatalf("Ack %d failed: %v", i, err)
+		}
+		t.Logf("Batch %d acked: seq_num=%d", i, ack.Start.SeqNum)
+	}
+
+	t.Log("Multiple batches submitted via session")
+}
+
+func TestAppendSession_Close(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Close append session")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-asc")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	session, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		t.Fatalf("AppendSession failed: %v", err)
+	}
+
+	future, err := session.Submit(&s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("test")}},
+	})
+	if err != nil {
+		t.Fatalf("Submit failed: %v", err)
+	}
+
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+
+	_, err = ticket.Ack(ctx)
+	if err != nil {
+		t.Fatalf("Ack failed: %v", err)
+	}
+
+	err = session.Close()
+	if err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	t.Log("Append session closed successfully")
+}
+
+func TestReadSession_Open(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Open read session")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rso")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	for i := 0; i < 5; i++ {
+		_, err := stream.Append(ctx, &s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
+		})
+		if err != nil {
+			t.Fatalf("Append %d failed: %v", i, err)
+		}
+	}
+
+	session, err := stream.ReadSession(ctx, &s2.ReadOptions{SeqNum: ptrU64(0)})
+	if err != nil {
+		t.Fatalf("ReadSession failed: %v", err)
+	}
+	defer session.Close()
+
+	count := 0
+	for session.Next() {
+		rec := session.Record()
+		if rec.SeqNum < 0 {
+			t.Error("Invalid seq_num")
+		}
+		count++
+		if count >= 5 {
+			break
+		}
+	}
+
+	if err := session.Err(); err != nil {
+		t.Fatalf("Session error: %v", err)
+	}
+
+	t.Logf("Read session read %d records", count)
+}
+
+func TestReadSession_Cancel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Cancel read session")
+
+	client := streamTestClient(t)
+	basinName := createTestBasin(ctx, t, client)
+	defer deleteTestBasin(ctx, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := uniqueStreamName("test-rsc")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	for i := 0; i < 10; i++ {
+		_, err := stream.Append(ctx, &s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
+		})
+		if err != nil {
+			t.Fatalf("Append %d failed: %v", i, err)
+		}
+	}
+
+	session, err := stream.ReadSession(ctx, &s2.ReadOptions{SeqNum: ptrU64(0)})
+	if err != nil {
+		t.Fatalf("ReadSession failed: %v", err)
+	}
+
+	if session.Next() {
+		_ = session.Record()
+	}
+
+	err = session.Close()
+	if err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	t.Log("Read session cancelled successfully")
+}

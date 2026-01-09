@@ -23,6 +23,16 @@
 > - If the SDK doesn't support SSE streaming reads, skip SSE-specific test cases
 > - Focus on testing the protocol(s) the SDK actually implements
 > - The S2S protocol handles encoding internally, so `s2-format` header tests are only relevant for JSON transport
+>
+> **SDK method coverage:**
+> - Review ALL public methods/functions exposed by the SDK before writing tests
+> - Test every user-facing SDK method, not just the raw API endpoints
+> - SDKs may expose helper methods (e.g., `fence()`, `trim()`, `set_fencing_token()`) that wrap command records
+> - SDKs may expose convenience methods for common patterns (e.g., `append_record()` for single record, `append_batch()` for multiple)
+> - Test client/session lifecycle methods: initialization, configuration, connection management, cleanup
+> - Test any builder patterns, fluent APIs, or configuration options the SDK exposes
+> - If the SDK has async/streaming variants of methods, test both
+> - If the SDK exposes retry/backoff configuration, verify it works correctly
 
 ---
 
@@ -41,6 +51,15 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 | GET | `/streams/{stream}/records/tail` | `check_tail` | Get stream tail position |
 | GET | `/streams/{stream}/records` | `read` | Read records from stream |
 | POST | `/streams/{stream}/records` | `append` | Append records to stream |
+
+### SDK-Specific Operations (via append)
+
+| Operation | Description |
+|-----------|-------------|
+| `fence` | Set fencing token via command record |
+| `trim` | Trim records via command record |
+
+> **Note:** SDKs may expose additional helper methods that wrap these operations. See section 10 (Command Records) and section 11 (SDK Client Lifecycle) for SDK-specific tests.
 
 ---
 
@@ -595,6 +614,77 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 | Read non-existent stream | invalid name | 404 (`stream_not_found`) |
 | Multiple start params | `seq_num=0`, `timestamp=0` | 400 (mutually exclusive) |
 | Permission denied | token without `read` op | 403 (`permission_denied`) |
+
+---
+
+## 10. Command Records
+
+Command records are special records that control stream behavior. SDKs typically expose these as helper methods.
+
+### Fence Command
+
+Sets or updates the fencing token for a stream. Subsequent appends with `fencing_token` must match.
+
+| Field | Value |
+|-------|-------|
+| Header name | `""` (empty string) |
+| Header value | `fence` |
+| Body | New fencing token (max 36 chars) |
+
+### Trim Command
+
+Trims (deletes) all records before the specified sequence number.
+
+| Field | Value |
+|-------|-------|
+| Header name | `""` (empty string) |
+| Header value | `trim` |
+| Body | 8-byte big-endian sequence number |
+
+### Test Cases
+
+| Test | Input | Expected |
+|------|-------|----------|
+| Set fencing token | Append fence command with token "my-token" | 200, token set |
+| Append with correct fencing token | `fencing_token="my-token"` | 200 |
+| Append with wrong fencing token | `fencing_token="wrong"` | 412 (`fencing_token_mismatch`) |
+| Clear fencing token | Append fence command with empty body | 200, token cleared |
+| Trim stream | Append trim command with seq_num | 200, records trimmed |
+| Read after trim | Read from seq_num < trim point | Records not returned |
+| Trim to future seq_num | trim_point > tail | 200 (no-op, nothing to trim) |
+
+> **Note:** If the SDK exposes `fence()` or `trim()` helper methods, test those instead of manually constructing command records.
+
+---
+
+## 11. SDK Client Lifecycle
+
+Test client initialization, configuration, and cleanup patterns exposed by the SDK.
+
+### Test Cases
+
+| Test | Description | Expected |
+|------|-------------|----------|
+| Client initialization | Create client with valid credentials | Client ready |
+| Client with invalid token | Create client with bad auth token | Auth error on first operation |
+| Client with custom endpoint | Configure non-default endpoint | Connects to specified endpoint |
+| Client cleanup/close | Properly close/dispose client | Resources released, no leaks |
+| Multiple concurrent clients | Create multiple client instances | All operate independently |
+| Client reuse | Use same client for multiple operations | Works correctly |
+| Connection recovery | Client reconnects after transient failure | Operations succeed after recovery |
+
+### Streaming Session Tests (if SDK supports streaming)
+
+| Test | Description | Expected |
+|------|-------------|----------|
+| Open append session | Create streaming append session | Session ready |
+| Append multiple batches | Send multiple batches on same session | All batches acknowledged |
+| Close append session | Gracefully close session | Final acks received, session closed |
+| Open read session | Create streaming read session | Session ready, records flow |
+| Cancel read session | Cancel/close read mid-stream | Session terminates cleanly |
+| Session timeout | Session idle beyond timeout | Session closed, reconnect works |
+
+> **Note:** Test all client/session creation patterns the SDK exposes (builders, factory methods, config objects, etc.)
 
 ---
 
