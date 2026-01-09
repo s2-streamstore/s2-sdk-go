@@ -36,16 +36,12 @@ type ClientOptions struct {
 	HTTPClient *http.Client
 	// Allows customizing how basin endpoints are constructed.
 	// If provided, this function is used to derive the base URL for a given basin.
+	// When provided, the "s2-basin" HTTP header is automatically included in basin-scoped requests.
 	MakeBasinBaseURL func(basin string) string
 	// Retry configuration.
 	RetryConfig *RetryConfig
 	// Get SDK level logs.
 	Logger *slog.Logger
-	// Sends an "s2-basin" HTTP header with the basin name on all basin-scoped requests.
-	IncludeBasinHeader bool
-	// AllowH2C enables HTTP/2 over cleartext (h2c) connections.
-	// Defaults to false
-	AllowH2C bool
 	// Overall timeout for HTTP requests.
 	// Defaults to 30 seconds.
 	RequestTimeout time.Duration
@@ -58,12 +54,11 @@ type Client struct {
 	accessToken        string
 	baseURL            string
 	httpClient         *http.Client
-	streamingClient    *http.Client // HTTP/2 client for streaming operations (AppendSession, ReadSession)
+	streamingClient    *http.Client
 	makeBasinBaseURL   func(basin string) string
 	retryConfig        *RetryConfig
 	logger             *slog.Logger
 	includeBasinHeader bool
-	allowH2C           bool
 	requestTimeout     time.Duration
 	connectionTimeout  time.Duration
 
@@ -144,12 +139,11 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		accessToken:        accessToken,
 		baseURL:            baseURL,
 		httpClient:         httpClient,
-		streamingClient:    createStreamingClient(opts.AllowH2C, connectionTimeout),
+		streamingClient:    createStreamingClient(connectionTimeout),
 		makeBasinBaseURL:   makeBasinBaseURL,
 		retryConfig:        retryConfig,
 		logger:             opts.Logger,
-		includeBasinHeader: opts.IncludeBasinHeader,
-		allowH2C:           opts.AllowH2C,
+		includeBasinHeader: opts.MakeBasinBaseURL != nil,
 		connectionTimeout:  connectionTimeout,
 		requestTimeout:     requestTimeout,
 	}
@@ -161,13 +155,38 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	return c
 }
 
-func createStreamingClient(allowH2C bool, connectionTimeout time.Duration) *http.Client {
+type schemeAwareTransport struct {
+	https *http2.Transport
+	h2c   *http2.Transport
+}
+
+func (t *schemeAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme == "http" {
+		return t.h2c.RoundTrip(req)
+	}
+	return t.https.RoundTrip(req)
+}
+
+func createStreamingClient(connectionTimeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: connectionTimeout,
 	}
 
-	transport := &http2.Transport{
-		AllowHTTP:                  allowH2C,
+	h2cTransport := &http2.Transport{
+		AllowHTTP:                  true,
+		MaxReadFrameSize:           http2MaxReadFrameSize,
+		MaxHeaderListSize:          http2MaxHeaderListSize,
+		ReadIdleTimeout:            http2ReadIdleTimeout,
+		PingTimeout:                http2PingTimeout,
+		WriteByteTimeout:           http2WriteByteTimeout,
+		StrictMaxConcurrentStreams: false,
+		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+
+	httpsTransport := &http2.Transport{
+		AllowHTTP:                  false,
 		MaxReadFrameSize:           http2MaxReadFrameSize,
 		MaxHeaderListSize:          http2MaxHeaderListSize,
 		ReadIdleTimeout:            http2ReadIdleTimeout,
@@ -175,9 +194,6 @@ func createStreamingClient(allowH2C bool, connectionTimeout time.Duration) *http
 		WriteByteTimeout:           http2WriteByteTimeout,
 		StrictMaxConcurrentStreams: false,
 		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-			if allowH2C {
-				return dialer.DialContext(ctx, network, addr)
-			}
 			conn, err := dialer.DialContext(ctx, network, addr)
 			if err != nil {
 				return nil, err
@@ -193,7 +209,7 @@ func createStreamingClient(allowH2C bool, connectionTimeout time.Duration) *http
 
 	return &http.Client{
 		Transport: userAgentRoundTripper{
-			base:      transport,
+			base:      &schemeAwareTransport{https: httpsTransport, h2c: h2cTransport},
 			userAgent: defaultUserAgent(),
 		},
 		Timeout: 0, // No timeout for streaming
@@ -216,13 +232,11 @@ func NewFromEnvironment(opts *ClientOptions) *Client {
 	}
 
 	effectiveOpts := &ClientOptions{
-		HTTPClient:         opts.HTTPClient,
-		RetryConfig:        opts.RetryConfig,
-		Logger:             opts.Logger,
-		IncludeBasinHeader: opts.IncludeBasinHeader,
-		AllowH2C:           opts.AllowH2C,
-		RequestTimeout:     opts.RequestTimeout,
-		ConnectionTimeout:  opts.ConnectionTimeout,
+		HTTPClient:        opts.HTTPClient,
+		RetryConfig:       opts.RetryConfig,
+		Logger:            opts.Logger,
+		RequestTimeout:    opts.RequestTimeout,
+		ConnectionTimeout: opts.ConnectionTimeout,
 	}
 
 	if opts.BaseURL != "" {
@@ -254,7 +268,6 @@ func (c *Client) Basin(name string) *BasinClient {
 		retryConfig:        c.retryConfig,
 		logger:             c.logger,
 		includeBasinHeader: c.includeBasinHeader,
-		allowH2C:           c.allowH2C,
 		connectionTimeout:  c.connectionTimeout,
 		requestTimeout:     c.requestTimeout,
 	}

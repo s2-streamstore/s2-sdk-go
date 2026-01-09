@@ -19,8 +19,7 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	client := s2.NewFromEnvironment(&s2.ClientOptions{
-		IncludeBasinHeader: true,
-		Logger:             logger,
+		Logger: logger,
 		RequestTimeout:     12 * time.Second,
 		RetryConfig: &s2.RetryConfig{
 			MaxAttempts:       math.MaxInt,

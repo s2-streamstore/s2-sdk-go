@@ -16,7 +16,6 @@ type BasinClient struct {
 	retryConfig        *RetryConfig
 	logger             *slog.Logger
 	includeBasinHeader bool
-	allowH2C           bool
 	connectionTimeout  time.Duration
 	requestTimeout     time.Duration
 

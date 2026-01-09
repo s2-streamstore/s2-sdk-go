@@ -20,9 +20,7 @@ func testClient(t *testing.T) *s2.Client {
 	if token == "" {
 		t.Skip("S2_ACCESS_TOKEN not set")
 	}
-	return s2.NewFromEnvironment(&s2.ClientOptions{
-		IncludeBasinHeader: true,
-	})
+	return s2.NewFromEnvironment(nil)
 }
 
 func uniqueBasinName(prefix string) s2.BasinName {
