@@ -14,55 +14,81 @@ import (
 
 const streamTestTimeout = 60 * time.Second
 
-func streamTestClient(t *testing.T) *s2.Client {
-	t.Helper()
+var (
+	sharedTestClient    *s2.Client
+	sharedTestBasinName s2.BasinName
+	sharedTestBasin     *s2.BasinClient
+)
+
+func TestMain(m *testing.M) {
 	token := os.Getenv("S2_ACCESS_TOKEN")
 	if token == "" {
-		t.Skip("S2_ACCESS_TOKEN not set")
+		os.Exit(0)
 	}
-	return s2.NewFromEnvironment(&s2.ClientOptions{
+
+	sharedTestClient = s2.NewFromEnvironment(&s2.ClientOptions{
 		IncludeBasinHeader: true,
 	})
-}
 
-func uniqueStreamName(prefix string) s2.StreamName {
-	return s2.StreamName(fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()))
-}
-
-func createTestBasin(ctx context.Context, t *testing.T, client *s2.Client) s2.BasinName {
-	t.Helper()
-	basinName := s2.BasinName(fmt.Sprintf("test-strm-%d", time.Now().UnixNano()))
-	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	sharedTestBasinName = s2.BasinName(fmt.Sprintf("test-strm-%d", time.Now().UnixNano()))
+	_, err := sharedTestClient.Basins.Create(ctx, s2.CreateBasinArgs{Basin: sharedTestBasinName})
 	if err != nil {
-		t.Fatalf("Failed to create test basin: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to create shared test basin: %v\n", err)
+		cancel()
+		os.Exit(1)
 	}
-	waitForBasinReady(ctx, t, client, basinName)
-	return basinName
-}
 
-func waitForBasinReady(ctx context.Context, t *testing.T, client *s2.Client, name s2.BasinName) {
-	t.Helper()
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timeout waiting for basin %s to become active", name)
+			fmt.Fprintf(os.Stderr, "Timeout waiting for shared basin to become active\n")
+			cancel()
+			os.Exit(1)
 		default:
 		}
-		_, err := client.Basins.GetConfig(ctx, name)
+		_, err := sharedTestClient.Basins.GetConfig(ctx, sharedTestBasinName)
 		if err == nil {
-			return
+			break
 		}
 		var s2Err *s2.S2Error
 		if errors.As(err, &s2Err) && s2Err.Code == "basin_creating" {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		return
+		break
 	}
+	cancel()
+
+	sharedTestBasin = sharedTestClient.Basin(string(sharedTestBasinName))
+
+	code := m.Run()
+
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	_ = sharedTestClient.Basins.Delete(cleanupCtx, sharedTestBasinName)
+	cleanupCancel()
+
+	os.Exit(code)
 }
 
-func deleteTestBasin(ctx context.Context, client *s2.Client, name s2.BasinName) {
-	_ = client.Basins.Delete(ctx, name)
+func streamTestClient(t *testing.T) *s2.Client {
+	t.Helper()
+	if sharedTestClient == nil {
+		t.Skip("S2_ACCESS_TOKEN not set")
+	}
+	return sharedTestClient
+}
+
+func getSharedBasin(t *testing.T) *s2.BasinClient {
+	t.Helper()
+	if sharedTestBasin == nil {
+		t.Skip("S2_ACCESS_TOKEN not set")
+	}
+	return sharedTestBasin
+}
+
+func uniqueStreamName(prefix string) s2.StreamName {
+	return s2.StreamName(fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()))
 }
 
 func deleteStream(ctx context.Context, basin *s2.BasinClient, name s2.StreamName) {
@@ -85,6 +111,10 @@ func ptrBool(v bool) *bool {
 	return &v
 }
 
+func ptrI32(v int32) *int32 {
+	return &v
+}
+
 func isStreamFreeTierLimitation(err error) bool {
 	var s2Err *s2.S2Error
 	if errors.As(err, &s2Err) && (s2Err.Code == "invalid_stream_config" || s2Err.Code == "bad_config") {
@@ -101,11 +131,7 @@ func TestListStreams_All(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: List all streams")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	resp, err := basin.Streams.List(ctx, nil)
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
@@ -118,11 +144,7 @@ func TestListStreams_WithPrefix(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: List streams with prefix")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-list")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -160,11 +182,7 @@ func TestListStreams_WithLimit(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: List streams with limit")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	limit := 5
 	resp, err := basin.Streams.List(ctx, &s2.ListStreamsArgs{
 		Limit: &limit,
@@ -184,11 +202,7 @@ func TestListStreams_Pagination(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: List streams with pagination")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 
 	for i := 0; i < 3; i++ {
 		name := s2.StreamName(fmt.Sprintf("page-test-%d", i))
@@ -235,11 +249,7 @@ func TestListStreams_Iterator(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Iterate over streams")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	limit := 3
 	iter := basin.Streams.Iter(ctx, &s2.ListStreamsArgs{
 		Limit: &limit,
@@ -267,11 +277,7 @@ func TestCreateStream_Minimal(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create minimal stream")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-cmin")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -293,11 +299,7 @@ func TestCreateStream_WithFullConfig(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with full config")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-full")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -339,11 +341,7 @@ func TestCreateStream_StorageClassStandard(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with storage_class=standard")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-scst")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -374,11 +372,7 @@ func TestCreateStream_StorageClassExpress(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with storage_class=express")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-scex")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -413,11 +407,7 @@ func TestCreateStream_RetentionPolicyAge(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with retention_policy.age")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rpag")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -452,11 +442,7 @@ func TestCreateStream_RetentionPolicyInfinite(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with retention_policy.infinite")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rpin")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -503,11 +489,7 @@ func TestCreateStream_TimestampingModes(t *testing.T) {
 			defer cancel()
 			t.Logf("Testing: Create stream with timestamping.mode=%s", tc.name)
 
-			client := streamTestClient(t)
-			basinName := createTestBasin(ctx, t, client)
-			defer deleteTestBasin(ctx, client, basinName)
-
-			basin := client.Basin(string(basinName))
+			basin := getSharedBasin(t)
 			streamName := uniqueStreamName("test-tsm")
 			defer deleteStream(ctx, basin, streamName)
 
@@ -544,11 +526,7 @@ func TestCreateStream_DeleteOnEmpty(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with delete_on_empty.min_age_secs")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-doe")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -583,11 +561,7 @@ func TestCreateStream_DuplicateName(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with duplicate name")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-dup")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -612,11 +586,7 @@ func TestCreateStream_InvalidRetentionAgeZero(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with retention_policy.age=0")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-raz")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -643,11 +613,7 @@ func TestGetStreamConfig_Existing(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Get existing stream config")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-gcfg")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -678,11 +644,7 @@ func TestGetStreamConfig_NonExistent(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Get non-existent stream config")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	_, err := basin.Streams.GetConfig(ctx, "nonexistent-stream-12345")
 
 	var s2Err *s2.S2Error
@@ -702,11 +664,7 @@ func TestDeleteStream_Existing(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Delete existing stream")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-del")
 
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
@@ -727,11 +685,7 @@ func TestDeleteStream_NonExistent(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Delete non-existent stream")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	err := basin.Streams.Delete(ctx, "nonexistent-stream-12345")
 
 	var s2Err *s2.S2Error
@@ -746,11 +700,7 @@ func TestDeleteStream_VerifyNotListable(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Verify stream not listable after delete")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-dvnl")
 
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
@@ -787,11 +737,7 @@ func TestReconfigureStream_ChangeStorageClass(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Reconfigure stream storage_class")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rcsc")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -832,11 +778,7 @@ func TestReconfigureStream_ChangeRetentionToAge(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Reconfigure stream retention_policy to age-based")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rra")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -873,11 +815,7 @@ func TestReconfigureStream_ChangeRetentionToInfinite(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Reconfigure stream retention_policy to infinite")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rri")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -920,11 +858,7 @@ func TestReconfigureStream_NonExistent(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Reconfigure non-existent stream")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	storageClass := s2.StorageClassStandard
 	_, err := basin.Streams.Reconfigure(ctx, s2.ReconfigureStreamArgs{
 		Stream: "nonexistent-stream-12345",
@@ -945,11 +879,7 @@ func TestReconfigureStream_EmptyConfig(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Reconfigure stream with empty config")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-remp")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -985,11 +915,7 @@ func TestCheckTail_EmptyStream(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Check tail on empty stream")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-tail")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1015,11 +941,7 @@ func TestCheckTail_AfterAppends(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Check tail after appends")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-taila")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1056,11 +978,7 @@ func TestCheckTail_NonExistentStream(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Check tail on non-existent stream")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	stream := basin.Stream("nonexistent-stream-12345")
 
 	_, err := stream.CheckTail(ctx)
@@ -1078,11 +996,7 @@ func TestAppend_SingleRecord(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append single record")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-app1")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1115,11 +1029,7 @@ func TestAppend_MultipleRecords(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append multiple records")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-appm")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1152,11 +1062,7 @@ func TestAppend_WithHeaders(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append record with headers")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-apph")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1189,11 +1095,7 @@ func TestAppend_EmptyBody(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append record with empty body")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-appe")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1220,11 +1122,7 @@ func TestAppend_WithMatchSeqNum_Success(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append with match_seq_num (success)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-amsn")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1251,11 +1149,7 @@ func TestAppend_WithMatchSeqNum_Failure(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append with match_seq_num (failure)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-amsnf")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1290,11 +1184,7 @@ func TestAppend_ToNonExistentStream(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append to non-existent stream")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	stream := basin.Stream("nonexistent-stream-12345")
 
 	_, err := stream.Append(ctx, &s2.AppendInput{
@@ -1315,11 +1205,7 @@ func TestRead_FromBeginning(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read from beginning")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rdb")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1357,11 +1243,7 @@ func TestRead_WithCountLimit(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read with count limit")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rdcl")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1398,13 +1280,9 @@ func TestRead_WithCountLimit(t *testing.T) {
 func TestRead_EmptyStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
-	t.Log("Testing: Read empty stream")
+	t.Log("Testing: Read empty stream from seq_num=0 (expects 416)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rdes")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1414,17 +1292,15 @@ func TestRead_EmptyStream(t *testing.T) {
 	}
 
 	stream := basin.Stream(streamName)
-	batch, err := stream.Read(ctx, &s2.ReadOptions{
+	_, err = stream.Read(ctx, &s2.ReadOptions{
 		SeqNum: ptrU64(0),
 	})
-	if err != nil {
-		t.Fatalf("Read failed: %v", err)
-	}
 
-	if len(batch.Records) != 0 {
-		t.Errorf("Expected 0 records, got %d", len(batch.Records))
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 416 {
+		t.Errorf("Expected 416 error (tail is 0, no records exist), got: %v", err)
 	}
-	t.Log("Read empty stream successfully")
+	t.Logf("Got expected 416 error: %v", err)
 }
 
 func TestRead_NonExistentStream(t *testing.T) {
@@ -1432,11 +1308,7 @@ func TestRead_NonExistentStream(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read non-existent stream")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	stream := basin.Stream("nonexistent-stream-12345")
 
 	_, err := stream.Read(ctx, &s2.ReadOptions{
@@ -1453,14 +1325,45 @@ func TestRead_NonExistentStream(t *testing.T) {
 func TestRead_WithClampTrue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
-	t.Log("Testing: Read with clamp=true")
+	t.Log("Testing: Read with clamp=true beyond tail (expects 416)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rdct")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("test")}},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	_, err = stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: ptrU64(999999),
+		Clamp:  ptrBool(true),
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 416 {
+		t.Errorf("Expected 416 error (clamped TO tail, but no record exists there), got: %v", err)
+	}
+	t.Logf("Got expected 416 error: %v", err)
+}
+
+func TestRead_WithClampTrueAndWait(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with clamp=true and wait (long poll at tail)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rdctw")
 	defer deleteStream(ctx, basin, streamName)
 
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
@@ -1480,12 +1383,39 @@ func TestRead_WithClampTrue(t *testing.T) {
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
 		SeqNum: ptrU64(999999),
 		Clamp:  ptrBool(true),
+		Wait:   ptrI32(1),
 	})
 	if err != nil {
-		t.Fatalf("Read failed: %v", err)
+		t.Fatalf("Read with clamp+wait failed: %v", err)
 	}
 
-	t.Logf("Read with clamp=true returned %d records", len(batch.Records))
+	t.Logf("Read with clamp=true and wait=1 succeeded, returned %d records", len(batch.Records))
+}
+
+func TestRead_EmptyStreamWithWait(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read empty stream with wait (long poll)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rdesw")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: ptrU64(0),
+		Wait:   ptrI32(1),
+	})
+	if err != nil {
+		t.Fatalf("Read with wait failed: %v", err)
+	}
+
+	t.Logf("Read empty stream with wait=1 succeeded, returned %d records (timeout with empty)", len(batch.Records))
 }
 
 func TestRead_VerifyRecordContent(t *testing.T) {
@@ -1493,11 +1423,7 @@ func TestRead_VerifyRecordContent(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read and verify record content")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rdvc")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1552,18 +1478,13 @@ func TestCreateStream_NameEmpty(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with empty name")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: ""})
 
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if err == nil {
+		t.Error("Expected error for empty stream name, got nil")
 	}
-	t.Logf("Got expected error: %v", err)
+	t.Logf("Got expected error (SDK validation or server): %v", err)
 }
 
 func TestCreateStream_NameTooLong(t *testing.T) {
@@ -1571,19 +1492,14 @@ func TestCreateStream_NameTooLong(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with name too long (>512 bytes)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	longName := s2.StreamName(strings.Repeat("a", 513))
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: longName})
 
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if err == nil {
+		t.Error("Expected error for stream name too long, got nil")
 	}
-	t.Logf("Got expected error: %v", err)
+	t.Logf("Got expected error (SDK validation or server): %v", err)
 }
 
 func TestCreateStream_NameWithUnicode(t *testing.T) {
@@ -1591,11 +1507,7 @@ func TestCreateStream_NameWithUnicode(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Create stream with unicode name")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := s2.StreamName(fmt.Sprintf("test-unicode-日本語-%d", time.Now().UnixNano()))
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1625,11 +1537,7 @@ func TestCreateStream_TimestampingUncapped(t *testing.T) {
 			defer cancel()
 			t.Logf("Testing: Create stream with timestamping.uncapped=%v", tc.uncapped)
 
-			client := streamTestClient(t)
-			basinName := createTestBasin(ctx, t, client)
-			defer deleteTestBasin(ctx, client, basinName)
-
-			basin := client.Basin(string(basinName))
+			basin := getSharedBasin(t)
 			streamName := uniqueStreamName("test-tsu")
 			defer deleteStream(ctx, basin, streamName)
 
@@ -1665,11 +1573,7 @@ func TestAppend_WithTimestamp(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append with client timestamp")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-apts")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1700,11 +1604,7 @@ func TestAppend_WithFencingToken_Success(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append with correct fencing token")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-afts")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1743,11 +1643,7 @@ func TestAppend_WithFencingToken_Failure(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append with wrong fencing token")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-aftf")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1787,11 +1683,7 @@ func TestAppend_MaxBatchSize(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append max batch size (1000 records)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-ambs")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1822,11 +1714,7 @@ func TestAppend_TooManyRecords(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append too many records (>1000)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-atmr")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1843,11 +1731,10 @@ func TestAppend_TooManyRecords(t *testing.T) {
 
 	_, err = stream.Append(ctx, &s2.AppendInput{Records: records})
 
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if err == nil {
+		t.Error("Expected error for >1000 records, got nil")
 	}
-	t.Logf("Got expected error: %v", err)
+	t.Logf("Got expected error (SDK validation or server): %v", err)
 }
 
 func TestAppend_EmptyBatch(t *testing.T) {
@@ -1855,11 +1742,7 @@ func TestAppend_EmptyBatch(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append empty batch (0 records)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-aeb")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1871,11 +1754,10 @@ func TestAppend_EmptyBatch(t *testing.T) {
 	stream := basin.Stream(streamName)
 	_, err = stream.Append(ctx, &s2.AppendInput{Records: []s2.AppendRecord{}})
 
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if err == nil {
+		t.Error("Expected error for empty batch, got nil")
 	}
-	t.Logf("Got expected error: %v", err)
+	t.Logf("Got expected error (SDK validation or server): %v", err)
 }
 
 func TestAppend_HeaderWithEmptyName(t *testing.T) {
@@ -1883,11 +1765,7 @@ func TestAppend_HeaderWithEmptyName(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append record with header having empty name (command record)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-ahen")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1912,16 +1790,43 @@ func TestAppend_HeaderWithEmptyName(t *testing.T) {
 	t.Logf("Empty header name is valid for command records: seq_num=%d", ack.Start.SeqNum)
 }
 
+func TestAppend_HeaderWithEmptyName_NonCommand(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append record with empty header name but non-command value (expect 400)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-ahennc")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{{Name: []byte(""), Value: []byte("not-a-command")}},
+				Body:    []byte("test"),
+			},
+		},
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+		t.Errorf("Expected 400 error for empty header name with non-command value, got: %v", err)
+	}
+	t.Logf("Got expected 400 error: %v", err)
+}
+
 func TestRead_FromTail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
-	t.Log("Testing: Read from tail (tail_offset=0)")
+	t.Log("Testing: Read from tail (tail_offset=0, expects 416)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rft")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1941,14 +1846,15 @@ func TestRead_FromTail(t *testing.T) {
 		}
 	}
 
-	batch, err := stream.Read(ctx, &s2.ReadOptions{
+	_, err = stream.Read(ctx, &s2.ReadOptions{
 		TailOffset: ptrI64(0),
 	})
-	if err != nil {
-		t.Fatalf("Read failed: %v", err)
-	}
 
-	t.Logf("Read from tail returned %d records", len(batch.Records))
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 416 {
+		t.Errorf("Expected 416 error (position at tail with no records), got: %v", err)
+	}
+	t.Logf("Got expected 416 error: %v", err)
 }
 
 func TestRead_WithTailOffset(t *testing.T) {
@@ -1956,11 +1862,7 @@ func TestRead_WithTailOffset(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read with offset from tail (tail_offset=3)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rwto")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -1998,11 +1900,7 @@ func TestRead_ByTimestamp(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read by timestamp")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rdts")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2049,11 +1947,7 @@ func TestRead_WithBytesLimit(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read with bytes limit")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rdbl")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2089,11 +1983,7 @@ func TestRead_UntilTimestamp(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read until timestamp")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rdut")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2127,11 +2017,7 @@ func TestRead_ClampFalse_BeyondTail(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read with clamp=false beyond tail (expect 416)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rdcf")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2166,11 +2052,7 @@ func TestFence_SetToken(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Set fencing token via command record")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-fst")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2201,11 +2083,7 @@ func TestFence_ClearToken(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Clear fencing token")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-fct")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2255,11 +2133,7 @@ func TestTrim_Stream(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Trim stream via command record")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-trim")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2305,11 +2179,7 @@ func TestTrim_ReadAfterTrim(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Read after trim")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-trat")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2368,11 +2238,7 @@ func TestTrim_ToFutureSeqNum(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Trim to future seq_num (no-op)")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-trf")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2424,11 +2290,7 @@ func TestReconfigureStream_ChangeTimestampingMode(t *testing.T) {
 			defer cancel()
 			t.Logf("Testing: Reconfigure stream timestamping.mode=%s", mode)
 
-			client := streamTestClient(t)
-			basinName := createTestBasin(ctx, t, client)
-			defer deleteTestBasin(ctx, client, basinName)
-
-			basin := client.Basin(string(basinName))
+			basin := getSharedBasin(t)
 			streamName := uniqueStreamName("test-rctm")
 			defer deleteStream(ctx, basin, streamName)
 
@@ -2465,11 +2327,7 @@ func TestReconfigureStream_ChangeTimestampingUncapped(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Reconfigure stream timestamping.uncapped")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rctu")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2503,11 +2361,7 @@ func TestReconfigureStream_ChangeDeleteOnEmpty(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Reconfigure stream delete_on_empty.min_age_secs")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rcdoe")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2542,11 +2396,7 @@ func TestReconfigureStream_DisableDeleteOnEmpty(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Disable delete_on_empty")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rddoe")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2582,11 +2432,7 @@ func TestReconfigureStream_PartialConfig(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Partial reconfiguration")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rcpc")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2630,11 +2476,7 @@ func TestReconfigureStream_InvalidRetentionAgeZero(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Reconfigure with invalid retention_policy.age=0")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rcira")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2753,11 +2595,7 @@ func TestAppendSession_Open(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Open append session")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-aso")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2781,11 +2619,7 @@ func TestAppendSession_MultipleBatches(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Append multiple batches via session")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-asmb")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2829,11 +2663,7 @@ func TestAppendSession_Close(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Close append session")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-asc")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2878,11 +2708,7 @@ func TestReadSession_Open(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Open read session")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rso")
 	defer deleteStream(ctx, basin, streamName)
 
@@ -2932,11 +2758,7 @@ func TestReadSession_Cancel(t *testing.T) {
 	defer cancel()
 	t.Log("Testing: Cancel read session")
 
-	client := streamTestClient(t)
-	basinName := createTestBasin(ctx, t, client)
-	defer deleteTestBasin(ctx, client, basinName)
-
-	basin := client.Basin(string(basinName))
+	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-rsc")
 	defer deleteStream(ctx, basin, streamName)
 

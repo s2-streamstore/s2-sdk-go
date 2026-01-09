@@ -33,6 +33,61 @@
 > - Test any builder patterns, fluent APIs, or configuration options the SDK exposes
 > - If the SDK has async/streaming variants of methods, test both
 > - If the SDK exposes retry/backoff configuration, verify it works correctly
+>
+> **Error handling guidance:**
+> - SDKs may validate inputs client-side before sending to server (e.g., batch size limits)
+> - Client-side validation errors may not be HTTP status codes - just check that an error is returned
+> - For tests expecting errors, verify an error occurred; don't require specific HTTP status codes for client-validated constraints
+> - Server-side errors will have HTTP status codes and error codes as documented
+>
+> **Code quality guidance:**
+> - Do NOT create redundant helper functions, wrapper types, or utility code that duplicates SDK functionality
+> - Use the SDK's provided methods, builders, and types directly - don't wrap them unnecessarily
+> - Avoid creating test-only abstractions when the SDK already provides clean APIs
+> - Keep test code simple and direct - call SDK methods inline rather than through helper layers
+> - If the SDK provides a method for an operation, use it instead of constructing requests manually
+
+---
+
+## Test Setup Guidance
+
+**Critical: Understand stream state before testing reads**
+
+Many read test cases depend on the stream having records. Before testing reads:
+1. Create a fresh stream for isolation
+2. If testing "read from beginning", first append some records, then read with `seq_num=0`
+3. If testing an empty stream, understand that `seq_num=0` returns 416 (not 200 with empty array) because tail=0
+4. If testing `clamp=true`, understand it only prevents errors for positions BEYOND the tail; you still get 416 at the tail without `wait`
+
+**Test isolation patterns:**
+- Create a unique stream name per test (e.g., `test-<operation>-<timestamp>`)
+- Clean up streams after tests complete
+- Don't share streams between tests that modify state
+
+**Resource efficiency - Basin reuse:**
+- Stream tests do NOT need a new basin per test - stream-level isolation is sufficient
+- Create ONE shared basin for all stream tests (e.g., in `TestMain` or a setup function)
+- Each test creates its own uniquely-named stream within the shared basin
+- This avoids basin limit exhaustion and speeds up tests significantly
+- Only basin-specific tests (create/delete/reconfigure basin) need their own basins
+- Pattern:
+  ```
+  // In TestMain or suite setup:
+  sharedBasin = createTestBasin("stream-tests-<timestamp>")
+
+  // In each stream test:
+  streamName = uniqueStreamName("test-<operation>")
+  // ... test using sharedBasin and streamName
+  defer deleteStream(streamName)
+  ```
+
+**Common test pattern mistakes to avoid:**
+
+1. **"Read empty stream returns empty array"** - WRONG. Reading `seq_num=0` on an empty stream returns 416, not 200 with empty records. The correct test should verify 416 is returned.
+
+2. **"clamp=true returns existing records"** - WRONG. `clamp=true` clamps to the tail, not to the last record. If the stream has 1 record (tail=1), reading with `seq_num=999999, clamp=true` clamped to position 1, but there's no record at position 1. Test should expect 416 OR use `wait` to long-poll.
+
+3. **"Read from seq_num=0 on non-empty stream"** - CORRECT. If the stream has records, reading from `seq_num=0` returns records starting from the beginning.
 
 ---
 
@@ -214,8 +269,8 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 | **delete_on_empty.min_age_secs** | `{"min_age_secs": 3600}` | 201 |
 | Idempotent create (same token) | Same request + same `s2-request-token` | 201 |
 | Idempotent create (different token) | Same stream + different `s2-request-token` | 409 (`stream_exists`) |
-| Name empty | `{"stream": ""}` | 400 |
-| Name too long | `{"stream": "a" * 513}` (> 512 bytes) | 400 |
+| Name empty | `{"stream": ""}` | Error (SDK may validate client-side, or 400 from server) |
+| Name too long | `{"stream": "a" * 513}` (> 512 bytes) | Error (SDK may validate client-side, or 400 from server) |
 | Name with unicode | `{"stream": "test-stream-"}` | 201 |
 | Duplicate name | Create same stream twice | 409 (`stream_exists`) |
 | Basin not found | invalid basin | 404 (`basin_not_found`) |
@@ -458,7 +513,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 | Field | Type | Required | Constraints | Description |
 |-------|------|----------|-------------|-------------|
-| `records` | `AppendRecord[]` | **Yes** | 1-1000 records, <= 1 MiB total | Records to append |
+| `records` | `AppendRecord[]` | **Yes** | 1-1000 records, <= 1 MiB total | Records to append (SDK may validate client-side) |
 | `match_seq_num` | integer | No | - | Expected tail seq_num for conditional append |
 | `fencing_token` | string | No | max 36 chars | Fencing token for coordination |
 
@@ -522,11 +577,12 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 | Append with match_seq_num (failure) | wrong seq_num | 412 (`seq_num_mismatch`) |
 | Append with fencing_token (success) | correct token | 200 |
 | Append with fencing_token (failure) | wrong token | 412 (`fencing_token_mismatch`) |
-| Append too many records | > 1000 records | 400 |
-| Append too large batch | > 1 MiB | 400 |
-| Append empty batch | 0 records | 400 |
+| Append too many records | > 1000 records | Error (SDK validation or 400) |
+| Append too large batch | > 1 MiB | Error (SDK validation or 400) |
+| Append empty batch | 0 records | Error (SDK validation or 400) |
 | Append to non-existent stream | invalid name | 404 (`stream_not_found`) |
-| Append header with empty name | header with name="" | 400 |
+| Append header with empty name (command record) | header with name="" | 200 (valid for commands) |
+| Append header with empty name (non-command) | header name="" without command value | 400 |
 | Permission denied | token without `append` op | 403 (`permission_denied`) |
 
 ---
@@ -555,9 +611,18 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 |-----------|------|----------|---------|-------------|
 | `seq_num` | integer | No | - | Start from this sequence number |
 | `timestamp` | integer | No | - | Start from records at/after this timestamp (ms) |
-| `tail_offset` | integer | No | 0 | Start this many records before tail |
+| `tail_offset` | integer | No | 0 | Start this many records before the next seq_num (tail) |
 
-> **Note:** Only ONE of `seq_num`, `timestamp`, or `tail_offset` can be specified. Default is `tail_offset=0` (start from tail).
+> **Note:** Only ONE of `seq_num`, `timestamp`, or `tail_offset` can be specified. Default is `tail_offset=0`.
+>
+> **Important - Understanding 416 responses:**
+> - The tail is the next seq_num that WILL be assigned to a new record. It points to a position where no record exists yet.
+> - Reading returns 416 when the starting position is at or beyond the tail AND no `wait` is specified (or `wait=0`).
+> - `tail_offset=0` means "start AT the tail" - this always returns 416 without `wait` because there's no record at that position yet.
+> - `seq_num=0` on an empty stream returns 416 because the tail is also 0 (no records exist).
+> - `clamp=true` brings the starting position TO the tail if beyond it, but you still get 416 because there's no record at the tail position.
+> - To read records that exist: use `seq_num=0` on a non-empty stream, or `tail_offset=N` where N>0 to read the last N records.
+> - To wait for new records: use `wait=<seconds>` to long-poll for records at/beyond the tail.
 
 ### Query Parameters - End/Limit
 
@@ -566,7 +631,10 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 | `count` | integer | No | 1000 | <= 1000 | Max records to return |
 | `bytes` | integer | No | 1 MiB | <= 1 MiB | Max metered bytes |
 | `until` | integer | No | - | - | Exclusive timestamp to read until |
-| `clamp` | boolean | No | `false` | - | Clamp to tail if position exceeds it |
+| `clamp` | boolean | No | `false` | - | If position > tail, clamp starting position TO the tail (not before it) |
+| `wait` | integer | No | 0 | 0-60 seconds | Duration to wait for new records if at/beyond tail |
+
+> **Note on `clamp`:** Setting `clamp=true` prevents a 416 error when requesting a position BEYOND the tail by adjusting the start position to the tail. However, since the tail is where the next record will be written (not an existing record), you will still get 416 unless you also specify `wait` to long-poll for new records.
 
 ### Response Codes
 
@@ -601,16 +669,19 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 | Test | Input | Expected |
 |------|-------|----------|
-| Read from beginning | `seq_num=0` | 200, records from start |
-| Read from tail | `tail_offset=0` | 200, empty or latest records |
-| Read with offset from tail | `tail_offset=10` | 200, last 10 records |
+| Read from beginning (non-empty stream) | `seq_num=0` on stream with records | 200, records from start |
+| Read from tail (no wait) | `tail_offset=0` | 416 (tail position has no record yet) |
+| Read from tail (with wait) | `tail_offset=0`, `wait=5` | 200 with records if appended, or 200 empty if timeout |
+| Read last N records | `tail_offset=10` on stream with >=10 records | 200, last 10 records |
 | Read by timestamp | `timestamp=<ms>` | 200, records at/after timestamp |
 | Read with count limit | `count=5` | 200, max 5 records |
 | Read with bytes limit | `bytes=1024` | 200, max 1KB of records |
 | Read until timestamp | `until=<ms>` | 200, records before timestamp |
-| Read with clamp=true | `seq_num=999999`, `clamp=true` | 200, clamped to tail |
-| Read with clamp=false (beyond tail) | `seq_num=999999`, `clamp=false` | 416 (`position_out_of_range`) |
-| Read empty stream | new stream, `seq_num=0` | 200, empty records array |
+| Read with clamp=true (beyond tail) | `seq_num=999999`, `clamp=true` | 416 (clamped TO tail, but no record exists there) |
+| Read with clamp=true + wait | `seq_num=999999`, `clamp=true`, `wait=5` | 200 (waits for records at tail) |
+| Read with clamp=false (beyond tail) | `seq_num=999999`, `clamp=false` | 416 (position beyond tail) |
+| Read empty stream from seq_num=0 | new stream, `seq_num=0` | 416 (tail is 0, no records exist) |
+| Read empty stream with wait | new stream, `seq_num=0`, `wait=5` | 200 with records if appended, or 200 empty if timeout |
 | Read non-existent stream | invalid name | 404 (`stream_not_found`) |
 | Multiple start params | `seq_num=0`, `timestamp=0` | 400 (mutually exclusive) |
 | Permission denied | token without `read` op | 403 (`permission_denied`) |
@@ -733,7 +804,7 @@ When running against an account on the Free tier, certain configurations will be
 | 409 | `stream_deleted_during_reconfiguration` | Stream deleted during PUT |
 | 409 | `concurrent_stream_update` | Concurrent reconfiguration conflict |
 | 412 | - | Append precondition failed (fencing/seq_num) |
-| 416 | - | Read position beyond tail (returns `TailResponse`) |
+| 416 | - | Read position at/beyond tail with no records available (returns `TailResponse`, not `ErrorInfo`) |
 | 429 | `rate_limited` | Rate limit exceeded |
 | 500 | `internal` | Internal server error |
 | 503 | `basin_creating` | Basin still initializing |
