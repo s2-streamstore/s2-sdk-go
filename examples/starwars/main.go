@@ -1,14 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
+	"io"
 	"net"
 	"os"
+	"time"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
 )
@@ -33,73 +32,81 @@ func run(ctx context.Context, basinName, streamName string) error {
 	client := s2.NewFromEnvironment(nil)
 	stream := client.Basin(basinName).Stream(s2.StreamName(streamName))
 
-	tail, err := stream.CheckTail(ctx)
-	if err != nil {
-		return fmt.Errorf("check tail: %w", err)
+	type result[T any] struct {
+		val T
+		err error
 	}
 
-	readSession, err := stream.ReadSession(ctx, &s2.ReadOptions{
-		SeqNum: &tail.Tail.SeqNum,
-	})
-	if err != nil {
-		return fmt.Errorf("read session: %w", err)
-	}
-	defer readSession.Close()
-
-	appendSession, err := stream.AppendSession(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("append session: %w", err)
-	}
-	defer appendSession.Close()
+	readCh := make(chan result[*s2.ReadSession], 1)
+	appendCh := make(chan result[*s2.AppendSession], 1)
 
 	go func() {
-		if err := appendFrames(ctx, appendSession); err != nil {
+		sess, err := stream.ReadSession(ctx, &s2.ReadOptions{TailOffset: ptr(int64(0))})
+		readCh <- result[*s2.ReadSession]{sess, err}
+	}()
+	go func() {
+		sess, err := stream.AppendSession(ctx, nil)
+		appendCh <- result[*s2.AppendSession]{sess, err}
+	}()
+
+	readRes := <-readCh
+	if readRes.err != nil {
+		return fmt.Errorf("read session: %w", readRes.err)
+	}
+	readSession := readRes.val
+	defer readSession.Close()
+
+	appendRes := <-appendCh
+	if appendRes.err != nil {
+		return fmt.Errorf("append session: %w", appendRes.err)
+	}
+	appendSession := appendRes.val
+	defer appendSession.Close()
+
+	batcher := s2.NewBatcher(ctx, &s2.BatchingOptions{
+		Linger:     5 * time.Millisecond,
+		MaxRecords: 100,
+	})
+	producer := s2.NewProducer(ctx, batcher, appendSession)
+	defer producer.Close()
+
+	go func() {
+		if err := appendFrames(ctx, producer); err != nil {
 			fmt.Fprintln(os.Stderr, "Append error:", err)
 		}
 	}()
 
 	for readSession.Next() {
 		os.Stdout.Write(readSession.Record().Body)
-		os.Stdout.Write([]byte("\r\n"))
 	}
 
 	return readSession.Err()
 }
 
-func appendFrames(ctx context.Context, session *s2.AppendSession) error {
+func appendFrames(ctx context.Context, producer *s2.Producer) error {
 	conn, err := net.Dial("tcp", "starwars.s2.dev:23")
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		fut, err := session.Submit(&s2.AppendInput{
-			Records: []s2.AppendRecord{{Body: scanner.Bytes()}},
-		})
+	buf := make([]byte, 4096)
+	for {
+		n, err := conn.Read(buf)
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			if _, err := producer.Submit(s2.AppendRecord{Body: chunk}); err != nil {
+				return err
+			}
+		}
 		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
 			return err
 		}
-
-		go func() {
-			ticket, err := fut.Wait(ctx)
-			if err != nil {
-				log.Printf("error enqueueing: %v", err)
-
-				return
-			}
-			ack, err := ticket.Ack(ctx)
-			if err != nil {
-				log.Printf("error waiting: %v", err)
-
-				return
-			}
-
-			b, _ := json.Marshal(ack)
-			log.Printf("ack: %s", b)
-		}()
 	}
-
-	return scanner.Err()
 }
+
+func ptr[T any](v T) *T { return &v }
