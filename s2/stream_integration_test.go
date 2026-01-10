@@ -115,7 +115,7 @@ func ptrI32(v int32) *int32 {
 
 func isStreamFreeTierLimitation(err error) bool {
 	var s2Err *s2.S2Error
-	if errors.As(err, &s2Err) && (s2Err.Code == "invalid_stream_config" || s2Err.Code == "invalid" || s2Err.Code == "bad_config") {
+	if errors.As(err, &s2Err) && (s2Err.Code == "invalid_stream_config" || s2Err.Code == "invalid") {
 		msg := strings.ToLower(s2Err.Message)
 		return strings.Contains(msg, "free tier")
 	}
