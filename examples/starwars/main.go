@@ -41,7 +41,7 @@ func run(ctx context.Context, basinName, streamName string) error {
 	appendCh := make(chan result[*s2.AppendSession], 1)
 
 	go func() {
-		sess, err := stream.ReadSession(ctx, &s2.ReadOptions{TailOffset: ptr(int64(0))})
+		sess, err := stream.ReadSession(ctx, &s2.ReadOptions{TailOffset: s2.Int64(0)})
 		readCh <- result[*s2.ReadSession]{sess, err}
 	}()
 	go func() {
@@ -49,14 +49,17 @@ func run(ctx context.Context, basinName, streamName string) error {
 		appendCh <- result[*s2.AppendSession]{sess, err}
 	}()
 
-	readRes := <-readCh
+	readRes, appendRes := <-readCh, <-appendCh
+
 	if readRes.err != nil {
+		if appendRes.val != nil {
+			appendRes.val.Close()
+		}
 		return fmt.Errorf("read session: %w", readRes.err)
 	}
 	readSession := readRes.val
 	defer readSession.Close()
 
-	appendRes := <-appendCh
 	if appendRes.err != nil {
 		return fmt.Errorf("append session: %w", appendRes.err)
 	}
@@ -96,9 +99,7 @@ func appendFrames(ctx context.Context, producer *s2.Producer) error {
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
-			if _, err := producer.Submit(s2.AppendRecord{Body: chunk}); err != nil {
-				return err
-			}
+			producer.Submit(s2.AppendRecord{Body: chunk})
 		}
 		if err != nil {
 			if err == io.EOF {
@@ -108,5 +109,3 @@ func appendFrames(ctx context.Context, producer *s2.Producer) error {
 		}
 	}
 }
-
-func ptr[T any](v T) *T { return &v }
