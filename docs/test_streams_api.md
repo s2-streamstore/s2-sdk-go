@@ -96,7 +96,7 @@ Many read test cases depend on the stream having records. Before testing reads:
 
 **Basin readiness:**
 - After creating a basin, you MUST wait for it to become active before performing stream operations
-- A newly created basin returns 503 (`basin_creating`) for stream operations until ready
+- A newly created basin returns 503 (`unavailable`) for stream operations until ready
 - Implement a polling loop that calls `GetBasinConfig` until it succeeds (or check state)
 - Pattern:
   ```
@@ -105,7 +105,7 @@ Many read test cases depend on the stream having records. Before testing reads:
     try:
       getBasinConfig(name)  // or check state != creating
       break
-    catch 503 basin_creating:
+    catch 503 unavailable:
       sleep(500ms)
   // Basin is now ready for stream operations
   ```
@@ -172,7 +172,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Body: `ListStreamsResponse`
 
 - `400` — Bad request
-  - Code: `invalid_argument`
+  - Code: `invalid`
   - Cause: invalid parameter format/value
 
 - `403` — Forbidden
@@ -182,10 +182,10 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `503` — Basin still creating
-  - Code: `basin_creating`
+  - Code: `unavailable`
 
 ### Response Schema: ListStreamsResponse
 
@@ -321,7 +321,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Body: `StreamInfo`
 
 - `400` — Bad request / invalid config
-  - Codes: `invalid_argument`, `invalid_stream_config`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -330,13 +330,13 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Stream already exists
   - Code: `resource_already_exists`
 
 - `503` — Basin still creating
-  - Code: `basin_creating`
+  - Code: `unavailable`
 
 ### Test Cases
 
@@ -422,7 +422,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - **Invalid retention_policy.age < 0**
   - Input: `retention_policy: {"age": -1}`
-  - Expected: 400 (`invalid_argument`, JSON parse error)
+  - Expected: 400 (`invalid`, JSON parse error)
 
 - **Permission denied**
   - Setup: token without `create-stream` op
@@ -446,7 +446,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Body: `StreamConfig`
 
 - `400` — Bad request
-  - Code: `invalid_argument`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -455,7 +455,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
@@ -510,7 +510,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - `204` — No changes
 
 - `400` — Bad request / invalid config
-  - Codes: `invalid_argument`, `invalid_stream_config`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -519,13 +519,13 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Conflict
   - Codes: `stream_deletion_pending`, `transaction_conflict`
 
 - `503` — Basin still creating
-  - Code: `basin_creating`
+  - Code: `unavailable`
 
 ### Test Cases
 
@@ -574,7 +574,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - `202` — Deletion accepted (async operation)
 
 - `400` — Bad request
-  - Code: `invalid_argument`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -583,7 +583,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 ### Test Cases
 
@@ -653,7 +653,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Body: `StreamConfig` (updated)
 
 - `400` — Bad request / invalid config
-  - Codes: `invalid_argument`, `invalid`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -662,7 +662,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Concurrent update
   - Code: `transaction_conflict`
@@ -743,7 +743,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Body: `TailResponse`
 
 - `400` — Bad request
-  - Code: `invalid_argument`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -752,7 +752,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
@@ -853,7 +853,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Body: `AppendAck`
 
 - `400` — Bad request
-  - Code: `invalid_argument`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -862,7 +862,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
@@ -1064,7 +1064,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Body: `ReadBatch`
 
 - `400` — Bad request
-  - Code: `invalid_argument`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -1073,7 +1073,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
@@ -1329,7 +1329,7 @@ Test client initialization, configuration, and cleanup patterns exposed by the S
 
 ## Free Tier Limitations
 
-When running against an account on the Free tier, certain configurations will be rejected with `invalid_stream_config`. Tests should accept these failures as valid outcomes:
+When running against an account on the Free tier, certain configurations will be rejected with `invalid`. Tests should accept these failures as valid outcomes:
 
 - Retention > 28 days
   - Example: "Retention is currently limited to 28 days for free tier"
@@ -1369,14 +1369,17 @@ Several operations are eventually consistent. Tests should NOT assert on immedia
 
 ## Error Codes Reference
 
-- `400` `invalid_argument`
-  - Invalid parameter format/value
+- `400` `bad_json`
+  - Malformed JSON in request body
 
-- `400` `invalid_stream_config`
-  - Stream config validation failed (including tier limits)
+- `400` `bad_query`
+  - Invalid query parameters
+
+- `400` `bad_header`
+  - Invalid header value
 
 - `422` `invalid`
-  - Validation errors (config, arguments, etc.)
+  - Validation errors (config, arguments, tier limits)
 
 - `403` `permission_denied`
   - Token lacks required permissions
@@ -1387,7 +1390,7 @@ Several operations are eventually consistent. Tests should NOT assert on immedia
 - `404` `basin_not_found`
   - Parent basin does not exist
 
-- `408` `deadline_exceeded`
+- `408` `timeout`
   - Request timeout
 
 - `409` `resource_already_exists`
@@ -1410,8 +1413,8 @@ Several operations are eventually consistent. Tests should NOT assert on immedia
 - `429` `rate_limited`
   - Rate limit exceeded
 
-- `500` `internal`
+- `500` `other`
   - Internal server error
 
-- `503` `basin_creating`
-  - Basin still initializing
+- `503` `unavailable`
+  - Basin still initializing or service unavailable

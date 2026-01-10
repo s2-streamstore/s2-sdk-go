@@ -58,7 +58,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Body: `ListBasinsResponse`
 
 - `400` — Bad request
-  - Code: `invalid_argument`
+  - Code: `invalid`
   - Cause: invalid parameter format/value
 
 - `403` — Forbidden
@@ -66,7 +66,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Cause: token lacks `list-basins` permission
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 ### Response Schema: ListBasinsResponse
 
@@ -209,13 +209,13 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Body: `BasinInfo`
 
 - `400` — Bad request / invalid config
-  - Codes: `invalid_argument`, `invalid_basin_config`, `basin_scope_mismatch`
+  - Code: `invalid`
 
 - `403` — Forbidden / limit exhausted
   - Codes: `permission_denied`, `quota_exhausted`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Conflict (name taken)
   - Code: `resource_already_exists`
@@ -350,7 +350,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Invalid retention_policy.age < 0**
   - Input: `retention_policy: {"age": -1}`
-  - Expected: 400 (`invalid_argument`, JSON parse error)
+  - Expected: 400 (`invalid`, JSON parse error)
 
 ---
 
@@ -370,7 +370,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Body: `BasinConfig`
 
 - `400` — Bad request
-  - Code: `invalid_argument`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -379,10 +379,10 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `503` — Basin still creating
-  - Code: `basin_creating`
+  - Code: `unavailable`
 
 ### Test Cases
 
@@ -400,7 +400,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Get creating basin**
   - Input: basin in creating state
-  - Expected: 503 (`basin_creating`)
+  - Expected: 503 (`unavailable`)
 
 - **Verify all config fields returned**
   - Expected: all nested fields present with non-default values
@@ -441,13 +441,13 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `204` — No changes (null body on existing basin)
 
 - `400` — Bad request / scope mismatch
-  - Codes: `invalid_argument`, `basin_scope_mismatch`, `invalid_basin_config`
+  - Code: `invalid`
 
 - `403` — Forbidden / limit exhausted
   - Codes: `permission_denied`, `quota_exhausted`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Basin deleted during reconfigure
   - Code: `basin_deletion_pending`
@@ -475,7 +475,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Attempt to change scope**
   - Input: different scope
-  - Expected: 400 (`basin_scope_mismatch`)
+  - Expected: 400 (`invalid`)
 
 - **Create with defaults**
   - Input: new name, null body
@@ -506,7 +506,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `202` — Deletion accepted (async operation)
 
 - `400` — Bad request
-  - Code: `invalid_argument`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -515,10 +515,10 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `503` — Basin still creating
-  - Code: `basin_creating`
+  - Code: `unavailable`
 
 ### Test Cases
 
@@ -540,7 +540,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Delete creating basin**
   - Input: basin in creating state
-  - Expected: 503 (`basin_creating`)
+  - Expected: 503 (`unavailable`)
 
 - **Verify basin state after delete**
   - Expected: state = "deleting"
@@ -613,7 +613,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Body: `BasinConfig` (updated)
 
 - `400` — Bad request / invalid config
-  - Codes: `invalid_argument`, `invalid`
+  - Code: `invalid`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -622,7 +622,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `deadline_exceeded`
+  - Code: `timeout`
 
 - `409` — Concurrent update
   - Code: `transaction_conflict`
@@ -747,7 +747,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ## Free Tier Limitations
 
-When running against an account on the Free tier, certain configurations will be rejected with `invalid_basin_config`. Tests should accept these failures as valid outcomes:
+When running against an account on the Free tier, certain configurations will be rejected with `invalid`. Tests should accept these failures as valid outcomes:
 
 - Retention > 28 days
   - Example: "Retention is currently limited to 28 days for free tier"
@@ -762,17 +762,14 @@ When running against an account on the Free tier, certain configurations will be
 
 ## Error Codes Reference
 
-- `400` `invalid_argument`
-  - Invalid parameter format/value
+- `400` `bad_json`
+  - Malformed JSON in request body
 
-- `400` `invalid_basin_config`
-  - Basin config validation failed (including tier limits)
-
-- `400` `basin_scope_mismatch`
-  - Attempted to change basin scope
+- `400` `bad_query`
+  - Invalid query parameters
 
 - `422` `invalid`
-  - Validation errors (config, arguments, etc.)
+  - Validation errors (config, arguments, scope mismatch, tier limits)
 
 - `403` `permission_denied`
   - Token lacks required permissions or account frozen
@@ -783,7 +780,7 @@ When running against an account on the Free tier, certain configurations will be
 - `404` `basin_not_found`
   - Basin does not exist
 
-- `408` `deadline_exceeded`
+- `408` `timeout`
   - Request timeout
 
 - `409` `resource_already_exists`
@@ -798,8 +795,8 @@ When running against an account on the Free tier, certain configurations will be
 - `429` `rate_limited`
   - Concurrent creation conflict, retry
 
-- `503` `basin_creating`
-  - Basin still in creating state
+- `503` `unavailable`
+  - Basin still in creating state or service unavailable
 
-- `500` `internal`
+- `500` `other`
   - Internal server error
