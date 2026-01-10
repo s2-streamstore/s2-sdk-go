@@ -243,7 +243,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - **Invalid start_after < prefix**
   - Parameters: `prefix=z`, `start_after=a`
-  - Expected: 400, validation error
+  - Expected: 422 (`invalid`)
 
 - **Basin not found**
   - Setup: invalid basin
@@ -418,7 +418,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - **Invalid retention_policy.age = 0**
   - Input: `retention_policy: {"age": 0}`
-  - Expected: 400 (`invalid_stream_config`)
+  - Expected: 422 (`invalid`)
 
 - **Invalid retention_policy.age < 0**
   - Input: `retention_policy: {"age": -1}`
@@ -715,7 +715,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - **Invalid retention_policy.age = 0**
   - Input: `{"retention_policy": {"age": 0}}`
-  - Expected: 400 (`invalid`)
+  - Expected: 422 (`invalid`)
 
 - **Concurrent update conflict**
   - Setup: race condition
@@ -926,7 +926,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - **Append without timestamp (client-require mode)**
   - Setup: stream with `timestamping.mode=client-require`
   - Input: no timestamp
-  - Expected: 400 ("Record timestamp missing")
+  - Expected: 422 (`invalid`, "Record timestamp missing")
 
 - **Append with future timestamp (uncapped=false)**
   - Setup: stream with `uncapped=false`
@@ -964,7 +964,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - **Append with fencing_token too long**
   - Input: token > 36 bytes
-  - Expected: 400 (`invalid_argument`)
+  - Expected: 422 (`invalid`)
 
 - **Append too many records**
   - Input: > 1000 records
@@ -988,7 +988,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - **Append header with empty name (non-command)**
   - Input: header name="" without command value
-  - Expected: 400
+  - Expected: 422 (`invalid`)
 
 - **Permission denied**
   - Setup: token without `append` op
@@ -1375,8 +1375,8 @@ Several operations are eventually consistent. Tests should NOT assert on immedia
 - `400` `invalid_stream_config`
   - Stream config validation failed (including tier limits)
 
-- `400` `invalid`
-  - Reconfiguration validation failed
+- `422` `invalid`
+  - Validation errors (config, arguments, etc.)
 
 - `403` `permission_denied`
   - Token lacks required permissions

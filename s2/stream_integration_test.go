@@ -115,7 +115,7 @@ func ptrI32(v int32) *int32 {
 
 func isStreamFreeTierLimitation(err error) bool {
 	var s2Err *s2.S2Error
-	if errors.As(err, &s2Err) && (s2Err.Code == "invalid_stream_config" || s2Err.Code == "bad_config") {
+	if errors.As(err, &s2Err) && (s2Err.Code == "invalid_stream_config" || s2Err.Code == "invalid" || s2Err.Code == "bad_config") {
 		msg := strings.ToLower(s2Err.Message)
 		return strings.Contains(msg, "free tier")
 	}
@@ -266,6 +266,64 @@ func TestListStreams_Iterator(t *testing.T) {
 		t.Fatalf("Iterator error: %v", err)
 	}
 	t.Logf("Iterated over %d streams", count)
+}
+
+func TestListStreams_InvalidStartAfterLessThanPrefix(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: List streams with start_after < prefix")
+
+	basin := getSharedBasin(t)
+	_, err := basin.Streams.List(ctx, &s2.ListStreamsArgs{
+		Prefix:     "zzzzzzzz",
+		StartAfter: "aaaaaaaa",
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 400 error, got: %v", err)
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+func TestListStreams_LimitZero(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: List streams with limit=0 (treated as default)")
+
+	basin := getSharedBasin(t)
+	limit := 0
+	resp, err := basin.Streams.List(ctx, &s2.ListStreamsArgs{
+		Limit: &limit,
+	})
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+
+	if len(resp.Streams) > 1000 {
+		t.Errorf("Expected at most 1000 streams, got %d", len(resp.Streams))
+	}
+	t.Logf("Listed %d streams with limit=0 (treated as default 1000)", len(resp.Streams))
+}
+
+func TestListStreams_LimitExceeds1000(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: List streams with limit > 1000 (clamped to 1000)")
+
+	basin := getSharedBasin(t)
+	limit := 1500
+	resp, err := basin.Streams.List(ctx, &s2.ListStreamsArgs{
+		Limit: &limit,
+	})
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+
+	if len(resp.Streams) > 1000 {
+		t.Errorf("Expected at most 1000 streams (clamped), got %d", len(resp.Streams))
+	}
+	t.Logf("Listed %d streams with limit=1500 (clamped to 1000)", len(resp.Streams))
 }
 
 // --- Create Stream Tests ---
@@ -598,7 +656,7 @@ func TestCreateStream_InvalidRetentionAgeZero(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
 		t.Errorf("Expected 400 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
@@ -1625,7 +1683,7 @@ func TestAppend_WithoutTimestamp_ClientRequire(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
 		t.Errorf("Expected 400 error for missing timestamp on client-require, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
@@ -1670,6 +1728,50 @@ func TestAppend_FutureTimestamp_Uncapped(t *testing.T) {
 		t.Logf("Future timestamp may have been adjusted: sent=%d, got=%d", futureTimestamp, ack.Start.Timestamp)
 	}
 	t.Logf("Appended with future timestamp: seq_num=%d, timestamp=%d", ack.Start.SeqNum, ack.Start.Timestamp)
+}
+
+func TestAppend_FutureTimestamp_Capped(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append with future timestamp (uncapped=false caps it to arrival time)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-aftc")
+	defer deleteStream(ctx, basin, streamName)
+
+	// Default uncapped=false
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
+		Stream: streamName,
+		Config: &s2.StreamConfig{
+			Timestamping: &s2.TimestampingConfig{
+				Uncapped: ptrBool(false),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	futureTimestamp := uint64(time.Now().Add(1 * time.Hour).UnixMilli())
+	arrivalTime := uint64(time.Now().UnixMilli())
+	ack, err := stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Timestamp: &futureTimestamp,
+				Body:      []byte("future timestamp capped"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	// With uncapped=false, the timestamp should be capped to approximately arrival time
+	if ack.Start.Timestamp >= futureTimestamp {
+		t.Errorf("Future timestamp should be capped: sent=%d, got=%d (should be closer to %d)", futureTimestamp, ack.Start.Timestamp, arrivalTime)
+	}
+	t.Logf("Timestamp capped: sent=%d, got=%d (arrival ~%d)", futureTimestamp, ack.Start.Timestamp, arrivalTime)
 }
 
 func TestAppend_PastTimestamp_Monotonicity(t *testing.T) {
@@ -1742,7 +1844,7 @@ func TestAppend_FencingTokenTooLong(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
 		t.Errorf("Expected 400 error for fencing token too long, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
@@ -1964,7 +2066,7 @@ func TestAppend_HeaderWithEmptyName_NonCommand(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
 		t.Errorf("Expected 400 error for empty header name with non-command value, got: %v", err)
 	}
 	t.Logf("Got expected 400 error: %v", err)
@@ -2194,6 +2296,35 @@ func TestRead_ClampFalse_BeyondTail(t *testing.T) {
 		t.Errorf("Expected 416 error, got: %v", err)
 	}
 	t.Logf("Got expected 416 error: %v", err)
+}
+
+func TestRead_MultipleStartParams(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with multiple start params (mutually exclusive)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rdmsp")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	// Try to read with both seq_num and timestamp - should be an error
+	_, err = stream.Read(ctx, &s2.ReadOptions{
+		SeqNum:    ptrU64(0),
+		Timestamp: ptrU64(0),
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 400 error for mutually exclusive start params, got: %v", err)
+	}
+	t.Logf("Got expected error: %v", err)
 }
 
 func TestFence_SetToken(t *testing.T) {
@@ -2631,7 +2762,7 @@ func TestReconfigureStream_InvalidRetentionAgeZero(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
 		t.Errorf("Expected 400 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)

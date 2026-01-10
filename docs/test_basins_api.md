@@ -112,7 +112,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Invalid start_after < prefix**
   - Parameters: `prefix=z`, `start_after=a`
-  - Expected: 400, validation error
+  - Expected: 422 (`invalid`)
 
 - **Permission denied**
   - Setup: token without `list-basins` op
@@ -346,7 +346,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Invalid retention_policy.age = 0**
   - Input: `retention_policy: {"age": 0}`
-  - Expected: 400 (`invalid_basin_config`)
+  - Expected: 422 (`invalid`)
 
 - **Invalid retention_policy.age < 0**
   - Input: `retention_policy: {"age": -1}`
@@ -695,7 +695,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Invalid retention_policy.age = 0**
   - Input: `{"default_stream_config": {"retention_policy": {"age": 0}}}`
-  - Expected: 400 (`invalid`)
+  - Expected: 422 (`invalid`)
 
 - **Concurrent update conflict**
   - Setup: race condition with another update
@@ -771,8 +771,8 @@ When running against an account on the Free tier, certain configurations will be
 - `400` `basin_scope_mismatch`
   - Attempted to change basin scope
 
-- `400` `invalid`
-  - Reconfiguration validation failed
+- `422` `invalid`
+  - Validation errors (config, arguments, etc.)
 
 - `403` `permission_denied`
   - Token lacks required permissions or account frozen
