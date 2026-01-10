@@ -32,38 +32,16 @@ func run(ctx context.Context, basinName, streamName string) error {
 	client := s2.NewFromEnvironment(nil)
 	stream := client.Basin(basinName).Stream(s2.StreamName(streamName))
 
-	type result[T any] struct {
-		val T
-		err error
+	readSession, err := stream.ReadSession(ctx, &s2.ReadOptions{TailOffset: s2.Int64(0)})
+	if err != nil {
+		return fmt.Errorf("read session: %w", err)
 	}
-
-	readCh := make(chan result[*s2.ReadSession], 1)
-	appendCh := make(chan result[*s2.AppendSession], 1)
-
-	go func() {
-		sess, err := stream.ReadSession(ctx, &s2.ReadOptions{TailOffset: s2.Int64(0)})
-		readCh <- result[*s2.ReadSession]{sess, err}
-	}()
-	go func() {
-		sess, err := stream.AppendSession(ctx, nil)
-		appendCh <- result[*s2.AppendSession]{sess, err}
-	}()
-
-	readRes, appendRes := <-readCh, <-appendCh
-
-	if readRes.err != nil {
-		if appendRes.val != nil {
-			appendRes.val.Close()
-		}
-		return fmt.Errorf("read session: %w", readRes.err)
-	}
-	readSession := readRes.val
 	defer readSession.Close()
 
-	if appendRes.err != nil {
-		return fmt.Errorf("append session: %w", appendRes.err)
+	appendSession, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("append session: %w", err)
 	}
-	appendSession := appendRes.val
 	defer appendSession.Close()
 
 	batcher := s2.NewBatcher(ctx, &s2.BatchingOptions{
