@@ -44,7 +44,7 @@ func waitForBasinActive(ctx context.Context, t *testing.T, client *s2.Client, na
 			return
 		}
 		var s2Err *s2.S2Error
-		if errors.As(err, &s2Err) && s2Err.Code == "basin_creating" {
+		if errors.As(err, &s2Err) && s2Err.Code == "unavailable" {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
@@ -58,7 +58,7 @@ func ptr[T any](v T) *T {
 
 func isFreeTierLimitation(err error) bool {
 	var s2Err *s2.S2Error
-	if errors.As(err, &s2Err) && (s2Err.Code == "invalid_basin_config" || s2Err.Code == "bad_config") {
+	if errors.As(err, &s2Err) && s2Err.Code == "invalid" {
 		msg := strings.ToLower(s2Err.Message)
 		return strings.Contains(msg, "free tier")
 	}
@@ -247,8 +247,8 @@ func TestListBasins_InvalidStartAfterLessThanPrefix(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -777,8 +777,8 @@ func TestCreateBasin_DuplicateName(t *testing.T) {
 	if !errors.As(err, &s2Err) || s2Err.Status != 409 {
 		t.Errorf("Expected 409 conflict, got: %v", err)
 	}
-	if s2Err != nil && s2Err.Code != "basin_exists" {
-		t.Errorf("Expected error code basin_exists, got: %s", s2Err.Code)
+	if s2Err != nil && s2Err.Code != "resource_already_exists" {
+		t.Errorf("Expected error code resource_already_exists, got: %s", s2Err.Code)
 	}
 	t.Logf("Got expected conflict error: %v", err)
 }
@@ -790,6 +790,7 @@ func TestCreateBasin_NameValidation(t *testing.T) {
 		expectError bool
 	}{
 		{"too_short", "short", true},
+		{"too_long", s2.BasinName(strings.Repeat("a", 49)), true},
 		{"with_uppercase", "Test-Basin-Name", true},
 		{"with_underscore", "test_basin_name", true},
 		{"starts_with_hyphen", "-test-basin", true},
@@ -838,8 +839,8 @@ func TestCreateBasin_InvalidRetentionAgeZero(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -1719,8 +1720,8 @@ func TestReconfigureBasin_InvalidRetentionAgeZero(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
