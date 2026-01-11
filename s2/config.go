@@ -40,13 +40,25 @@ func parseEndpoint(endpoint string) string {
 	}
 
 	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		endpoint = "https://" + endpoint
+		if isLocalhost(endpoint) {
+			endpoint = "http://" + endpoint
+		} else {
+			endpoint = "https://" + endpoint
+		}
 	}
 
 	endpoint = strings.TrimRight(endpoint, "/")
 	endpoint = strings.TrimSuffix(endpoint, "/v1")
 
 	return endpoint
+}
+
+func isLocalhost(endpoint string) bool {
+	host := endpoint
+	if idx := strings.Index(endpoint, ":"); idx != -1 {
+		host = endpoint[:idx]
+	}
+	return host == "localhost" || host == "127.0.0.1"
 }
 
 func makeBasinURLFunc(basinEndpoint string) func(basin string) string {
