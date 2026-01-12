@@ -24,14 +24,12 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ## Endpoints Overview
 
-| Method | Endpoint | Operation ID | Description |
-|--------|----------|--------------|-------------|
-| GET | `/basins` | `list_basins` | List basins |
-| POST | `/basins` | `create_basin` | Create a basin |
-| GET | `/basins/{basin}` | `get_basin_config` | Get basin configuration |
-| PUT | `/basins/{basin}` | `create_or_reconfigure_basin` | Create or reconfigure a basin |
-| DELETE | `/basins/{basin}` | `delete_basin` | Delete a basin |
-| PATCH | `/basins/{basin}` | `reconfigure_basin` | Reconfigure a basin |
+- `GET /basins` — `list_basins` — List basins
+- `POST /basins` — `create_basin` — Create a basin
+- `GET /basins/{basin}` — `get_basin_config` — Get basin configuration
+- `PUT /basins/{basin}` — `create_or_reconfigure_basin` — Create or reconfigure a basin
+- `DELETE /basins/{basin}` — `delete_basin` — Delete a basin
+- `PATCH /basins/{basin}` — `reconfigure_basin` — Reconfigure a basin
 
 ---
 
@@ -41,42 +39,84 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### Query Parameters
 
-| Parameter | Type | Required | Default | Constraints | Description |
-|-----------|------|----------|---------|-------------|-------------|
-| `prefix` | string | No | `""` | - | Filter to basins whose names begin with this prefix |
-| `start_after` | string | No | `""` | Must be >= `prefix` | Filter to basins whose names lexicographically start after this string |
-| `limit` | integer | No | `1000` | Clamped to 1-1000 | Number of results (0 defaults to 1000, >1000 clamped to 1000) |
+- `prefix` (string, optional, default `""`)
+  - Filter to basins whose names begin with this prefix
+
+- `start_after` (string, optional, default `""`)
+  - Filter to basins whose names lexicographically start after this string
+  - Constraint: must be >= `prefix`
+
+- `limit` (integer, optional, default `1000`)
+  - Number of results
+  - Clamped to 1-1000
+  - 0 is treated as default (1000)
+  - Values > 1000 are clamped to 1000
 
 ### Response Codes
 
-| Code | Description | Error Code | Body |
-|------|-------------|------------|------|
-| 200 | Success | - | `ListBasinsResponse` |
-| 400 | Bad request | `invalid_argument` | `ErrorInfo` |
-| 403 | Forbidden | `permission_denied` | `ErrorInfo` |
-| 408 | Timeout | `deadline_exceeded` | `ErrorInfo` |
+- `200` — Success
+  - Body: `ListBasinsResponse`
 
-### Response Schema: `ListBasinsResponse`
+- `400` — Bad request
+  - Code: `invalid`
+  - Cause: invalid parameter format/value
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `basins` | `BasinInfo[]` | Matching basins (max 1000) |
-| `has_more` | boolean | Indicates more basins match criteria |
+- `403` — Forbidden
+  - Code: `permission_denied`
+  - Cause: token lacks `list-basins` permission
+
+- `408` — Timeout
+  - Code: `timeout`
+
+### Response Schema: ListBasinsResponse
+
+- `basins` (array of `BasinInfo`)
+  - Matching basins (max 1000)
+
+- `has_more` (boolean)
+  - Indicates more basins match criteria
 
 ### Test Cases
 
-| Test | Parameters | Expected |
-|------|------------|----------|
-| List all basins | none | 200, up to 1000 basins returned |
-| List with prefix | `prefix=test-` | 200, only matching basins |
-| List with start_after | `start_after=my-basin` | 200, basins after "my-basin" |
-| List with limit | `limit=5` | 200, max 5 basins, check `has_more` |
-| Pagination | `start_after` + `limit` | 200, correct pagination |
-| Empty prefix | `prefix=""` | 200, all basins |
-| Limit = 0 | `limit=0` | 200, up to 1000 basins (0 treated as default) |
-| Limit > 1000 | `limit=1001` | 200, up to 1000 basins (clamped to max) |
-| Invalid start_after < prefix | `prefix=z`, `start_after=a` | 400, validation error |
-| Permission denied | token without `list-basins` op | 403 (`permission_denied`) |
+- **List all basins**
+  - Parameters: none
+  - Expected: 200, up to 1000 basins returned
+
+- **List with prefix**
+  - Parameters: `prefix=test-`
+  - Expected: 200, only basins with names starting with "test-"
+
+- **List with start_after**
+  - Parameters: `start_after=my-basin`
+  - Expected: 200, basins lexicographically after "my-basin"
+
+- **List with limit**
+  - Parameters: `limit=5`
+  - Expected: 200, max 5 basins, check `has_more`
+
+- **Pagination**
+  - Parameters: `start_after` + `limit`
+  - Expected: 200, correct pagination behavior
+
+- **Empty prefix**
+  - Parameters: `prefix=""`
+  - Expected: 200, all basins
+
+- **Limit = 0**
+  - Parameters: `limit=0`
+  - Expected: 200, up to 1000 basins (0 treated as default)
+
+- **Limit > 1000**
+  - Parameters: `limit=1001`
+  - Expected: 200, up to 1000 basins (clamped to max)
+
+- **Invalid start_after < prefix**
+  - Parameters: `prefix=z`, `start_after=a`
+  - Expected: 422 (`invalid`)
+
+- **Permission denied**
+  - Setup: token without `list-basins` op
+  - Expected: 403 (`permission_denied`)
 
 ---
 
@@ -86,145 +126,231 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### Headers
 
-| Header | Type | Required | Description |
-|--------|------|----------|-------------|
-| `s2-request-token` | string | No | Client-specified idempotency token |
+- `s2-request-token` (string, optional)
+  - Client-specified idempotency token
+  - Max 36 bytes
 
-### Request Body: `CreateBasinRequest`
+### Request Body: CreateBasinRequest
 
-| Field | Type | Required | Constraints | Description |
-|-------|------|----------|-------------|-------------|
-| `basin` | string | **Yes** | 8-48 chars, lowercase + numbers + hyphens, no leading/trailing hyphen | Basin name (globally unique) |
-| `scope` | `BasinScope` | No | enum | Basin scope |
-| `config` | `BasinConfig` | No | - | Basin configuration |
+- `basin` (string, required)
+  - Basin name (globally unique)
+  - Constraints:
+    - 8-48 characters
+    - Lowercase letters, numbers, and hyphens only
+    - Must start with lowercase letter or digit
+    - Must end with lowercase letter or digit
+    - No leading/trailing hyphen
 
-### BasinScope Enum
+- `scope` (BasinScope, optional)
+  - Basin scope (immutable after creation)
+  - Values: `aws:us-east-1`
 
-| Value | Description |
-|-------|-------------|
-| `aws:us-east-1` | AWS US East 1 region |
+- `config` (BasinConfig, optional)
+  - Basin configuration
 
 ### BasinConfig Object
 
 > **Note:** Boolean fields are always present in responses. `default_stream_config` is omitted when all nested fields are defaults.
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `create_stream_on_append` | boolean | No | `false` (always present) | Auto-create stream on append |
-| `create_stream_on_read` | boolean | No | `false` (always present) | Auto-create stream on read |
-| `default_stream_config` | `StreamConfig` | No | omitted when all defaults | Default config for auto-created streams |
+- `create_stream_on_append` (boolean, default `false`, always present)
+  - Auto-create stream on append
+
+- `create_stream_on_read` (boolean, default `false`, always present)
+  - Auto-create stream on read
+
+- `default_stream_config` (StreamConfig, optional, omitted when all defaults)
+  - Default config for auto-created streams
 
 ### StreamConfig Object (nested in BasinConfig.default_stream_config)
 
 > **Note:** Fields with default values are **omitted** from API responses. If all StreamConfig fields are defaults, the entire `default_stream_config` is omitted.
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `storage_class` | `StorageClass` | No | `express` (omitted) | Storage class for recent writes |
-| `retention_policy` | `RetentionPolicy` | No | `{"age": 604800}` (7 days, omitted) | Retention policy |
-| `timestamping` | `TimestampingConfig` | No | (see below, omitted) | Timestamping behavior |
-| `delete_on_empty` | `DeleteOnEmptyConfig` | No | disabled (omitted) | Auto-delete empty streams |
+- `storage_class` (StorageClass, default `express`, omitted)
+  - Storage class for recent writes
+  - Values: `standard`, `express`
 
-### StorageClass Enum
+- `retention_policy` (RetentionPolicy, default 7 days, omitted)
+  - Retention policy
+  - Variants:
+    - `{"age": <seconds>}` — Age-based (must be > 0)
+    - `{"infinite": {}}` — Retain unless explicitly trimmed
 
-| Value | Description |
-|-------|-------------|
-| `standard` | Standard storage |
-| `express` | Express storage |
+- `timestamping` (TimestampingConfig, omitted when defaults)
+  - Timestamping behavior
 
-### RetentionPolicy (oneOf)
-
-| Variant | Field | Type | Description |
-|---------|-------|------|-------------|
-| Age-based | `age` | integer (seconds) | Auto-trim records older than this (must be > 0) |
-| Infinite | `infinite` | object `{}` | Retain unless explicitly trimmed |
+- `delete_on_empty` (DeleteOnEmptyConfig, omitted when disabled)
+  - Auto-delete empty streams
 
 ### TimestampingConfig Object
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `mode` | `TimestampingMode` | `client-prefer` | How timestamps are handled |
-| `uncapped` | boolean | `false` | Allow client timestamps to exceed arrival time |
+- `mode` (TimestampingMode, default `client-prefer`)
+  - Values:
+    - `client-prefer` — Prefer client timestamp if provided
+    - `client-require` — Require client timestamp
+    - `arrival` — Use arrival time
 
-### TimestampingMode Enum
-
-| Value | Description |
-|-------|-------------|
-| `client-prefer` | Prefer client timestamp if provided |
-| `client-require` | Require client timestamp |
-| `arrival` | Use arrival time |
+- `uncapped` (boolean, default `false`)
+  - Allow client timestamps to exceed arrival time
 
 ### DeleteOnEmptyConfig Object
 
 > **Note:** When `min_age_secs` is 0 (disabled), the entire `delete_on_empty` field is **omitted** from API responses.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `min_age_secs` | integer | 0 (omitted) | Min age in seconds before empty stream deleted (0 = disabled, field omitted) |
+- `min_age_secs` (integer, default 0, omitted when 0)
+  - Min age in seconds before empty stream deleted
+  - 0 = disabled
 
 ### Response Codes
 
-| Code | Description | Error Code | Body |
-|------|-------------|------------|------|
-| 200 | Basin already exists (idempotent) | - | `BasinInfo` |
-| 201 | Basin created | - | `BasinInfo` |
-| 400 | Bad request / invalid config | `invalid_argument`, `invalid_basin_config`, `basin_scope_mismatch` | `ErrorInfo` |
-| 403 | Forbidden / limit exhausted | `permission_denied`, `basins_limit` | `ErrorInfo` |
-| 408 | Timeout | `deadline_exceeded` | `ErrorInfo` |
-| 409 | Conflict (name taken) | `basin_exists` | `ErrorInfo` |
-| 429 | Retryable conflict | `too_many_basin_creations` | `ErrorInfo` |
+- `200` — Basin already exists (idempotent with same token)
+  - Body: `BasinInfo`
 
-### Response Schema: `BasinInfo`
+- `201` — Basin created
+  - Body: `BasinInfo`
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Basin name |
-| `scope` | `BasinScope` | Basin scope |
-| `state` | `BasinState` | Basin state |
+- `400` — Bad request / invalid config
+  - Code: `invalid`
 
-### BasinState Enum
+- `403` — Forbidden / limit exhausted
+  - Codes: `permission_denied`, `quota_exhausted`
 
-| Value | Description |
-|-------|-------------|
-| `active` | Basin is active |
-| `creating` | Basin is being created |
-| `deleting` | Basin is being deleted |
+- `408` — Timeout
+  - Code: `timeout`
+
+- `409` — Conflict (name taken)
+  - Code: `resource_already_exists`
+
+- `429` — Retryable conflict
+  - Code: `rate_limited`
+
+### Response Schema: BasinInfo
+
+- `name` (string) — Basin name
+- `scope` (BasinScope) — Basin scope
+- `state` (BasinState) — Basin state
+  - Values: `active`, `creating`, `deleting`
 
 ### Test Cases
 
-| Test | Input | Expected |
-|------|-------|----------|
-| Create minimal basin | `{"basin": "test-basin-01"}` | 201 |
-| Create with scope | `{"basin": "...", "scope": "aws:us-east-1"}` | 201 |
-| Create with full config | All config fields | 201 |
-| **create_stream_on_append = true** | config with flag | 201, verify auto-create on append |
-| **create_stream_on_read = true** | config with flag | 201, verify auto-create on read |
-| **create_stream_on_append = false** | config with flag | 201, verify no auto-create |
-| **create_stream_on_read = false** | config with flag | 201, verify no auto-create |
-| **default_stream_config.storage_class = standard** | nested config | 201, verify streams use standard |
-| **default_stream_config.storage_class = express** | nested config | 201, verify streams use express |
-| **default_stream_config.retention_policy.age** | `{"age": 86400}` | 201, verify 1-day retention |
-| **default_stream_config.retention_policy.infinite** | `{"infinite": {}}` | 201, verify infinite retention |
-| **default_stream_config.timestamping.mode = client-prefer** | nested | 201 |
-| **default_stream_config.timestamping.mode = client-require** | nested | 201 |
-| **default_stream_config.timestamping.mode = arrival** | nested | 201 |
-| **default_stream_config.timestamping.uncapped = true** | nested | 201 |
-| **default_stream_config.timestamping.uncapped = false** | nested | 201 |
-| **default_stream_config.delete_on_empty.min_age_secs** | `{"min_age_secs": 3600}` | 201 |
-| Idempotent create (same token) | Same request + same `s2-request-token` | 200 |
-| Idempotent create (different token) | Same basin name + different `s2-request-token` | 409 (`basin_exists`) |
-| Name too short | `{"basin": "short"}` (< 8 chars) | 400 |
-| Name too long | `{"basin": "a" * 49}` (> 48 chars) | 400 |
-| Name with uppercase | `{"basin": "Test-Basin"}` | 400 |
-| Name with underscore | `{"basin": "test_basin"}` | 400 |
-| Name starts with hyphen | `{"basin": "-test-basin"}` | 400 |
-| Name ends with hyphen | `{"basin": "test-basin-"}` | 400 |
-| Duplicate name | Create same basin twice (no token) | 409 (`basin_exists`) |
-| Basin limit exhausted | Create beyond account limit | 403 (`basins_limit`) |
-| Retryable conflict | Concurrent creation race | 429 (`too_many_basin_creations`) |
-| Account frozen | Frozen account | 403 (`permission_denied`) |
-| Invalid retention_policy.age = 0 | `retention_policy: {"age": 0}` | 400 (`invalid_basin_config`) |
-| Invalid retention_policy.age < 0 | `retention_policy: {"age": -1}` | 400 (`invalid_argument`, JSON parse error) |
+- **Create minimal basin**
+  - Input: `{"basin": "test-basin-01"}`
+  - Expected: 201
+
+- **Create with scope**
+  - Input: `{"basin": "...", "scope": "aws:us-east-1"}`
+  - Expected: 201
+
+- **Create with full config**
+  - Input: all config fields
+  - Expected: 201
+
+- **create_stream_on_append = true**
+  - Input: config with flag
+  - Expected: 201, verify auto-create on append
+
+- **create_stream_on_read = true**
+  - Input: config with flag
+  - Expected: 201, verify auto-create on read
+
+- **create_stream_on_append = false**
+  - Input: config with flag
+  - Expected: 201, verify no auto-create
+
+- **create_stream_on_read = false**
+  - Input: config with flag
+  - Expected: 201, verify no auto-create
+
+- **default_stream_config.storage_class = standard**
+  - Input: nested config
+  - Expected: 201, verify streams use standard
+
+- **default_stream_config.storage_class = express**
+  - Input: nested config
+  - Expected: 201, verify streams use express
+
+- **default_stream_config.retention_policy.age**
+  - Input: `{"age": 86400}`
+  - Expected: 201, verify 1-day retention
+
+- **default_stream_config.retention_policy.infinite**
+  - Input: `{"infinite": {}}`
+  - Expected: 201, verify infinite retention
+
+- **default_stream_config.timestamping.mode = client-prefer**
+  - Input: nested config
+  - Expected: 201
+
+- **default_stream_config.timestamping.mode = client-require**
+  - Input: nested config
+  - Expected: 201
+
+- **default_stream_config.timestamping.mode = arrival**
+  - Input: nested config
+  - Expected: 201
+
+- **default_stream_config.timestamping.uncapped = true**
+  - Input: nested config
+  - Expected: 201
+
+- **default_stream_config.timestamping.uncapped = false**
+  - Input: nested config
+  - Expected: 201
+
+- **default_stream_config.delete_on_empty.min_age_secs**
+  - Input: `{"min_age_secs": 3600}`
+  - Expected: 201
+
+- **Idempotent create (same token)**
+  - Input: same request + same `s2-request-token`
+  - Expected: 200
+
+- **Idempotent create (different token)**
+  - Input: same basin name + different `s2-request-token`
+  - Expected: 409 (`resource_already_exists`)
+
+- **Name too short**
+  - Input: `{"basin": "short"}` (< 8 chars)
+  - Expected: 400
+
+- **Name too long**
+  - Input: `{"basin": "a" * 49}` (> 48 chars)
+  - Expected: 400
+
+- **Name with uppercase**
+  - Input: `{"basin": "Test-Basin"}`
+  - Expected: 400
+
+- **Name with underscore**
+  - Input: `{"basin": "test_basin"}`
+  - Expected: 400
+
+- **Name starts with hyphen**
+  - Input: `{"basin": "-test-basin"}`
+  - Expected: 400
+
+- **Name ends with hyphen**
+  - Input: `{"basin": "test-basin-"}`
+  - Expected: 400
+
+- **Duplicate name**
+  - Input: create same basin twice (no token)
+  - Expected: 409 (`resource_already_exists`)
+
+- **Basin limit exhausted**
+  - Setup: create beyond account limit
+  - Expected: 403 (`quota_exhausted`)
+
+- **Account frozen**
+  - Setup: frozen account
+  - Expected: 403 (`permission_denied`)
+
+- **Invalid retention_policy.age = 0**
+  - Input: `retention_policy: {"age": 0}`
+  - Expected: 422 (`invalid`)
+
+- **Invalid retention_policy.age < 0**
+  - Input: `retention_policy: {"age": -1}`
+  - Expected: 400 (`invalid`, JSON parse error)
 
 ---
 
@@ -234,31 +360,54 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### Path Parameters
 
-| Parameter | Type | Required | Constraints | Description |
-|-----------|------|----------|-------------|-------------|
-| `basin` | string | **Yes** | 8-48 chars | Basin name |
+- `basin` (string, required)
+  - Basin name
+  - Constraints: 8-48 chars
 
 ### Response Codes
 
-| Code | Description | Error Code | Body |
-|------|-------------|------------|------|
-| 200 | Success | - | `BasinConfig` |
-| 400 | Bad request | `invalid_argument` | `ErrorInfo` |
-| 403 | Forbidden | `permission_denied` | `ErrorInfo` |
-| 404 | Basin not found | `basin_not_found` | `ErrorInfo` |
-| 408 | Timeout | `deadline_exceeded` | `ErrorInfo` |
-| 503 | Basin still creating | `basin_creating` | `ErrorInfo` |
+- `200` — Success
+  - Body: `BasinConfig`
+
+- `400` — Bad request
+  - Code: `invalid`
+
+- `403` — Forbidden
+  - Code: `permission_denied`
+
+- `404` — Basin not found
+  - Code: `basin_not_found`
+
+- `408` — Timeout
+  - Code: `timeout`
+
+- `503` — Basin still creating
+  - Code: `unavailable`
 
 ### Test Cases
 
-| Test | Input | Expected |
-|------|-------|----------|
-| Get existing basin config | valid basin name | 200, full config |
-| Get non-existent basin | name that doesn't exist | 404 (`basin_not_found`) |
-| Get deleted basin | deleted basin name | 404 (`basin_not_found`) |
-| Get creating basin | basin in creating state | 503 (`basin_creating`) |
-| Verify all config fields returned | - | All nested fields present |
-| Permission denied | token without `get-basin-config` op | 403 (`permission_denied`) |
+- **Get existing basin config**
+  - Input: valid basin name
+  - Expected: 200, full config
+
+- **Get non-existent basin**
+  - Input: name that doesn't exist
+  - Expected: 404 (`basin_not_found`)
+
+- **Get deleted basin**
+  - Input: deleted basin name
+  - Expected: 404 (`basin_not_found`)
+
+- **Get creating basin**
+  - Input: basin in creating state
+  - Expected: 503 (`unavailable`)
+
+- **Verify all config fields returned**
+  - Expected: all nested fields present with non-default values
+
+- **Permission denied**
+  - Setup: token without `get-basin-config` op
+  - Expected: 403 (`permission_denied`)
 
 ---
 
@@ -268,42 +417,77 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### Path Parameters
 
-| Parameter | Type | Required | Constraints | Description |
-|-----------|------|----------|-------------|-------------|
-| `basin` | string | **Yes** | 8-48 chars | Basin name |
+- `basin` (string, required)
+  - Basin name
+  - Constraints: 8-48 chars
 
-### Request Body: `CreateOrReconfigureBasinRequest` (optional, can be null)
+### Request Body: CreateOrReconfigureBasinRequest (optional, can be null)
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `scope` | `BasinScope` | No | Basin scope (cannot be reconfigured) |
-| `config` | `BasinConfig` | No | Basin configuration |
+- `scope` (BasinScope, optional)
+  - Basin scope
+  - Cannot be changed on reconfiguration
+
+- `config` (BasinConfig, optional)
+  - Basin configuration
 
 ### Response Codes
 
-| Code | Description | Error Code | Body |
-|------|-------------|------------|------|
-| 200 | Basin reconfigured | - | `BasinInfo` |
-| 201 | Basin created | - | `BasinInfo` |
-| 204 | No changes (null body) | - | - |
-| 400 | Bad request / scope mismatch | `invalid_argument`, `basin_scope_mismatch`, `invalid_basin_config` | `ErrorInfo` |
-| 403 | Forbidden / limit exhausted | `permission_denied`, `basins_limit` | `ErrorInfo` |
-| 408 | Timeout | `deadline_exceeded` | `ErrorInfo` |
-| 409 | Basin deleted during reconfigure | `basin_deleted` | `ErrorInfo` |
-| 429 | Retryable conflict | `too_many_basin_creations` | `ErrorInfo` |
+- `200` — Basin reconfigured
+  - Body: `BasinInfo`
+
+- `201` — Basin created
+  - Body: `BasinInfo`
+
+- `204` — No changes (null body on existing basin)
+
+- `400` — Bad request / scope mismatch
+  - Code: `invalid`
+
+- `403` — Forbidden / limit exhausted
+  - Codes: `permission_denied`, `quota_exhausted`
+
+- `408` — Timeout
+  - Code: `timeout`
+
+- `409` — Basin deleted during reconfigure
+  - Code: `basin_deletion_pending`
+
+- `429` — Retryable conflict
+  - Code: `rate_limited`
 
 ### Test Cases
 
-| Test | Input | Expected |
-|------|-------|----------|
-| Create new basin via PUT | new name + config | 201 |
-| Reconfigure existing basin | existing name + new config | 200 |
-| PUT with null body (no-op) | existing basin, null body | 204 |
-| PUT with empty object | existing basin, `{}` | 200 (reconfigured with defaults) |
-| Attempt to change scope | different scope | 400 (`basin_scope_mismatch`) |
-| Create with defaults | new name, null body | 201 |
-| Basin deleted during reconfigure | race condition | 409 (`basin_deleted`) |
-| Account frozen | frozen account | 403 (`permission_denied`) |
+- **Create new basin via PUT**
+  - Input: new name + config
+  - Expected: 201
+
+- **Reconfigure existing basin**
+  - Input: existing name + new config
+  - Expected: 200
+
+- **PUT with null body (no-op)**
+  - Input: existing basin, null body
+  - Expected: 204
+
+- **PUT with empty object**
+  - Input: existing basin, `{}`
+  - Expected: 200 (reconfigured with defaults)
+
+- **Attempt to change scope**
+  - Input: different scope
+  - Expected: 400 (`invalid`)
+
+- **Create with defaults**
+  - Input: new name, null body
+  - Expected: 201
+
+- **Basin deleted during reconfigure**
+  - Setup: race condition
+  - Expected: 409 (`basin_deletion_pending`)
+
+- **Account frozen**
+  - Setup: frozen account
+  - Expected: 403 (`permission_denied`)
 
 ---
 
@@ -313,33 +497,61 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### Path Parameters
 
-| Parameter | Type | Required | Constraints | Description |
-|-----------|------|----------|-------------|-------------|
-| `basin` | string | **Yes** | 8-48 chars | Basin name |
+- `basin` (string, required)
+  - Basin name
+  - Constraints: 8-48 chars
 
 ### Response Codes
 
-| Code | Description | Error Code | Body |
-|------|-------------|------------|------|
-| 202 | Deletion accepted | - | - |
-| 400 | Bad request | `invalid_argument` | `ErrorInfo` |
-| 403 | Forbidden | `permission_denied` | `ErrorInfo` |
-| 404 | Basin not found | `basin_not_found` | `ErrorInfo` |
-| 408 | Timeout | `deadline_exceeded` | `ErrorInfo` |
-| 503 | Basin still creating | `basin_creating` | `ErrorInfo` |
+- `202` — Deletion accepted (async operation)
+
+- `400` — Bad request
+  - Code: `invalid`
+
+- `403` — Forbidden
+  - Code: `permission_denied`
+
+- `404` — Basin not found
+  - Code: `basin_not_found`
+
+- `408` — Timeout
+  - Code: `timeout`
+
+- `503` — Basin still creating
+  - Code: `unavailable`
 
 ### Test Cases
 
-| Test | Input | Expected |
-|------|-------|----------|
-| Delete existing basin | valid basin name | 202 |
-| Delete non-existent basin | name that doesn't exist | 404 (`basin_not_found`) |
-| Delete already deleting basin | basin in deleting state | 202 (idempotent) |
-| Delete basin with streams | basin containing streams | 202 |
-| Delete creating basin | basin in creating state | 503 (`basin_creating`) |
-| Verify basin state after delete | - | state = "deleting" |
-| Account frozen | frozen account | 403 (`permission_denied`) |
-| Permission denied | token without `delete-basin` op | 403 (`permission_denied`) |
+- **Delete existing basin**
+  - Input: valid basin name
+  - Expected: 202
+
+- **Delete non-existent basin**
+  - Input: name that doesn't exist
+  - Expected: 404 (`basin_not_found`)
+
+- **Delete already deleting basin**
+  - Input: basin in deleting state
+  - Expected: 202 (idempotent)
+
+- **Delete basin with streams**
+  - Input: basin containing streams
+  - Expected: 202
+
+- **Delete creating basin**
+  - Input: basin in creating state
+  - Expected: 503 (`unavailable`)
+
+- **Verify basin state after delete**
+  - Expected: state = "deleting"
+
+- **Account frozen**
+  - Setup: frozen account
+  - Expected: 403 (`permission_denied`)
+
+- **Permission denied**
+  - Setup: token without `delete-basin` op
+  - Expected: 403 (`permission_denied`)
 
 ---
 
@@ -349,73 +561,153 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### Path Parameters
 
-| Parameter | Type | Required | Constraints | Description |
-|-----------|------|----------|-------------|-------------|
-| `basin` | string | **Yes** | 8-48 chars | Basin name |
+- `basin` (string, required)
+  - Basin name
+  - Constraints: 8-48 chars
 
-### Request Body: `BasinReconfiguration`
+### Request Body: BasinReconfiguration
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `create_stream_on_append` | boolean \| null | No | Set auto-create on append (null = no change) |
-| `create_stream_on_read` | boolean \| null | No | Set auto-create on read (null = no change) |
-| `default_stream_config` | `StreamReconfiguration` | No | Reconfigure default stream config |
+> **Note:** Fields use partial update semantics — `null` means no change, absent means no change, explicit value means update.
+
+- `create_stream_on_append` (boolean | null, optional)
+  - Set auto-create on append
+  - null = no change
+
+- `create_stream_on_read` (boolean | null, optional)
+  - Set auto-create on read
+  - null = no change
+
+- `default_stream_config` (StreamReconfiguration, optional)
+  - Reconfigure default stream config
 
 ### StreamReconfiguration Object
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `storage_class` | `StorageClass` \| null | Change storage class |
-| `retention_policy` | `RetentionPolicy` \| null | Change retention policy |
-| `timestamping` | `TimestampingReconfiguration` \| null | Change timestamping |
-| `delete_on_empty` | `DeleteOnEmptyReconfiguration` \| null | Change delete-on-empty |
+- `storage_class` (StorageClass | null)
+  - Change storage class
+
+- `retention_policy` (RetentionPolicy | null)
+  - Change retention policy
+
+- `timestamping` (TimestampingReconfiguration | null)
+  - Change timestamping config
+
+- `delete_on_empty` (DeleteOnEmptyReconfiguration | null)
+  - Change delete-on-empty config
 
 ### TimestampingReconfiguration Object
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `mode` | `TimestampingMode` \| null | Change timestamping mode |
-| `uncapped` | boolean \| null | Change uncapped setting |
+- `mode` (TimestampingMode | null)
+  - Change timestamping mode
+
+- `uncapped` (boolean | null)
+  - Change uncapped setting
 
 ### DeleteOnEmptyReconfiguration Object
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `min_age_secs` | integer \| null | Change min age (0 = disable) |
+- `min_age_secs` (integer | null)
+  - Change min age (0 = disable)
 
 ### Response Codes
 
-| Code | Description | Error Code | Body |
-|------|-------------|------------|------|
-| 200 | Success | - | `BasinConfig` (updated) |
-| 400 | Bad request / invalid config | `invalid_argument`, `bad_config` | `ErrorInfo` |
-| 403 | Forbidden | `permission_denied` | `ErrorInfo` |
-| 404 | Basin not found | `basin_not_found` | `ErrorInfo` |
-| 408 | Timeout | `deadline_exceeded` | `ErrorInfo` |
+- `200` — Success
+  - Body: `BasinConfig` (updated)
+
+- `400` — Bad request / invalid config
+  - Code: `invalid`
+
+- `403` — Forbidden
+  - Code: `permission_denied`
+
+- `404` — Basin not found
+  - Code: `basin_not_found`
+
+- `408` — Timeout
+  - Code: `timeout`
+
+- `409` — Concurrent update
+  - Code: `transaction_conflict`
 
 ### Test Cases
 
-| Test | Input | Expected |
-|------|-------|----------|
-| Enable create_stream_on_append | `{"create_stream_on_append": true}` | 200, config updated |
-| Disable create_stream_on_append | `{"create_stream_on_append": false}` | 200, config updated |
-| Enable create_stream_on_read | `{"create_stream_on_read": true}` | 200, config updated |
-| Disable create_stream_on_read | `{"create_stream_on_read": false}` | 200, config updated |
-| Null field (no change) | `{"create_stream_on_append": null}` | 200, field unchanged |
-| Change storage_class to express | nested config | 200 |
-| Change storage_class to standard | nested config | 200 |
-| Change retention to age-based | `{"default_stream_config": {"retention_policy": {"age": 3600}}}` | 200 |
-| Change retention to infinite | `{"default_stream_config": {"retention_policy": {"infinite": {}}}}` | 200 |
-| Change timestamping mode | all 3 modes | 200 |
-| Change timestamping.uncapped | true/false | 200 |
-| Change delete_on_empty.min_age_secs | various values | 200 |
-| Disable delete_on_empty | `{"default_stream_config": {"delete_on_empty": {"min_age_secs": 0}}}` | 200 |
-| Reconfigure non-existent basin | name that doesn't exist | 404 (`basin_not_found`) |
-| Empty reconfiguration | `{}` | 200, no changes |
-| Partial reconfiguration | only some fields | 200, only specified fields changed |
-| Invalid retention_policy.age = 0 | `{"default_stream_config": {"retention_policy": {"age": 0}}}` | 400 (`bad_config`) |
-| Account frozen | frozen account | 403 (`permission_denied`) |
-| Permission denied | token without `reconfigure-basin` op | 403 (`permission_denied`) |
+- **Enable create_stream_on_append**
+  - Input: `{"create_stream_on_append": true}`
+  - Expected: 200, config updated
+
+- **Disable create_stream_on_append**
+  - Input: `{"create_stream_on_append": false}`
+  - Expected: 200, config updated
+
+- **Enable create_stream_on_read**
+  - Input: `{"create_stream_on_read": true}`
+  - Expected: 200, config updated
+
+- **Disable create_stream_on_read**
+  - Input: `{"create_stream_on_read": false}`
+  - Expected: 200, config updated
+
+- **Null field (no change)**
+  - Input: `{"create_stream_on_append": null}`
+  - Expected: 200, field unchanged
+
+- **Change storage_class to express**
+  - Input: nested config
+  - Expected: 200
+
+- **Change storage_class to standard**
+  - Input: nested config
+  - Expected: 200
+
+- **Change retention to age-based**
+  - Input: `{"default_stream_config": {"retention_policy": {"age": 3600}}}`
+  - Expected: 200
+
+- **Change retention to infinite**
+  - Input: `{"default_stream_config": {"retention_policy": {"infinite": {}}}}`
+  - Expected: 200
+
+- **Change timestamping mode**
+  - Input: all 3 modes
+  - Expected: 200
+
+- **Change timestamping.uncapped**
+  - Input: true/false
+  - Expected: 200
+
+- **Change delete_on_empty.min_age_secs**
+  - Input: various values
+  - Expected: 200
+
+- **Disable delete_on_empty**
+  - Input: `{"default_stream_config": {"delete_on_empty": {"min_age_secs": 0}}}`
+  - Expected: 200
+
+- **Reconfigure non-existent basin**
+  - Input: name that doesn't exist
+  - Expected: 404 (`basin_not_found`)
+
+- **Empty reconfiguration**
+  - Input: `{}`
+  - Expected: 200, no changes
+
+- **Partial reconfiguration**
+  - Input: only some fields
+  - Expected: 200, only specified fields changed
+
+- **Invalid retention_policy.age = 0**
+  - Input: `{"default_stream_config": {"retention_policy": {"age": 0}}}`
+  - Expected: 422 (`invalid`)
+
+- **Concurrent update conflict**
+  - Setup: race condition with another update
+  - Expected: 409 (`transaction_conflict`)
+
+- **Account frozen**
+  - Setup: frozen account
+  - Expected: 403 (`permission_denied`)
+
+- **Permission denied**
+  - Setup: token without `reconfigure-basin` op
+  - Expected: 403 (`permission_denied`)
 
 ---
 
@@ -423,54 +715,88 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### BasinConfig Fields
 
-| Field Path | Type | Values to Test |
-|------------|------|----------------|
-| `create_stream_on_append` | boolean | `true`, `false` |
-| `create_stream_on_read` | boolean | `true`, `false` |
-| `default_stream_config` | object/null | present, absent |
+- `create_stream_on_append` (boolean)
+  - Values to test: `true`, `false`
+
+- `create_stream_on_read` (boolean)
+  - Values to test: `true`, `false`
+
+- `default_stream_config` (object/null)
+  - Values to test: present, absent
 
 ### StreamConfig Fields (under default_stream_config)
 
-> **Response serialization:** Fields with default values are omitted from responses. `null` in the table below means "omitted in response when default".
+> **Response serialization:** Fields with default values are omitted from responses.
 
-| Field Path | Type | Default | Values to Test |
-|------------|------|---------|----------------|
-| `storage_class` | enum | `express` | `standard`, `express` (default, omitted) |
-| `retention_policy` | oneOf | 7 days | `{"age": N}`, `{"infinite": {}}` (default omitted) |
-| `retention_policy.age` | integer | 604800 | 1, 86400, 604800 (default), max value |
-| `timestamping.mode` | enum | `client-prefer` | `client-prefer` (default), `client-require`, `arrival` |
-| `timestamping.uncapped` | boolean | `false` | `true`, `false` (default) |
-| `delete_on_empty.min_age_secs` | integer | 0 (omitted) | 0 (disabled, omitted), 60, 3600, max value |
+- `storage_class` (enum, default `express`)
+  - Values to test: `standard`, `express`
+
+- `retention_policy` (oneOf, default 7 days)
+  - Values to test: `{"age": 1}`, `{"age": 86400}`, `{"age": 604800}`, `{"infinite": {}}`
+
+- `timestamping.mode` (enum, default `client-prefer`)
+  - Values to test: `client-prefer`, `client-require`, `arrival`
+
+- `timestamping.uncapped` (boolean, default `false`)
+  - Values to test: `true`, `false`
+
+- `delete_on_empty.min_age_secs` (integer, default 0/omitted)
+  - Values to test: 0 (disabled), 60, 3600
 
 ---
 
 ## Free Tier Limitations
 
-When running against an account on the Free tier, certain configurations will be rejected with `invalid_basin_config`. Tests should accept these failures as valid outcomes:
+When running against an account on the Free tier, certain configurations will be rejected with `invalid`. Tests should accept these failures as valid outcomes:
 
-| Limitation | Example Message |
-|------------|-----------------|
-| Retention > 28 days | "Retention is currently limited to 28 days for free tier" |
-| Infinite retention | "Retention is currently limited to 28 days for free tier" |
-| Express storage class | "Express storage class is not available on free tier" |
+- Retention > 28 days
+  - Example: "Retention is currently limited to 28 days for free tier"
+
+- Infinite retention
+  - Example: "Retention is currently limited to 28 days for free tier"
+
+- Express storage class
+  - Example: "Express storage class is not available on free tier"
 
 ---
 
 ## Error Codes Reference
 
-| HTTP Code | Error Code | Scenario |
-|-----------|------------|----------|
-| 400 | `invalid_argument` | Invalid parameter format/value |
-| 400 | `invalid_basin_config` | Basin config validation failed (including tier limits) |
-| 400 | `basin_scope_mismatch` | Attempted to change basin scope |
-| 400 | `bad_config` | Reconfiguration validation failed |
-| 403 | `permission_denied` | Token lacks required permissions or account frozen |
-| 403 | `basins_limit` | Account basin limit reached |
-| 404 | `basin_not_found` | Basin does not exist |
-| 408 | `deadline_exceeded` | Request timeout |
-| 409 | `basin_exists` | Basin name already taken |
-| 409 | `basin_deleted` | Basin deleted during PUT reconfigure |
-| 429 | `too_many_basin_creations` | Concurrent creation conflict, retry |
-| 503 | `basin_creating` | Basin still in creating state |
-| 500 | `internal` | Internal server error |
+- `400` `bad_json`
+  - Malformed JSON in request body
 
+- `400` `bad_query`
+  - Invalid query parameters
+
+- `422` `invalid`
+  - Validation errors (config, arguments, scope mismatch, tier limits)
+
+- `403` `permission_denied`
+  - Token lacks required permissions or account frozen
+
+- `403` `quota_exhausted`
+  - Account basin limit reached
+
+- `404` `basin_not_found`
+  - Basin does not exist
+
+- `408` `timeout`
+  - Request timeout
+
+- `409` `resource_already_exists`
+  - Basin name already taken
+
+- `409` `basin_deletion_pending`
+  - Basin deleted during PUT reconfigure
+
+- `409` `transaction_conflict`
+  - Concurrent update conflict
+
+- `429` `rate_limited`
+  - Concurrent creation conflict, retry
+
+- `503` `unavailable`
+  - Basin still in creating state or service unavailable
+
+- `500` `other`
+  - Internal server error
