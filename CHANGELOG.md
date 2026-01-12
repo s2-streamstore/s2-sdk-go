@@ -2,12 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.5] - 2026-01-12
+
+### Bug Fixes
+
+- Default scheme for localhost to be http ([#132](https://github.com/s2-streamstore/s2-sdk-go/issues/132))
+- Producer doesn't pipeline ([#133](https://github.com/s2-streamstore/s2-sdk-go/issues/133))
+
+### Miscellaneous Tasks
+
+- Update integration tests ([#131](https://github.com/s2-streamstore/s2-sdk-go/issues/131))
+- Improve starwars example ([#130](https://github.com/s2-streamstore/s2-sdk-go/issues/130))
+
 ## [v0.11.4] - 2026-01-09
 
 ### Features
 
 - Llm generated tests + encoding bugfix [P1] ([#126](https://github.com/s2-streamstore/s2-sdk-go/issues/126))
 - Llm generated tests [P2] ([#127](https://github.com/s2-streamstore/s2-sdk-go/issues/127))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.11.4 ([#129](https://github.com/s2-streamstore/s2-sdk-go/issues/129))
 
 ## [v0.11.3] - 2026-01-07
 
