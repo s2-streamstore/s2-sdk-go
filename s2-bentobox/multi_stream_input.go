@@ -35,11 +35,11 @@ func ConnectMultiStreamInput(ctx context.Context, config *InputConfig) (*MultiSt
 
 func (msi *MultiStreamInput) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, AckFunc, Stream, error) {
 	select {
-	case r := <-msi.inputStream:
+	case r, ok := <-msi.inputStream:
+		if !ok {
+			return nil, nil, "", ErrInputClosed
+		}
 		return r.Batch, r.AckFunc, r.Stream, r.Err
-
-	case <-msi.streamsManagerCloser:
-		return nil, nil, "", ErrInputClosed
 
 	case <-ctx.Done():
 		return nil, nil, "", ctx.Err()
@@ -166,6 +166,8 @@ managerLoop:
 		worker.Close()
 		worker.Wait()
 	}
+
+	close(inputStream)
 }
 
 func streamSource(
