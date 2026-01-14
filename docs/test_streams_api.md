@@ -1219,6 +1219,19 @@ Trims (deletes) all records before the specified sequence number.
   - Input: append fence command with empty body
   - Expected: 200, token cleared
 
+- **Set fencing token at max length (36 bytes)**
+  - Input: append fence command with 36-byte token
+  - Expected: 200, token set successfully
+
+- **Set fencing token exceeding max length (37 bytes)**
+  - Input: append fence command with 37-byte token
+  - Expected: 422 (`invalid`)
+
+- **Append with fencing_token at max length (36 bytes)**
+  - Setup: fencing token set to 36-byte value
+  - Input: `fencing_token` with matching 36-byte value
+  - Expected: 200
+
 - **Trim stream**
   - Input: append trim command with seq_num
   - Expected: 200, trim accepted
