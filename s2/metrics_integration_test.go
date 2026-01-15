@@ -3,7 +3,6 @@ package s2_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -12,17 +11,9 @@ import (
 
 const metricsTestTimeout = 60 * time.Second
 
-func skipIfMetricsUnsupported(t *testing.T) {
-	t.Helper()
-	if os.Getenv("S2_SKIP_METRICS") != "" {
-		t.Skip("Metrics API not supported (S2_SKIP_METRICS is set)")
-	}
-}
-
 // --- Account Metrics Tests ---
 
 func TestAccountMetrics_ActiveBasins(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get account metrics - active basins")
@@ -48,7 +39,6 @@ func TestAccountMetrics_ActiveBasins(t *testing.T) {
 }
 
 func TestAccountMetrics_AccountOpsMinute(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get account metrics - account ops (minute interval)")
@@ -76,7 +66,6 @@ func TestAccountMetrics_AccountOpsMinute(t *testing.T) {
 }
 
 func TestAccountMetrics_AccountOpsHour(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get account metrics - account ops (hour interval)")
@@ -104,7 +93,6 @@ func TestAccountMetrics_AccountOpsHour(t *testing.T) {
 }
 
 func TestAccountMetrics_AccountOpsDay(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get account metrics - account ops (day interval)")
@@ -132,7 +120,6 @@ func TestAccountMetrics_AccountOpsDay(t *testing.T) {
 }
 
 func TestAccountMetrics_NilArgs(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get account metrics - nil args")
@@ -147,7 +134,6 @@ func TestAccountMetrics_NilArgs(t *testing.T) {
 }
 
 func TestAccountMetrics_EmptySet(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get account metrics - empty set")
@@ -164,7 +150,6 @@ func TestAccountMetrics_EmptySet(t *testing.T) {
 }
 
 func TestAccountMetrics_MissingStartEnd(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get account metrics - missing start/end")
@@ -184,7 +169,6 @@ func TestAccountMetrics_MissingStartEnd(t *testing.T) {
 // --- Basin Metrics Tests ---
 
 func TestBasinMetrics_Storage(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - storage")
@@ -214,7 +198,6 @@ func TestBasinMetrics_Storage(t *testing.T) {
 }
 
 func TestBasinMetrics_AppendOpsMinute(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - append ops (minute)")
@@ -245,7 +228,6 @@ func TestBasinMetrics_AppendOpsMinute(t *testing.T) {
 }
 
 func TestBasinMetrics_AppendOpsHour(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - append ops (hour)")
@@ -276,7 +258,6 @@ func TestBasinMetrics_AppendOpsHour(t *testing.T) {
 }
 
 func TestBasinMetrics_AppendOpsDay(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - append ops (day)")
@@ -307,7 +288,6 @@ func TestBasinMetrics_AppendOpsDay(t *testing.T) {
 }
 
 func TestBasinMetrics_ReadOps(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - read ops")
@@ -338,7 +318,6 @@ func TestBasinMetrics_ReadOps(t *testing.T) {
 }
 
 func TestBasinMetrics_ReadThroughput(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - read throughput")
@@ -369,7 +348,6 @@ func TestBasinMetrics_ReadThroughput(t *testing.T) {
 }
 
 func TestBasinMetrics_AppendThroughput(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - append throughput")
@@ -400,7 +378,6 @@ func TestBasinMetrics_AppendThroughput(t *testing.T) {
 }
 
 func TestBasinMetrics_BasinOps(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - basin ops")
@@ -431,7 +408,6 @@ func TestBasinMetrics_BasinOps(t *testing.T) {
 }
 
 func TestBasinMetrics_NonExistent(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - non-existent basin")
@@ -455,7 +431,6 @@ func TestBasinMetrics_NonExistent(t *testing.T) {
 }
 
 func TestBasinMetrics_EmptyBasinName(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - empty basin name")
@@ -473,7 +448,6 @@ func TestBasinMetrics_EmptyBasinName(t *testing.T) {
 }
 
 func TestBasinMetrics_NilArgs(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get basin metrics - nil args")
@@ -490,7 +464,6 @@ func TestBasinMetrics_NilArgs(t *testing.T) {
 // --- Stream Metrics Tests ---
 
 func TestStreamMetrics_StorageMinute(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get stream metrics - storage (minute)")
@@ -529,7 +502,6 @@ func TestStreamMetrics_StorageMinute(t *testing.T) {
 }
 
 func TestStreamMetrics_StorageHourNotSupported(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get stream metrics - storage (hour) not supported")
@@ -566,7 +538,6 @@ func TestStreamMetrics_StorageHourNotSupported(t *testing.T) {
 }
 
 func TestStreamMetrics_StorageDayNotSupported(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get stream metrics - storage (day) not supported")
@@ -603,7 +574,6 @@ func TestStreamMetrics_StorageDayNotSupported(t *testing.T) {
 }
 
 func TestStreamMetrics_NonExistentStream(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get stream metrics - non-existent stream")
@@ -632,7 +602,6 @@ func TestStreamMetrics_NonExistentStream(t *testing.T) {
 }
 
 func TestStreamMetrics_NonExistentBasin(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get stream metrics - non-existent basin")
@@ -659,7 +628,6 @@ func TestStreamMetrics_NonExistentBasin(t *testing.T) {
 }
 
 func TestStreamMetrics_EmptyStreamName(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get stream metrics - empty stream name")
@@ -678,7 +646,6 @@ func TestStreamMetrics_EmptyStreamName(t *testing.T) {
 }
 
 func TestStreamMetrics_EmptyBasinName(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get stream metrics - empty basin name")
@@ -697,7 +664,6 @@ func TestStreamMetrics_EmptyBasinName(t *testing.T) {
 }
 
 func TestStreamMetrics_NilArgs(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Get stream metrics - nil args")
@@ -714,7 +680,6 @@ func TestStreamMetrics_NilArgs(t *testing.T) {
 // --- Concurrent Metrics Tests ---
 
 func TestMetrics_ConcurrentCalls(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Concurrent metrics calls")
@@ -764,7 +729,6 @@ func TestMetrics_ConcurrentCalls(t *testing.T) {
 }
 
 func TestMetrics_SequentialCalls(t *testing.T) {
-	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
 	t.Log("Testing: Sequential metrics calls")
