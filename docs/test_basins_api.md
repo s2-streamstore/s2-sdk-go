@@ -174,6 +174,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Variants:
     - `{"age": <seconds>}` — Age-based (must be > 0)
     - `{"infinite": {}}` — Retain unless explicitly trimmed
+  - **Free tier constraint:** Maximum 28 days retention (2,419,200 seconds). Longer values return 422 (`invalid`) with message "Retention is currently limited to 28 days for free tier"
 
 - `timestamping` (TimestampingConfig, omitted when defaults)
   - Timestamping behavior
@@ -213,6 +214,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - `403` — Forbidden / limit exhausted
   - Codes: `permission_denied`, `quota_exhausted`
+  - `quota_exhausted`: Account has reached maximum basin limit. Message: "Basin limit exhausted"
 
 - `408` — Timeout
   - Code: `timeout`
@@ -343,6 +345,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - **Account frozen**
   - Setup: frozen account
   - Expected: 403 (`permission_denied`)
+  - Note: Frozen accounts cannot create basins or streams. Message: "Not allowed for frozen accounts"
 
 - **Invalid retention_policy.age = 0**
   - Input: `retention_policy: {"age": 0}`

@@ -289,6 +289,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Variants:
     - `{"age": <seconds>}` — Age-based (must be > 0)
     - `{"infinite": {}}` — Retain unless explicitly trimmed
+  - **Free tier constraint:** Maximum 28 days retention (2,419,200 seconds). Longer values return 422 (`invalid`) with message "Retention is currently limited to 28 days for free tier"
 
 - `timestamping` (TimestampingConfig, omitted when defaults)
   - Timestamping behavior
@@ -837,6 +838,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - `body` (string, optional, default empty)
   - Record body
+  - Constraint: Maximum 1 MiB per record (including headers)
 
 ### Header Object
 
@@ -872,6 +874,8 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - `429` — Rate limited
   - Code: `rate_limited`
+  - Header: `retry-after-ms` contains recommended retry delay in milliseconds
+  - Constraint: Maximum 200 append batches per second per stream per connection
 
 ### Response Schema: AppendAck
 
@@ -941,6 +945,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - **Append with past timestamp**
   - Input: timestamp < last record's timestamp
   - Expected: 200, timestamp adjusted up for monotonicity
+  - Note: Timestamps MUST be monotonically increasing. If a client provides a timestamp less than the previous record's timestamp, the server automatically adjusts it upward. Timestamps never decrease.
 
 - **Append empty body**
   - Input: record with empty body
@@ -971,7 +976,11 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Expected: Error (SDK validation or 400)
 
 - **Append too large batch**
-  - Input: > 1 MiB
+  - Input: > 1 MiB total across all records
+  - Expected: Error (SDK validation or 400)
+
+- **Append single record too large**
+  - Input: single record > 1 MiB
   - Expected: Error (SDK validation or 400)
 
 - **Append empty batch**
@@ -993,6 +1002,11 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - **Permission denied**
   - Setup: token without `append` op
   - Expected: 403 (`permission_denied`)
+
+- **Rate limited**
+  - Setup: send > 200 batches per second to same stream
+  - Expected: 429 (`rate_limited`) with `retry-after-ms` header
+  - Recovery: wait for specified duration and retry
 
 ---
 
@@ -1219,6 +1233,19 @@ Trims (deletes) all records before the specified sequence number.
   - Input: append fence command with empty body
   - Expected: 200, token cleared
 
+- **Set fencing token at max length (36 bytes)**
+  - Input: append fence command with 36-byte token
+  - Expected: 200, token set successfully
+
+- **Set fencing token exceeding max length (37 bytes)**
+  - Input: append fence command with 37-byte token
+  - Expected: 422 (`invalid`)
+
+- **Append with fencing_token at max length (36 bytes)**
+  - Setup: fencing token set to 36-byte value
+  - Input: `fencing_token` with matching 36-byte value
+  - Expected: 200
+
 - **Trim stream**
   - Input: append trim command with seq_num
   - Expected: 200, trim accepted
@@ -1276,6 +1303,10 @@ Test client initialization, configuration, and cleanup patterns exposed by the S
 
 ### Streaming Session Tests (if SDK supports streaming)
 
+> **Critical append session constraints:**
+> - **Session poisoning:** After the first error in an append session, the session becomes "poisoned" and all subsequent records are rejected. The client must open a new session.
+> - **ACK sequence validation:** ACK sequence numbers must be monotonically increasing and contiguous with previous ACKs.
+
 - **Open append session**
   - Description: create streaming append session
   - Expected: session ready
@@ -1287,6 +1318,10 @@ Test client initialization, configuration, and cleanup patterns exposed by the S
 - **Close append session**
   - Description: gracefully close session
   - Expected: final acks received, session closed
+
+- **Append session error recovery**
+  - Description: after error, session is poisoned
+  - Expected: must open new session to continue appending
 
 - **Open read session**
   - Description: create streaming read session
