@@ -35,6 +35,7 @@ func (s *StreamsClient) List(ctx context.Context, args *ListStreamsArgs) (*ListS
 			accessToken: s.basin.accessToken,
 			logger:      s.basin.logger,
 			basinName:   s.basin.basinHeaderValue(),
+			compression: s.basin.compression,
 		}
 
 		var result ListStreamsResponse
@@ -120,6 +121,7 @@ func (s *StreamsClient) Create(ctx context.Context, args CreateStreamArgs) (*Str
 			accessToken: s.basin.accessToken,
 			logger:      s.basin.logger,
 			basinName:   s.basin.basinHeaderValue(),
+			compression: s.basin.compression,
 		}
 
 		headers := map[string]string{
@@ -153,6 +155,7 @@ func (s *StreamsClient) Delete(ctx context.Context, streamName StreamName) error
 			accessToken: s.basin.accessToken,
 			logger:      s.basin.logger,
 			basinName:   s.basin.basinHeaderValue(),
+			compression: s.basin.compression,
 		}
 
 		err := httpClient.request(ctx, "DELETE", path, nil, nil)
@@ -182,6 +185,7 @@ func (s *StreamsClient) GetConfig(ctx context.Context, streamName StreamName) (*
 			accessToken: s.basin.accessToken,
 			logger:      s.basin.logger,
 			basinName:   s.basin.basinHeaderValue(),
+			compression: s.basin.compression,
 		}
 
 		var result StreamConfig
@@ -212,6 +216,7 @@ func (s *StreamsClient) Reconfigure(ctx context.Context, args ReconfigureStreamA
 			accessToken: s.basin.accessToken,
 			logger:      s.basin.logger,
 			basinName:   s.basin.basinHeaderValue(),
+			compression: s.basin.compression,
 		}
 
 		var result StreamConfig

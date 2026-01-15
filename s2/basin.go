@@ -18,6 +18,7 @@ type BasinClient struct {
 	includeBasinHeader bool
 	connectionTimeout  time.Duration
 	requestTimeout     time.Duration
+	compression        CompressionType
 
 	Streams *StreamsClient
 }

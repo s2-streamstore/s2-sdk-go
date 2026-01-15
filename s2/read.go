@@ -98,6 +98,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 			accessToken: s.basinClient.accessToken,
 			logger:      s.logger,
 			basinName:   s.basinClient.basinHeaderValue(),
+			compression: s.basinClient.compression,
 		}
 
 		var pbBatch pb.ReadBatch

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 
+	internalframing "github.com/s2-streamstore/s2-sdk-go/internal/framing"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -21,7 +22,8 @@ type httpClient struct {
 	baseURL     string
 	accessToken string
 	logger      *slog.Logger
-	basinName   string // If set, sends "s2-basin" header with this value
+	basinName   string
+	compression CompressionType
 }
 
 func (h *httpClient) request(ctx context.Context, method, path string, body interface{}, result interface{}) error {
@@ -96,6 +98,7 @@ func (h *httpClient) requestProto(ctx context.Context, method, path string, body
 		"method", method,
 		"path", path,
 		"url", h.baseURL+path,
+		"compression", h.compression.ContentEncoding(),
 	)
 
 	var reqBody io.Reader
@@ -104,6 +107,14 @@ func (h *httpClient) requestProto(ctx context.Context, method, path string, body
 		if err != nil {
 			return fmt.Errorf("marshal proto body: %w", err)
 		}
+
+		if h.compression != CompressionNone {
+			data, err = internalframing.Compress(data, h.compression)
+			if err != nil {
+				return fmt.Errorf("compress request body: %w", err)
+			}
+		}
+
 		reqBody = bytes.NewReader(data)
 	}
 
@@ -116,9 +127,13 @@ func (h *httpClient) requestProto(ctx context.Context, method, path string, body
 	req.Header.Set("Authorization", "Bearer "+h.accessToken)
 	if body != nil {
 		req.Header.Set("Content-Type", protoContentType)
+		if encoding := h.compression.ContentEncoding(); encoding != "" {
+			req.Header.Set("Content-Encoding", encoding)
+		}
 	}
 	if result != nil {
 		req.Header.Set("Accept", protoContentType)
+		req.Header.Set("Accept-Encoding", "zstd, gzip")
 	}
 
 	if h.basinName != "" {
@@ -146,6 +161,15 @@ func (h *httpClient) requestProto(ctx context.Context, method, path string, body
 		if err != nil {
 			return fmt.Errorf("read proto response: %w", err)
 		}
+
+		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
+			respCompression := internalframing.ParseContentEncoding(encoding)
+			data, err = internalframing.Decompress(data, respCompression)
+			if err != nil {
+				return fmt.Errorf("decompress response body: %w", err)
+			}
+		}
+
 		if err := proto.Unmarshal(data, result); err != nil {
 			return fmt.Errorf("decode proto response: %w", err)
 		}

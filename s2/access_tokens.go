@@ -34,6 +34,7 @@ func (a *AccessTokensClient) List(ctx context.Context, args *ListAccessTokensArg
 			baseURL:     a.client.baseURL,
 			accessToken: a.client.accessToken,
 			logger:      a.client.logger,
+			compression: a.client.compression,
 		}
 
 		var result ListAccessTokensResponse
@@ -116,6 +117,7 @@ func (a *AccessTokensClient) Issue(ctx context.Context, args IssueAccessTokenArg
 			baseURL:     a.client.baseURL,
 			accessToken: a.client.accessToken,
 			logger:      a.client.logger,
+			compression: a.client.compression,
 		}
 
 		var result IssueAccessTokenResponse
@@ -145,6 +147,7 @@ func (a *AccessTokensClient) Revoke(ctx context.Context, args RevokeAccessTokenA
 			baseURL:     a.client.baseURL,
 			accessToken: a.client.accessToken,
 			logger:      a.client.logger,
+			compression: a.client.compression,
 		}
 
 		err := httpClient.request(ctx, "DELETE", path, nil, nil)

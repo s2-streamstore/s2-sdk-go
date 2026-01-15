@@ -229,20 +229,20 @@ func CreateFrame(data []byte, terminal bool, compression CompressionType) []byte
 
 func CreateFrameWithStatus(data []byte, terminal bool, compression CompressionType, statusCode int) []byte {
 	compressedData := data
-	actualCompression := compression
+	actualCompression := CompressionNone
 
-	if len(data) > compressionThreshold && compression == CompressionNone {
-		if compressed, err := compressZstd(data); err == nil && len(compressed) < len(data) {
-			compressedData = compressed
-			actualCompression = CompressionZstd
-		}
-	} else if compression == CompressionZstd {
-		if compressed, err := compressZstd(data); err == nil {
-			compressedData = compressed
-		}
-	} else if compression == CompressionGzip {
-		if compressed, err := compressGzip(data); err == nil {
-			compressedData = compressed
+	if compression != CompressionNone && len(data) >= compressionThreshold {
+		switch compression {
+		case CompressionZstd:
+			if compressed, err := compressZstd(data); err == nil {
+				compressedData = compressed
+				actualCompression = CompressionZstd
+			}
+		case CompressionGzip:
+			if compressed, err := compressGzip(data); err == nil {
+				compressedData = compressed
+				actualCompression = CompressionGzip
+			}
 		}
 	}
 
@@ -291,4 +291,30 @@ func compressGzip(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func Compress(data []byte, compression CompressionType) ([]byte, error) {
+	switch compression {
+	case CompressionNone:
+		return data, nil
+	case CompressionZstd:
+		return compressZstd(data)
+	case CompressionGzip:
+		return compressGzip(data)
+	default:
+		return nil, fmt.Errorf("unknown compression type: %d", compression)
+	}
+}
+
+func Decompress(data []byte, compression CompressionType) ([]byte, error) {
+	switch compression {
+	case CompressionNone:
+		return data, nil
+	case CompressionGzip:
+		return gunzip(data)
+	case CompressionZstd:
+		return unzstd(data)
+	default:
+		return nil, fmt.Errorf("unknown compression type: %d", compression)
+	}
 }

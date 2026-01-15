@@ -48,6 +48,9 @@ type ClientOptions struct {
 	// Timeout for establishing TCP connections.
 	// Defaults to 10 seconds.
 	ConnectionTimeout time.Duration
+	// Compression algorithm for request bodies.
+	// Defaults to CompressionNone (no compression).
+	Compression CompressionType
 }
 
 type Client struct {
@@ -61,6 +64,7 @@ type Client struct {
 	includeBasinHeader bool
 	requestTimeout     time.Duration
 	connectionTimeout  time.Duration
+	compression        CompressionType
 
 	// Client for access tokens.
 	AccessTokens *AccessTokensClient
@@ -146,6 +150,7 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		includeBasinHeader: opts.MakeBasinBaseURL != nil,
 		connectionTimeout:  connectionTimeout,
 		requestTimeout:     requestTimeout,
+		compression:        opts.Compression,
 	}
 
 	c.AccessTokens = &AccessTokensClient{client: c}
@@ -270,6 +275,7 @@ func (c *Client) Basin(name string) *BasinClient {
 		includeBasinHeader: c.includeBasinHeader,
 		connectionTimeout:  c.connectionTimeout,
 		requestTimeout:     c.requestTimeout,
+		compression:        c.compression,
 	}
 
 	basin.Streams = &StreamsClient{basin: basin}

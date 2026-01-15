@@ -59,6 +59,7 @@ func (s *StreamClient) CheckTail(ctx context.Context) (*TailResponse, error) {
 			accessToken: s.basinClient.accessToken,
 			logger:      s.logger,
 			basinName:   s.basinClient.basinHeaderValue(),
+			compression: s.basinClient.compression,
 		}
 
 		var result TailResponse
