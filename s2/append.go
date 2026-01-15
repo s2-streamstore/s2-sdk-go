@@ -45,6 +45,7 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 		accessToken: s.basinClient.accessToken,
 		logger:      s.logger,
 		basinName:   s.basinClient.basinHeaderValue(),
+		compression: s.basinClient.compression,
 	}
 
 	ack, err := withAppendRetries(ctx, s.basinClient.retryConfig, s.logger, prepared, func() (*AppendAck, error) {

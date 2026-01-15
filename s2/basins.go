@@ -35,6 +35,7 @@ func (b *BasinsClient) List(ctx context.Context, args *ListBasinsArgs) (*ListBas
 			baseURL:     b.client.baseURL,
 			accessToken: b.client.accessToken,
 			logger:      b.client.logger,
+			compression: b.client.compression,
 		}
 
 		var result ListBasinsResponse
@@ -119,6 +120,7 @@ func (b *BasinsClient) Create(ctx context.Context, args CreateBasinArgs) (*Basin
 			baseURL:     b.client.baseURL,
 			accessToken: b.client.accessToken,
 			logger:      b.client.logger,
+			compression: b.client.compression,
 		}
 
 		var result BasinInfo
@@ -149,6 +151,7 @@ func (b *BasinsClient) Delete(ctx context.Context, basinName BasinName) error {
 			baseURL:     b.client.baseURL,
 			accessToken: b.client.accessToken,
 			logger:      b.client.logger,
+			compression: b.client.compression,
 		}
 
 		err := httpClient.request(ctx, "DELETE", path, nil, nil)
@@ -177,6 +180,7 @@ func (b *BasinsClient) GetConfig(ctx context.Context, basinName BasinName) (*Bas
 			baseURL:     b.client.baseURL,
 			accessToken: b.client.accessToken,
 			logger:      b.client.logger,
+			compression: b.client.compression,
 		}
 
 		var result BasinConfig
@@ -206,6 +210,7 @@ func (b *BasinsClient) Reconfigure(ctx context.Context, args ReconfigureBasinArg
 			baseURL:     b.client.baseURL,
 			accessToken: b.client.accessToken,
 			logger:      b.client.logger,
+			compression: b.client.compression,
 		}
 
 		var result BasinConfig

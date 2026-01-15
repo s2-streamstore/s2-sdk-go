@@ -292,3 +292,29 @@ func compressGzip(data []byte) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
+
+func Compress(data []byte, compression CompressionType) ([]byte, error) {
+	switch compression {
+	case CompressionNone:
+		return data, nil
+	case CompressionZstd:
+		return compressZstd(data)
+	case CompressionGzip:
+		return compressGzip(data)
+	default:
+		return nil, fmt.Errorf("unknown compression type: %d", compression)
+	}
+}
+
+func Decompress(data []byte, compression CompressionType) ([]byte, error) {
+	switch compression {
+	case CompressionNone:
+		return data, nil
+	case CompressionGzip:
+		return gunzip(data)
+	case CompressionZstd:
+		return unzstd(data)
+	default:
+		return nil, fmt.Errorf("unknown compression type: %d", compression)
+	}
+}
