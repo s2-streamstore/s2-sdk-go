@@ -160,6 +160,8 @@ This document enumerates every knob/parameter of the Access Tokens API to ensure
 
 ### AccessTokenScope Object
 
+**Constraint:** The scope must have at least one permission granted via `ops` or `op_groups`. A token with empty permissions (no `ops` and no `op_groups` with `read` or `write` set to `true`) will be rejected with a 422 error.
+
 - `basins` (ResourceSet, optional)
   - Basin names allowed
   - If null/omitted, no basin access
@@ -265,9 +267,9 @@ Token management operations:
 
 ### Test Cases
 
-- **Issue minimal token**
+- **Issue token with empty scope (fails)**
   - Input: `{"id": "test-token-01", "scope": {}}`
-  - Expected: 201, token returned
+  - Expected: 422 (`invalid`) - permissions cannot be empty
 
 - **Issue token with full scope**
   - Input: all scope fields populated
@@ -302,79 +304,79 @@ Token management operations:
   - Expected: 201, token limited to specified ops
 
 - **Issue token with basins.exact**
-  - Input: `{"id": "...", "scope": {"basins": {"exact": "my-basin"}}}`
+  - Input: `{"id": "...", "scope": {"basins": {"exact": "my-basin"}, "ops": ["list-basins"]}}`
   - Expected: 201, token limited to exact basin
 
 - **Issue token with basins.prefix**
-  - Input: `{"id": "...", "scope": {"basins": {"prefix": "test-"}}}`
+  - Input: `{"id": "...", "scope": {"basins": {"prefix": "test-"}, "ops": ["list-basins"]}}`
   - Expected: 201, token limited to basins with prefix
 
 - **Issue token with streams.exact**
-  - Input: `{"id": "...", "scope": {"streams": {"exact": "my-stream"}}}`
+  - Input: `{"id": "...", "scope": {"streams": {"exact": "my-stream"}, "ops": ["read"]}}`
   - Expected: 201, token limited to exact stream
 
 - **Issue token with streams.prefix**
-  - Input: `{"id": "...", "scope": {"streams": {"prefix": "logs/"}}}`
+  - Input: `{"id": "...", "scope": {"streams": {"prefix": "logs/"}, "ops": ["read"]}}`
   - Expected: 201, token limited to streams with prefix
 
 - **Issue token with access_tokens.exact**
-  - Input: `{"id": "...", "scope": {"access_tokens": {"exact": "child-token"}}}`
+  - Input: `{"id": "...", "scope": {"access_tokens": {"exact": "child-token"}, "ops": ["list-access-tokens"]}}`
   - Expected: 201, token can only manage exact token ID
 
 - **Issue token with access_tokens.prefix**
-  - Input: `{"id": "...", "scope": {"access_tokens": {"prefix": "child-"}}}`
+  - Input: `{"id": "...", "scope": {"access_tokens": {"prefix": "child-"}, "ops": ["list-access-tokens"]}}`
   - Expected: 201, token can manage tokens with prefix
 
 - **Issue token with basins.exact = "" (deny all basins)**
-  - Input: `{"id": "...", "scope": {"basins": {"exact": ""}}}`
+  - Input: `{"id": "...", "scope": {"basins": {"exact": ""}, "ops": ["list-basins"]}}`
   - Expected: 201, token cannot access any basins
   - Verify: any basin operation returns 403
 
 - **Issue token with basins.prefix = "" (allow all basins)**
-  - Input: `{"id": "...", "scope": {"basins": {"prefix": ""}}}`
+  - Input: `{"id": "...", "scope": {"basins": {"prefix": ""}, "ops": ["list-basins"]}}`
   - Expected: 201, token can access all basins
   - Verify: basin operations succeed on any basin
 
 - **Issue token with streams.exact = "" (deny all streams)**
-  - Input: `{"id": "...", "scope": {"streams": {"exact": ""}}}`
+  - Input: `{"id": "...", "scope": {"streams": {"exact": ""}, "ops": ["read"]}}`
   - Expected: 201, token cannot access any streams
   - Verify: any stream operation returns 403
 
 - **Issue token with streams.prefix = "" (allow all streams)**
-  - Input: `{"id": "...", "scope": {"streams": {"prefix": ""}}}`
+  - Input: `{"id": "...", "scope": {"streams": {"prefix": ""}, "ops": ["read"]}}`
   - Expected: 201, token can access all streams
   - Verify: stream operations succeed on any stream
 
 - **Issue token with auto_prefix_streams = true**
-  - Input: `{"id": "...", "scope": {"streams": {"prefix": "ns/"}}, "auto_prefix_streams": true}`
+  - Input: `{"id": "...", "scope": {"streams": {"prefix": "ns/"}, "ops": ["read"]}, "auto_prefix_streams": true}`
   - Expected: 201, stream names will be auto-prefixed
 
 - **Issue token with expires_at**
-  - Input: `{"id": "...", "scope": {}, "expires_at": "<future_timestamp>"}`
+  - Input: `{"id": "...", "scope": {"ops": ["list-basins"]}, "expires_at": "<future_timestamp>"}`
   - Expected: 201, token has custom expiration
 
 - **Issue token with past expires_at**
-  - Input: `{"id": "...", "scope": {}, "expires_at": "<past_timestamp>"}`
+  - Input: `{"id": "...", "scope": {"ops": ["list-basins"]}, "expires_at": "<past_timestamp>"}`
   - Expected: 422 (`invalid`)
 
 - **ID empty (0 bytes)**
-  - Input: `{"id": "", "scope": {}}`
+  - Input: `{"id": "", "scope": {"ops": ["list-basins"]}}`
   - Expected: Error (SDK may validate client-side, or 400 from server)
 
 - **ID minimum length (1 byte)**
-  - Input: `{"id": "a", "scope": {}}`
+  - Input: `{"id": "a", "scope": {"ops": ["list-basins"]}}`
   - Expected: 201, token created successfully
 
 - **ID maximum length (96 bytes)**
-  - Input: `{"id": "a" * 96}` (exactly 96 bytes)
+  - Input: `{"id": "a" * 96, "scope": {"ops": ["list-basins"]}}` (exactly 96 bytes)
   - Expected: 201, token created successfully
 
 - **ID too long (97 bytes)**
-  - Input: `{"id": "a" * 97}` (> 96 bytes)
+  - Input: `{"id": "a" * 97, "scope": {"ops": ["list-basins"]}}` (> 96 bytes)
   - Expected: Error (SDK may validate client-side, or 400 from server)
 
 - **Duplicate ID**
-  - Input: create same ID twice
+  - Input: create same ID twice with `{"scope": {"ops": ["list-basins"]}}`
   - Expected: 409 (`resource_already_exists`)
 
 - **Permission denied**

@@ -46,8 +46,10 @@ func TestListAccessTokens_WithPrefix(t *testing.T) {
 	defer revokeToken(ctx, client, tokenID)
 
 	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:    tokenID,
-		Scope: s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Issue failed: %v", err)
@@ -107,8 +109,10 @@ func TestListAccessTokens_Pagination(t *testing.T) {
 	for i := range 3 {
 		id := s2.AccessTokenID(fmt.Sprintf("page-tok-%d-%d", time.Now().UnixNano(), i))
 		_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-			ID:    id,
-			Scope: s2.AccessTokenScope{},
+			ID: id,
+			Scope: s2.AccessTokenScope{
+				Ops: []string{s2.OperationListBasins},
+			},
 		})
 		if err != nil {
 			t.Fatalf("Issue token %d failed: %v", i, err)
@@ -213,27 +217,25 @@ func TestListAccessTokens_InvalidStartAfterLessThanPrefix(t *testing.T) {
 
 // --- Issue Access Token Tests ---
 
-func TestIssueAccessToken_Minimal(t *testing.T) {
+func TestIssueAccessToken_EmptyScopeFails(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), tokenTestTimeout)
 	defer cancel()
-	t.Log("Testing: Issue minimal access token")
+	t.Log("Testing: Issue token with empty scope fails")
 
 	client := testClient(t)
 	tokenID := uniqueTokenID("test-imin")
 	defer revokeToken(ctx, client, tokenID)
 
-	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
+	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID:    tokenID,
 		Scope: s2.AccessTokenScope{},
 	})
-	if err != nil {
-		t.Fatalf("Issue failed: %v", err)
-	}
 
-	if resp.AccessToken == "" {
-		t.Error("Expected non-empty access token")
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error for empty scope, got: %v", err)
 	}
-	t.Logf("Issued token: %s (token value length: %d)", tokenID, len(resp.AccessToken))
+	t.Logf("Got expected error: %v", err)
 }
 
 func TestIssueAccessToken_WithOpGroupsAccountRead(t *testing.T) {
@@ -363,6 +365,7 @@ func TestIssueAccessToken_WithBasinsExact(t *testing.T) {
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
 			Basins: &s2.ResourceSet{Exact: &basinName},
+			Ops:    []string{s2.OperationListBasins},
 		},
 	})
 	if err != nil {
@@ -385,6 +388,7 @@ func TestIssueAccessToken_WithBasinsPrefix(t *testing.T) {
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
 			Basins: &s2.ResourceSet{Prefix: &prefix},
+			Ops:    []string{s2.OperationListBasins},
 		},
 	})
 	if err != nil {
@@ -407,6 +411,7 @@ func TestIssueAccessToken_WithStreamsExact(t *testing.T) {
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
 			Streams: &s2.ResourceSet{Exact: &streamName},
+			Ops:     []string{s2.OperationRead},
 		},
 	})
 	if err != nil {
@@ -429,6 +434,7 @@ func TestIssueAccessToken_WithStreamsPrefix(t *testing.T) {
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
 			Streams: &s2.ResourceSet{Prefix: &prefix},
+			Ops:     []string{s2.OperationRead},
 		},
 	})
 	if err != nil {
@@ -451,6 +457,7 @@ func TestIssueAccessToken_WithBasinsExactEmpty_DenyAll(t *testing.T) {
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
 			Basins: &s2.ResourceSet{Exact: &empty},
+			Ops:    []string{s2.OperationListBasins},
 		},
 	})
 	if err != nil {
@@ -473,6 +480,7 @@ func TestIssueAccessToken_WithBasinsPrefixEmpty_AllowAll(t *testing.T) {
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
 			Basins: &s2.ResourceSet{Prefix: &empty},
+			Ops:    []string{s2.OperationListBasins},
 		},
 	})
 	if err != nil {
@@ -495,6 +503,7 @@ func TestIssueAccessToken_WithStreamsExactEmpty_DenyAll(t *testing.T) {
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
 			Streams: &s2.ResourceSet{Exact: &empty},
+			Ops:     []string{s2.OperationRead},
 		},
 	})
 	if err != nil {
@@ -517,6 +526,7 @@ func TestIssueAccessToken_WithStreamsPrefixEmpty_AllowAll(t *testing.T) {
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
 			Streams: &s2.ResourceSet{Prefix: &empty},
+			Ops:     []string{s2.OperationRead},
 		},
 	})
 	if err != nil {
@@ -539,6 +549,7 @@ func TestIssueAccessToken_WithAutoPrefixStreams(t *testing.T) {
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
 			Streams: &s2.ResourceSet{Prefix: &prefix},
+			Ops:     []string{s2.OperationRead},
 		},
 		AutoPrefixStreams: true,
 	})
@@ -559,8 +570,10 @@ func TestIssueAccessToken_WithExpiresAt(t *testing.T) {
 
 	expiresAt := time.Now().Add(24 * time.Hour)
 	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:        tokenID,
-		Scope:     s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 		ExpiresAt: &expiresAt,
 	})
 	if err != nil {
@@ -579,8 +592,10 @@ func TestIssueAccessToken_IDMinLength(t *testing.T) {
 	defer revokeToken(ctx, client, tokenID)
 
 	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:    tokenID,
-		Scope: s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Issue failed: %v", err)
@@ -598,8 +613,10 @@ func TestIssueAccessToken_IDMaxLength(t *testing.T) {
 	defer revokeToken(ctx, client, tokenID)
 
 	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:    tokenID,
-		Scope: s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Issue failed: %v", err)
@@ -651,16 +668,20 @@ func TestIssueAccessToken_DuplicateID(t *testing.T) {
 	defer revokeToken(ctx, client, tokenID)
 
 	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:    tokenID,
-		Scope: s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 	})
 	if err != nil {
 		t.Fatalf("First issue failed: %v", err)
 	}
 
 	_, err = client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:    tokenID,
-		Scope: s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 	})
 
 	var s2Err *s2.S2Error
@@ -717,8 +738,10 @@ func TestRevokeAccessToken_Existing(t *testing.T) {
 	tokenID := uniqueTokenID("test-rev")
 
 	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:    tokenID,
-		Scope: s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Issue failed: %v", err)
@@ -758,8 +781,10 @@ func TestRevokeAccessToken_AlreadyRevoked(t *testing.T) {
 	tokenID := uniqueTokenID("test-revr")
 
 	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:    tokenID,
-		Scope: s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Issue failed: %v", err)
@@ -804,8 +829,10 @@ func TestIssueAccessToken_VerifyListReturnsToken(t *testing.T) {
 	defer revokeToken(ctx, client, tokenID)
 
 	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:    tokenID,
-		Scope: s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Issue failed: %v", err)
@@ -840,8 +867,10 @@ func TestRevokeAccessToken_VerifyNotInList(t *testing.T) {
 	tokenID := uniqueTokenID("test-vrnl")
 
 	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
-		ID:    tokenID,
-		Scope: s2.AccessTokenScope{},
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Ops: []string{s2.OperationListBasins},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Issue failed: %v", err)
