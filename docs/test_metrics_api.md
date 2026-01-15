@@ -113,13 +113,13 @@ Set of string labels (e.g., list of basin names).
     - `active-basins` — Set of all basins that had at least one stream during specified period
     - `account-ops` — Count of account-level RPC operations, per interval
 
-- `start` (integer, optional)
+- `start` (integer, required)
   - Start timestamp as Unix epoch seconds
-  - Required for timeseries metric sets
+  - Required for all metric sets
 
-- `end` (integer, optional)
+- `end` (integer, required)
   - End timestamp as Unix epoch seconds
-  - Required for timeseries metric sets
+  - Required for all metric sets
 
 - `interval` (TimeseriesInterval, optional)
   - Interval to aggregate over for timeseries metric sets
@@ -168,12 +168,8 @@ Returns: `AccumulationMetric`
 ### Test Cases
 
 - **Get active basins**
-  - Parameters: `set=active-basins`
-  - Expected: 200, label metric with basin names
-
-- **Get active basins with time range**
   - Parameters: `set=active-basins`, `start=<epoch>`, `end=<epoch>`
-  - Expected: 200, basins active during range
+  - Expected: 200, label metric with basin names active during range
 
 - **Get account ops (minute interval)**
   - Parameters: `set=account-ops`, `start=<epoch>`, `end=<epoch>`, `interval=minute`
@@ -190,6 +186,10 @@ Returns: `AccumulationMetric`
 - **Missing set parameter**
   - Parameters: none
   - Expected: 400 (`invalid`)
+
+- **Missing start/end parameters**
+  - Parameters: `set=active-basins` (without start/end)
+  - Expected: 422 (`invalid`)
 
 - **Invalid set value**
   - Parameters: `set=invalid-set`

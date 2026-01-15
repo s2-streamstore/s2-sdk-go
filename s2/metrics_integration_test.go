@@ -28,26 +28,6 @@ func TestAccountMetrics_ActiveBasins(t *testing.T) {
 	t.Log("Testing: Get account metrics - active basins")
 
 	client := testClient(t)
-	resp, err := client.Metrics.Account(ctx, &s2.AccountMetricsArgs{
-		Set: s2.AccountMetricSetActiveBasins,
-	})
-	if err != nil {
-		t.Fatalf("Account metrics failed: %v", err)
-	}
-
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
-	}
-	t.Logf("Got %d metric values", len(resp.Values))
-}
-
-func TestAccountMetrics_ActiveBasinsWithTimeRange(t *testing.T) {
-	skipIfMetricsUnsupported(t)
-	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
-	defer cancel()
-	t.Log("Testing: Get account metrics - active basins with time range")
-
-	client := testClient(t)
 	now := time.Now()
 	start := now.Add(-24 * time.Hour).Unix()
 	end := now.Unix()
@@ -64,7 +44,7 @@ func TestAccountMetrics_ActiveBasinsWithTimeRange(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Expected non-nil response")
 	}
-	t.Logf("Got %d metric values for time range", len(resp.Values))
+	t.Logf("Got %d metric values", len(resp.Values))
 }
 
 func TestAccountMetrics_AccountOpsMinute(t *testing.T) {
@@ -179,6 +159,24 @@ func TestAccountMetrics_EmptySet(t *testing.T) {
 
 	if err == nil {
 		t.Error("Expected error for empty set")
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+func TestAccountMetrics_MissingStartEnd(t *testing.T) {
+	skipIfMetricsUnsupported(t)
+	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
+	defer cancel()
+	t.Log("Testing: Get account metrics - missing start/end")
+
+	client := testClient(t)
+	_, err := client.Metrics.Account(ctx, &s2.AccountMetricsArgs{
+		Set: s2.AccountMetricSetActiveBasins,
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error for missing start/end, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -738,7 +736,9 @@ func TestMetrics_ConcurrentCalls(t *testing.T) {
 
 	go func() {
 		_, err := client.Metrics.Account(ctx, &s2.AccountMetricsArgs{
-			Set: s2.AccountMetricSetActiveBasins,
+			Set:   s2.AccountMetricSetActiveBasins,
+			Start: &start,
+			End:   &end,
 		})
 		errCh <- err
 	}()
@@ -755,7 +755,9 @@ func TestMetrics_ConcurrentCalls(t *testing.T) {
 
 	go func() {
 		_, err := client.Metrics.Account(ctx, &s2.AccountMetricsArgs{
-			Set: s2.AccountMetricSetActiveBasins,
+			Set:   s2.AccountMetricSetActiveBasins,
+			Start: &start,
+			End:   &end,
 		})
 		errCh <- err
 	}()
@@ -781,7 +783,9 @@ func TestMetrics_SequentialCalls(t *testing.T) {
 	interval := s2.TimeseriesIntervalMinute
 
 	_, err := client.Metrics.Account(ctx, &s2.AccountMetricsArgs{
-		Set: s2.AccountMetricSetActiveBasins,
+		Set:   s2.AccountMetricSetActiveBasins,
+		Start: &start,
+		End:   &end,
 	})
 	if err != nil {
 		t.Fatalf("First call failed: %v", err)
@@ -798,7 +802,9 @@ func TestMetrics_SequentialCalls(t *testing.T) {
 	}
 
 	_, err = client.Metrics.Account(ctx, &s2.AccountMetricsArgs{
-		Set: s2.AccountMetricSetActiveBasins,
+		Set:   s2.AccountMetricSetActiveBasins,
+		Start: &start,
+		End:   &end,
 	})
 	if err != nil {
 		t.Fatalf("Third call failed: %v", err)
