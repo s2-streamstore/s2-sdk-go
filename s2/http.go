@@ -109,7 +109,7 @@ func (h *httpClient) requestProto(ctx context.Context, method, path string, body
 		}
 
 		if h.compression != CompressionNone {
-			data, err = internalframing.Compress(data, internalframing.CompressionType(h.compression))
+			data, err = internalframing.Compress(data, h.compression)
 			if err != nil {
 				return fmt.Errorf("compress request body: %w", err)
 			}

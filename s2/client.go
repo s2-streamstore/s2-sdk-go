@@ -48,7 +48,9 @@ type ClientOptions struct {
 	// Timeout for establishing TCP connections.
 	// Defaults to 10 seconds.
 	ConnectionTimeout time.Duration
-	Compression       CompressionType
+	// Compression algorithm for request bodies.
+	// Defaults to CompressionNone (no compression).
+	Compression CompressionType
 }
 
 type Client struct {

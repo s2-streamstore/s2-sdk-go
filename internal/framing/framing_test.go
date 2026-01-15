@@ -81,11 +81,17 @@ func TestParseTerminalFrameWithStatus(t *testing.T) {
 }
 
 func TestParseCompression(t *testing.T) {
+	// Data must be >= 1024 bytes for compression to be applied
+	largeData := make([]byte, 2048)
+	for i := range largeData {
+		largeData[i] = byte(i % 256)
+	}
+
 	tests := []CompressionType{CompressionNone, CompressionZstd, CompressionGzip}
 
 	for _, comp := range tests {
 		p := NewS2SFrameParser()
-		frame := CreateFrame([]byte("test"), false, comp)
+		frame := CreateFrame(largeData, false, comp)
 
 		p.Push(frame)
 		parsed, err := p.ParseFrame()
@@ -95,6 +101,26 @@ func TestParseCompression(t *testing.T) {
 		}
 		if parsed.Compression != comp {
 			t.Errorf("got compression %v, want %v", parsed.Compression, comp)
+		}
+	}
+}
+
+func TestParseCompressionBelowThreshold(t *testing.T) {
+	// Data below threshold should not be compressed even if compression is requested
+	smallData := []byte("test")
+
+	for _, comp := range []CompressionType{CompressionNone, CompressionZstd, CompressionGzip} {
+		p := NewS2SFrameParser()
+		frame := CreateFrame(smallData, false, comp)
+
+		p.Push(frame)
+		parsed, err := p.ParseFrame()
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		if parsed.Compression != CompressionNone {
+			t.Errorf("small data with comp=%v: got compression %v, want %v", comp, parsed.Compression, CompressionNone)
 		}
 	}
 }
