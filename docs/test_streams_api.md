@@ -1304,8 +1304,6 @@ Test client initialization, configuration, and cleanup patterns exposed by the S
 ### Streaming Session Tests (if SDK supports streaming)
 
 > **Critical append session constraints:**
-> - **First message must have input:** The inaugural (first) message in an append session must contain the `input` field with stream name and records. Missing input returns 400 (`invalid`, "Missing input").
-> - **Stream name must be constant:** After the inaugural message, subsequent messages must either omit the stream name or use the same stream name. Changing stream name returns 400 (`invalid`, "Stream name is expected to be omitted or stay constant").
 > - **Session poisoning:** After the first error in an append session, the session becomes "poisoned" and all subsequent records are rejected. The client must open a new session.
 > - **ACK sequence validation:** ACK sequence numbers must be monotonically increasing and contiguous with previous ACKs.
 
@@ -1324,10 +1322,6 @@ Test client initialization, configuration, and cleanup patterns exposed by the S
 - **Append session error recovery**
   - Description: after error, session is poisoned
   - Expected: must open new session to continue appending
-
-- **Append session stream name change (fails)**
-  - Description: try to change stream name mid-session
-  - Expected: 400 (`invalid`)
 
 - **Open read session**
   - Description: create streaming read session
