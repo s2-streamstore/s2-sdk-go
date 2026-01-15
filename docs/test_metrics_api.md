@@ -266,7 +266,7 @@ Returns: `AccumulationMetric`
 - `503` — Basin still creating
   - Code: `unavailable`
 
-Note: Non-existent basins return 200 with empty values array, not 404.
+> **Note:** Non-existent basins return 200 with empty values array, not 404.
 
 ### BasinMetricSet Values
 
@@ -416,13 +416,13 @@ Returns: `AccumulationMetric`
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
 
-Note: Non-existent basins/streams return 200 with empty values array, not 404.
-
 - `422` — Invalid arguments
   - Code: `invalid`
 
 - `503` — Unavailable
   - Code: `unavailable`
+
+> **Note:** Non-existent basins/streams return 200 with empty values array, not 404.
 
 ### StreamMetricSet Values
 
