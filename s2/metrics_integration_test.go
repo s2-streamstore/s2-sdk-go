@@ -441,18 +441,17 @@ func TestBasinMetrics_NonExistent(t *testing.T) {
 	start := now.Add(-1 * time.Hour).Unix()
 	end := now.Unix()
 
-	_, err := client.Metrics.Basin(ctx, &s2.BasinMetricsArgs{
+	resp, err := client.Metrics.Basin(ctx, &s2.BasinMetricsArgs{
 		Basin: "nonexistent-basin-12345",
 		Set:   s2.BasinMetricSetStorage,
 		Start: &start,
 		End:   &end,
 	})
 
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 404 {
-		t.Errorf("Expected 404 error, got: %v", err)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
 	}
-	t.Logf("Got expected error: %v", err)
+	t.Logf("Got %d metric values for non-existent basin (expected empty)", len(resp.Values))
 }
 
 func TestBasinMetrics_EmptyBasinName(t *testing.T) {
@@ -529,11 +528,11 @@ func TestStreamMetrics_StorageMinute(t *testing.T) {
 	t.Logf("Got %d metric values for storage (minute)", len(resp.Values))
 }
 
-func TestStreamMetrics_StorageHour(t *testing.T) {
+func TestStreamMetrics_StorageHourNotSupported(t *testing.T) {
 	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
-	t.Log("Testing: Get stream metrics - storage (hour)")
+	t.Log("Testing: Get stream metrics - storage (hour) not supported")
 
 	basin := getSharedBasin(t)
 	client := streamTestClient(t)
@@ -550,7 +549,7 @@ func TestStreamMetrics_StorageHour(t *testing.T) {
 	end := now.Unix()
 	interval := s2.TimeseriesIntervalHour
 
-	resp, err := client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
+	_, err = client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
 		Basin:    string(sharedTestBasinName),
 		Stream:   string(streamName),
 		Set:      s2.StreamMetricSetStorage,
@@ -558,21 +557,19 @@ func TestStreamMetrics_StorageHour(t *testing.T) {
 		End:      &end,
 		Interval: &interval,
 	})
-	if err != nil {
-		t.Fatalf("Stream metrics failed: %v", err)
-	}
 
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error for unsupported interval, got: %v", err)
 	}
-	t.Logf("Got %d metric values for storage (hour)", len(resp.Values))
+	t.Logf("Got expected error: %v", err)
 }
 
-func TestStreamMetrics_StorageDay(t *testing.T) {
+func TestStreamMetrics_StorageDayNotSupported(t *testing.T) {
 	skipIfMetricsUnsupported(t)
 	ctx, cancel := context.WithTimeout(context.Background(), metricsTestTimeout)
 	defer cancel()
-	t.Log("Testing: Get stream metrics - storage (day)")
+	t.Log("Testing: Get stream metrics - storage (day) not supported")
 
 	basin := getSharedBasin(t)
 	client := streamTestClient(t)
@@ -589,7 +586,7 @@ func TestStreamMetrics_StorageDay(t *testing.T) {
 	end := now.Unix()
 	interval := s2.TimeseriesIntervalDay
 
-	resp, err := client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
+	_, err = client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
 		Basin:    string(sharedTestBasinName),
 		Stream:   string(streamName),
 		Set:      s2.StreamMetricSetStorage,
@@ -597,14 +594,12 @@ func TestStreamMetrics_StorageDay(t *testing.T) {
 		End:      &end,
 		Interval: &interval,
 	})
-	if err != nil {
-		t.Fatalf("Stream metrics failed: %v", err)
-	}
 
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error for unsupported interval, got: %v", err)
 	}
-	t.Logf("Got %d metric values for storage (day)", len(resp.Values))
+	t.Logf("Got expected error: %v", err)
 }
 
 func TestStreamMetrics_NonExistentStream(t *testing.T) {
@@ -621,7 +616,7 @@ func TestStreamMetrics_NonExistentStream(t *testing.T) {
 	end := now.Unix()
 	interval := s2.TimeseriesIntervalMinute
 
-	_, err := client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
+	resp, err := client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
 		Basin:    string(sharedTestBasinName),
 		Stream:   "nonexistent-stream-12345",
 		Set:      s2.StreamMetricSetStorage,
@@ -630,11 +625,10 @@ func TestStreamMetrics_NonExistentStream(t *testing.T) {
 		Interval: &interval,
 	})
 
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 404 {
-		t.Errorf("Expected 404 error, got: %v", err)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
 	}
-	t.Logf("Got expected error: %v", err)
+	t.Logf("Got %d metric values for non-existent stream (expected empty)", len(resp.Values))
 }
 
 func TestStreamMetrics_NonExistentBasin(t *testing.T) {
@@ -649,7 +643,7 @@ func TestStreamMetrics_NonExistentBasin(t *testing.T) {
 	end := now.Unix()
 	interval := s2.TimeseriesIntervalMinute
 
-	_, err := client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
+	resp, err := client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
 		Basin:    "nonexistent-basin-12345",
 		Stream:   "some-stream",
 		Set:      s2.StreamMetricSetStorage,
@@ -658,11 +652,10 @@ func TestStreamMetrics_NonExistentBasin(t *testing.T) {
 		Interval: &interval,
 	})
 
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 404 {
-		t.Errorf("Expected 404 error, got: %v", err)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
 	}
-	t.Logf("Got expected error: %v", err)
+	t.Logf("Got %d metric values for non-existent basin (expected empty)", len(resp.Values))
 }
 
 func TestStreamMetrics_EmptyStreamName(t *testing.T) {

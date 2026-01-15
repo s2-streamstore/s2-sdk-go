@@ -257,9 +257,6 @@ Returns: `AccumulationMetric`
   - Code: `permission_denied`
   - Cause: token lacks `basin-metrics` permission
 
-- `404` — Basin not found
-  - Code: `basin_not_found`
-
 - `408` — Timeout
   - Code: `timeout`
 
@@ -268,6 +265,8 @@ Returns: `AccumulationMetric`
 
 - `503` — Basin still creating
   - Code: `unavailable`
+
+Note: Non-existent basins return 200 with empty values array, not 404.
 
 ### BasinMetricSet Values
 
@@ -341,9 +340,9 @@ Returns: `AccumulationMetric`
   - Parameters: `set=basin-ops`, `start=<epoch>`, `end=<epoch>`, `interval=hour`
   - Expected: 200, accumulation metric
 
-- **Basin not found**
+- **Non-existent basin**
   - Setup: invalid basin name
-  - Expected: 404 (`basin_not_found`)
+  - Expected: 200, empty values array
 
 - **Basin still creating**
   - Setup: basin in creating state
@@ -396,7 +395,8 @@ Returns: `AccumulationMetric`
 
 - `interval` (TimeseriesInterval, optional)
   - Interval to aggregate over
-  - Values: `minute`, `hour`, `day`
+  - Values: `minute` (only minute-level aggregation currently supported)
+  - Note: `hour` and `day` intervals return 422 (`invalid`)
 
 ### Response Codes
 
@@ -410,14 +410,13 @@ Returns: `AccumulationMetric`
   - Code: `permission_denied`
   - Cause: token lacks `stream-metrics` permission
 
-- `404` — Not found
-  - Code: `basin_not_found` or `stream_not_found`
-
 - `408` — Timeout
   - Code: `timeout`
 
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
+
+Note: Non-existent basins/streams return 200 with empty values array, not 404.
 
 - `422` — Invalid arguments
   - Code: `invalid`
@@ -439,21 +438,21 @@ Returns: `GaugeMetric`
   - Parameters: `set=storage`, `start=<epoch>`, `end=<epoch>`, `interval=minute`
   - Expected: 200, gauge metric with storage values
 
-- **Get stream storage (hour)**
+- **Get stream storage (hour) - not supported**
   - Parameters: `set=storage`, `start=<epoch>`, `end=<epoch>`, `interval=hour`
-  - Expected: 200, gauge metric aggregated hourly
+  - Expected: 422 (`invalid`)
 
-- **Get stream storage (day)**
+- **Get stream storage (day) - not supported**
   - Parameters: `set=storage`, `start=<epoch>`, `end=<epoch>`, `interval=day`
-  - Expected: 200, gauge metric aggregated daily
+  - Expected: 422 (`invalid`)
 
-- **Stream not found**
+- **Non-existent stream**
   - Setup: invalid stream name
-  - Expected: 404 (`stream_not_found`)
+  - Expected: 200, empty values array
 
-- **Basin not found**
+- **Non-existent basin**
   - Setup: invalid basin name
-  - Expected: 404 (`basin_not_found`)
+  - Expected: 200, empty values array
 
 - **Stream being deleted**
   - Setup: stream in deleting state
