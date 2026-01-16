@@ -106,12 +106,12 @@ jobs:
 
   build-s2-lite:
     name: Build S2-lite
-    uses: s2-streamstore/s2-ci/.github/workflows/build-s2-lite.yml@main
+    uses: s2-streamstore/s2/.github/workflows/build-s2-lite.yml@main
 
   s2-lite-integration:
     name: S2-lite Integration
     needs: build-s2-lite
-    uses: s2-streamstore/s2-ci/.github/workflows/sdk-tests.yml@main
+    uses: s2-streamstore/s2/.github/workflows/sdk-tests.yml@main
     with:
       server-binary: server
       server-args: "--port 8080"
