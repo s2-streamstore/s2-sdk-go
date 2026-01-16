@@ -1,0 +1,13 @@
+input:
+  generate:
+    mapping: |
+      root.message = "hello from bento"
+      root.count = counter()
+    interval: 500ms
+    count: 3
+
+output:
+  s2:
+    basin: testing-for
+    stream: pogo
+    access_token: "${S2_ACCESS_TOKEN}"

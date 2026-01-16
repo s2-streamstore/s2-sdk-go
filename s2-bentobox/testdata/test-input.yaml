@@ -1,0 +1,13 @@
+cache_resources:
+  - label: seq_cache
+    memory: {}
+
+input:
+  s2:
+    basin: testing-for
+    streams: pogo
+    access_token: "${S2_ACCESS_TOKEN}"
+    cache: seq_cache
+
+output:
+  stdout: {}

@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: none
     name: CI
-    needs: [examples, test, s2-integration, s2-lite-integration, golangci-lint]
+    needs: [examples, test, s2-integration, s2-lite-integration, golangci-lint, bento-integration]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -142,3 +142,86 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.1.6
+
+  bento-integration:
+    name: Bento Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          path: s2-sdk-go
+      - uses: actions/checkout@v4
+        with:
+          repository: warpstreamlabs/bento
+          path: bento
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Setup bento with local s2-sdk-go
+        working-directory: bento
+        run: |
+          go mod edit -replace github.com/s2-streamstore/s2-sdk-go=../s2-sdk-go
+          go mod tidy
+          go build -o bento ./cmd/bento
+      - name: Create test basin
+        env:
+          S2_ACCESS_TOKEN: ${{ secrets.S2_ACCESS_TOKEN }}
+        working-directory: s2-sdk-go
+        run: |
+          BASIN_NAME=$(go run ./s2-bentobox/testdata/setup create)
+          echo "BASIN_NAME=$BASIN_NAME" >> $GITHUB_ENV
+          echo "Created basin: $BASIN_NAME"
+      - name: Test bento output (write to S2)
+        env:
+          S2_ACCESS_TOKEN: ${{ secrets.S2_ACCESS_TOKEN }}
+        working-directory: bento
+        run: |
+          cat > test-output.yaml << EOF
+          input:
+            generate:
+              mapping: |
+                root.message = "bento-ci-test"
+                root.count = counter()
+              interval: 100ms
+              count: 5
+          output:
+            s2:
+              basin: ${{ env.BASIN_NAME }}
+              stream: test-stream
+              access_token: "\${S2_ACCESS_TOKEN}"
+          EOF
+          ./bento run test-output.yaml
+      - name: Test bento input (read from S2)
+        env:
+          S2_ACCESS_TOKEN: ${{ secrets.S2_ACCESS_TOKEN }}
+        working-directory: bento
+        run: |
+          cat > test-input.yaml << EOF
+          cache_resources:
+            - label: seq_cache
+              memory: {}
+          input:
+            s2:
+              basin: ${{ env.BASIN_NAME }}
+              streams: test-stream
+              access_token: "\${S2_ACCESS_TOKEN}"
+              cache: seq_cache
+          output:
+            stdout: {}
+          EOF
+          timeout 10 ./bento run test-input.yaml 2>&1 | tee output.log || true
+          # Verify we got the expected messages
+          COUNT=$(grep -c "bento-ci-test" output.log || echo "0")
+          if [ "$COUNT" -ge "5" ]; then
+            echo "Success: Found $COUNT messages"
+          else
+            echo "Error: Expected at least 5 messages, got $COUNT"
+            exit 1
+          fi
+      - name: Cleanup test basin
+        if: always()
+        env:
+          S2_ACCESS_TOKEN: ${{ secrets.S2_ACCESS_TOKEN }}
+        working-directory: s2-sdk-go
+        run: go run ./s2-bentobox/testdata/setup delete ${{ env.BASIN_NAME }} || true
