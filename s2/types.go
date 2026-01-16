@@ -4,6 +4,14 @@ import (
 	"time"
 )
 
+// Batch limits.
+const (
+	// MaxBatchRecords is the maximum number of records in a batch.
+	MaxBatchRecords = 1000
+	// MaxBatchBytes is the maximum size of a batch in bytes (1 MiB).
+	MaxBatchBytes = 1024 * 1024
+)
+
 // Access token ID.
 type AccessTokenID string
 

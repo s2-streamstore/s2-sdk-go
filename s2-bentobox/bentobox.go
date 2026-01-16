@@ -1,27 +1,28 @@
 package bentobox
 
 import (
-	"log/slog"
-
 	s2 "github.com/s2-streamstore/s2-sdk-go/s2"
 )
 
 // Plugin name.
 const PluginName = "s2"
 
+// Logger interface for bentobox logging.
+type Logger interface {
+	Debug(msg string, args ...any)
+	Info(msg string, args ...any)
+	Warn(msg string, args ...any)
+	Error(msg string, args ...any)
+	With(args ...any) Logger
+}
+
 type Config struct {
-	Basin       string
-	AccessToken string
-	Logger      *slog.Logger
+	Basin     string
+	AuthToken string
 }
 
 func newClient(config *Config) *s2.Client {
-	var opts *s2.ClientOptions
-	if config.Logger != nil {
-		opts = &s2.ClientOptions{Logger: config.Logger}
-	}
-
-	return s2.New(config.AccessToken, opts)
+	return s2.New(config.AuthToken, nil)
 }
 
 func newStreamClient(config *Config, stream string) *s2.StreamClient {

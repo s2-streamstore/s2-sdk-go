@@ -38,9 +38,9 @@ func main() {
 		_, err := client.CreateBasin(ctx, &s2.CreateBasinInput{
 			Basin: basinName,
 			DefaultStreamConfig: &s2.StreamConfig{
-				StorageClass: s2.StorageClassStandard,
+				StorageClass:         s2.StorageClassStandard,
 				CreateStreamOnAppend: true,
-				CreateStreamOnRead: true
+				CreateStreamOnRead:   true,
 			},
 		})
 		if err != nil {
