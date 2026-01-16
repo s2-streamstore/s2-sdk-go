@@ -10,7 +10,6 @@ import (
 // Plugin name.
 const PluginName = "s2"
 
-// Environment variable names for endpoint configuration.
 const (
 	envAccountEndpoint = "S2_ACCOUNT_ENDPOINT"
 	envBasinEndpoint   = "S2_BASIN_ENDPOINT"
@@ -38,7 +37,6 @@ type Logger interface {
 func newClient(config *Config) *s2.Client {
 	opts := &s2.ClientOptions{}
 
-	// Check for endpoint overrides from environment (for s2-lite testing)
 	if endpoint := os.Getenv(envAccountEndpoint); endpoint != "" {
 		opts.BaseURL = parseEndpoint(endpoint) + "/v1"
 	}
@@ -50,7 +48,6 @@ func newClient(config *Config) *s2.Client {
 	return s2.New(config.AccessToken, opts)
 }
 
-// parseEndpoint normalizes an endpoint string.
 func parseEndpoint(endpoint string) string {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {

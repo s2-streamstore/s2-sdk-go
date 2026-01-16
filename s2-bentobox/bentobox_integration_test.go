@@ -22,8 +22,6 @@ func getAccessToken(t *testing.T) string {
 }
 
 func newTestClient(t *testing.T) *s2.Client {
-	// Use NewFromEnvironment to pick up S2_ACCOUNT_ENDPOINT and S2_BASIN_ENDPOINT
-	// for s2-lite testing, while still using the access token
 	return s2.NewFromEnvironment(nil)
 }
 
@@ -110,14 +108,9 @@ func TestOutputAndInput_RoundTrip(t *testing.T) {
 	basinName := uniqueBasinName("bentobox-test")
 	streamName := "test-stream"
 
-	// Create test basin and stream
 	createTestBasin(ctx, t, client, basinName)
 	defer deleteTestBasin(ctx, t, client, basinName)
-
-	// Wait for basin to be active
 	time.Sleep(2 * time.Second)
-
-	// Create stream explicitly (s2-lite doesn't support auto-creation)
 	createTestStream(ctx, t, client, basinName, streamName)
 
 	config := &bentobox.Config{
@@ -125,7 +118,6 @@ func TestOutputAndInput_RoundTrip(t *testing.T) {
 		AccessToken: accessToken,
 	}
 
-	// Test Output
 	t.Run("Output", func(t *testing.T) {
 		output, err := bentobox.ConnectOutput(ctx, &bentobox.OutputConfig{
 			Config:      config,
@@ -137,7 +129,6 @@ func TestOutputAndInput_RoundTrip(t *testing.T) {
 		}
 		defer output.Close(ctx)
 
-		// Write test records
 		for i := 0; i < 5; i++ {
 			records := []s2.AppendRecord{
 				{
@@ -154,7 +145,6 @@ func TestOutputAndInput_RoundTrip(t *testing.T) {
 		}
 	})
 
-	// Test Input
 	t.Run("Input", func(t *testing.T) {
 		input, err := bentobox.ConnectMultiStreamInput(ctx, &bentobox.InputConfig{
 			Config:      config,
@@ -169,7 +159,6 @@ func TestOutputAndInput_RoundTrip(t *testing.T) {
 		}
 		defer input.Close(ctx)
 
-		// Read records with timeout
 		readCtx, readCancel := context.WithTimeout(ctx, 10*time.Second)
 		defer readCancel()
 
@@ -189,7 +178,6 @@ func TestOutputAndInput_RoundTrip(t *testing.T) {
 				messagesRead++
 			}
 
-			// Acknowledge the batch
 			if err := ackFn(ctx, nil); err != nil {
 				t.Errorf("Ack failed: %v", err)
 			}
@@ -215,8 +203,6 @@ func TestOutput_WriteBatch(t *testing.T) {
 	defer deleteTestBasin(ctx, t, client, basinName)
 
 	time.Sleep(2 * time.Second)
-
-	// Create stream explicitly (s2-lite doesn't support auto-creation)
 	createTestStream(ctx, t, client, basinName, streamName)
 
 	config := &bentobox.Config{
@@ -234,7 +220,6 @@ func TestOutput_WriteBatch(t *testing.T) {
 	}
 	defer output.Close(ctx)
 
-	// Write a batch of records
 	records := make([]s2.AppendRecord, 10)
 	for i := range records {
 		records[i] = s2.AppendRecord{
@@ -269,11 +254,8 @@ func TestInput_PrefixedStreams(t *testing.T) {
 		AccessToken: accessToken,
 	}
 
-	// Create streams explicitly and write to them
 	for i := 0; i < 3; i++ {
 		streamName := fmt.Sprintf("%sstream-%d", prefix, i)
-
-		// Create stream explicitly (s2-lite doesn't support auto-creation)
 		createTestStream(ctx, t, client, basinName, streamName)
 
 		output, err := bentobox.ConnectOutput(ctx, &bentobox.OutputConfig{
@@ -294,7 +276,6 @@ func TestInput_PrefixedStreams(t *testing.T) {
 		t.Logf("Wrote to stream: %s", streamName)
 	}
 
-	// Read from all streams using prefix
 	input, err := bentobox.ConnectMultiStreamInput(ctx, &bentobox.InputConfig{
 		Config:                config,
 		Streams:               bentobox.PrefixedInputStreams{Prefix: prefix},
@@ -309,7 +290,6 @@ func TestInput_PrefixedStreams(t *testing.T) {
 	}
 	defer input.Close(ctx)
 
-	// Read with timeout
 	readCtx, readCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer readCancel()
 
