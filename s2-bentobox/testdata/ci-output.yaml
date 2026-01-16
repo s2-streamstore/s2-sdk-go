@@ -1,0 +1,13 @@
+input:
+  generate:
+    mapping: |
+      root.message = "bento-ci-test"
+      root.count = counter()
+    interval: 100ms
+    count: 5
+
+output:
+  s2:
+    basin: ${BASIN_NAME}
+    stream: test-stream
+    access_token: ${S2_ACCESS_TOKEN}

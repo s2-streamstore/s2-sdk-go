@@ -4,9 +4,9 @@ cache_resources:
 
 input:
   s2:
-    basin: testing-for
-    streams: pogo
-    access_token: "${S2_ACCESS_TOKEN}"
+    basin: ${BASIN_NAME}
+    streams: test-stream
+    access_token: ${S2_ACCESS_TOKEN}
     cache: seq_cache
 
 output:

@@ -3,12 +3,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
 )
+
+const streamName = "test-stream"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -23,7 +26,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	client := s2.New(accessToken, nil)
@@ -35,15 +38,28 @@ func main() {
 			basinName = os.Args[2]
 		}
 
+		// Create basin
 		_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 			Basin: s2.BasinName(basinName),
-			Config: &s2.BasinConfig{
-				CreateStreamOnAppend: s2.Ptr(true),
-				CreateStreamOnRead:   s2.Ptr(true),
-			},
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to create basin: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Wait for basin to be active
+		if err := waitForBasinActive(ctx, client, s2.BasinName(basinName)); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed waiting for basin to be active: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Create stream
+		basin := client.Basin(basinName)
+		_, err = basin.Streams.Create(ctx, s2.CreateStreamArgs{
+			Stream: streamName,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create stream: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -62,10 +78,33 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to delete basin: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Deleted basin: %s\n", basinName)
+		fmt.Fprintf(os.Stderr, "Deleted basin: %s\n", basinName)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown action: %s\n", action)
 		os.Exit(1)
+	}
+}
+
+func waitForBasinActive(ctx context.Context, client *s2.Client, name s2.BasinName) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for basin %s to become active", name)
+		default:
+		}
+
+		_, err := client.Basins.GetConfig(ctx, name)
+		if err == nil {
+			return nil
+		}
+
+		var s2Err *s2.S2Error
+		if errors.As(err, &s2Err) && s2Err.Code == "unavailable" {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		// Non-unavailable error or success
+		return nil
 	}
 }

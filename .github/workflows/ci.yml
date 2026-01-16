@@ -125,6 +125,14 @@ jobs:
             "lang": "go",
             "go-version": "1.23",
             "test_cmd": "go test -v -timeout 10m -count=1 -skip WithScope ./s2/..."
+          },
+          {
+            "name": "go-bentobox",
+            "repo": "${{ github.repository }}",
+            "ref": "${{ github.ref }}",
+            "lang": "go",
+            "go-version": "1.23",
+            "test_cmd": "go test -v -timeout 5m -count=1 ./s2-bentobox/..."
           }
         ]
 
@@ -176,42 +184,16 @@ jobs:
       - name: Test bento output (write to S2)
         env:
           S2_ACCESS_TOKEN: ${{ secrets.S2_ACCESS_TOKEN }}
+          BASIN_NAME: ${{ env.BASIN_NAME }}
         working-directory: bento
-        run: |
-          cat > test-output.yaml << EOF
-          input:
-            generate:
-              mapping: |
-                root.message = "bento-ci-test"
-                root.count = counter()
-              interval: 100ms
-              count: 5
-          output:
-            s2:
-              basin: ${{ env.BASIN_NAME }}
-              stream: test-stream
-              access_token: "\${S2_ACCESS_TOKEN}"
-          EOF
-          ./bento run test-output.yaml
+        run: ./bento run ../s2-sdk-go/s2-bentobox/testdata/ci-output.yaml
       - name: Test bento input (read from S2)
         env:
           S2_ACCESS_TOKEN: ${{ secrets.S2_ACCESS_TOKEN }}
+          BASIN_NAME: ${{ env.BASIN_NAME }}
         working-directory: bento
         run: |
-          cat > test-input.yaml << EOF
-          cache_resources:
-            - label: seq_cache
-              memory: {}
-          input:
-            s2:
-              basin: ${{ env.BASIN_NAME }}
-              streams: test-stream
-              access_token: "\${S2_ACCESS_TOKEN}"
-              cache: seq_cache
-          output:
-            stdout: {}
-          EOF
-          timeout 10 ./bento run test-input.yaml 2>&1 | tee output.log || true
+          timeout 10 ./bento run ../s2-sdk-go/s2-bentobox/testdata/ci-input.yaml 2>&1 | tee output.log || true
           # Verify we got the expected messages
           COUNT=$(grep -c "bento-ci-test" output.log || echo "0")
           if [ "$COUNT" -ge "5" ]; then
