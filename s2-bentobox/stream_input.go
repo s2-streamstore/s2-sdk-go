@@ -241,6 +241,8 @@ func (si *streamInput) ack(ctx context.Context, records []s2.SequencedRecord) er
 		withLog = append(withLog, "range", fmt.Sprintf("%d..=%d", firstSeqNum, lastSeqNum))
 	}
 
+	si.Logger.With(withLog...).Debug("Acknowledging batch")
+
 	return si.toAck.MarkDone(ctx, records, !si.isClosed())
 }
 
