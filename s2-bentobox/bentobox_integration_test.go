@@ -54,6 +54,17 @@ func deleteTestBasin(ctx context.Context, t *testing.T, client *s2.Client, name 
 	}
 }
 
+func createTestStream(ctx context.Context, t *testing.T, client *s2.Client, basinName, streamName string) {
+	basin := client.Basin(basinName)
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
+		Stream: s2.StreamName(streamName),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create stream %s: %v", streamName, err)
+	}
+	t.Logf("Created stream: %s", streamName)
+}
+
 // noopLogger implements bentobox.Logger with no-op methods
 type noopLogger struct{}
 
@@ -99,12 +110,15 @@ func TestOutputAndInput_RoundTrip(t *testing.T) {
 	basinName := uniqueBasinName("bentobox-test")
 	streamName := "test-stream"
 
-	// Create test basin
+	// Create test basin and stream
 	createTestBasin(ctx, t, client, basinName)
 	defer deleteTestBasin(ctx, t, client, basinName)
 
 	// Wait for basin to be active
 	time.Sleep(2 * time.Second)
+
+	// Create stream explicitly (s2-lite doesn't support auto-creation)
+	createTestStream(ctx, t, client, basinName, streamName)
 
 	config := &bentobox.Config{
 		Basin:       basinName,
@@ -202,6 +216,9 @@ func TestOutput_WriteBatch(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
+	// Create stream explicitly (s2-lite doesn't support auto-creation)
+	createTestStream(ctx, t, client, basinName, streamName)
+
 	config := &bentobox.Config{
 		Basin:       basinName,
 		AccessToken: accessToken,
@@ -252,9 +269,13 @@ func TestInput_PrefixedStreams(t *testing.T) {
 		AccessToken: accessToken,
 	}
 
-	// Write to multiple streams with the prefix
+	// Create streams explicitly and write to them
 	for i := 0; i < 3; i++ {
 		streamName := fmt.Sprintf("%sstream-%d", prefix, i)
+
+		// Create stream explicitly (s2-lite doesn't support auto-creation)
+		createTestStream(ctx, t, client, basinName, streamName)
+
 		output, err := bentobox.ConnectOutput(ctx, &bentobox.OutputConfig{
 			Config: config,
 			Stream: streamName,
