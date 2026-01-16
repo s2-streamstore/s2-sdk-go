@@ -35,12 +35,11 @@ func main() {
 			basinName = os.Args[2]
 		}
 
-		_, err := client.CreateBasin(ctx, &s2.CreateBasinInput{
-			Basin: basinName,
-			DefaultStreamConfig: &s2.StreamConfig{
-				StorageClass: s2.StorageClassStandard,
-				CreateStreamOnAppend: true,
-				CreateStreamOnRead: true
+		_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
+			Basin: s2.BasinName(basinName),
+			Config: &s2.BasinConfig{
+				CreateStreamOnAppend: s2.Ptr(true),
+				CreateStreamOnRead:   s2.Ptr(true),
 			},
 		})
 		if err != nil {
@@ -58,9 +57,7 @@ func main() {
 		}
 		basinName := os.Args[2]
 
-		err := client.DeleteBasin(ctx, &s2.DeleteBasinInput{
-			Basin: basinName,
-		})
+		err := client.Basins.Delete(ctx, s2.BasinName(basinName))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to delete basin: %v\n", err)
 			os.Exit(1)
