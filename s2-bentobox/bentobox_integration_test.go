@@ -21,6 +21,12 @@ func getAccessToken(t *testing.T) string {
 	return token
 }
 
+func newTestClient(t *testing.T) *s2.Client {
+	// Use NewFromEnvironment to pick up S2_ACCOUNT_ENDPOINT and S2_BASIN_ENDPOINT
+	// for s2-lite testing, while still using the access token
+	return s2.NewFromEnvironment(nil)
+}
+
 func uniqueBasinName(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
@@ -89,7 +95,7 @@ func TestOutputAndInput_RoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	client := s2.New(accessToken, nil)
+	client := newTestClient(t)
 	basinName := uniqueBasinName("bentobox-test")
 	streamName := "test-stream"
 
@@ -187,7 +193,7 @@ func TestOutput_WriteBatch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	client := s2.New(accessToken, nil)
+	client := newTestClient(t)
 	basinName := uniqueBasinName("bentobox-out")
 	streamName := "output-test"
 
@@ -232,7 +238,7 @@ func TestInput_PrefixedStreams(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	client := s2.New(accessToken, nil)
+	client := newTestClient(t)
 	basinName := uniqueBasinName("bentobox-pfx")
 	prefix := "prefix-test/"
 

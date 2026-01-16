@@ -191,9 +191,9 @@ func convertPbAppendAck(pbAck *pb.AppendAck) *AppendAck {
 }
 
 const (
-	// MaxBatchRecords is the maximum number of records allowed in a single append batch.
+	// Maximum number of records allowed in a single append batch.
 	MaxBatchRecords = 1000
-	// MaxBatchMeteredBytes is the maximum metered size in bytes for a single append batch (1 MiB).
+	// Maximum metered size in bytes for a single append batch (1 MiB).
 	MaxBatchMeteredBytes = 1 * 1024 * 1024 // 1 MiB
 )
 
