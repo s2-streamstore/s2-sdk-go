@@ -110,6 +110,7 @@ type InputConfig struct {
 	MaxInFlight           int
 	UpdateStreamsInterval time.Duration
 	Cache                 SeqNumCache
+	Logger                Logger
 	BackoffDuration       time.Duration
 	StartSeqNum           InputStartSeqNum
 }
