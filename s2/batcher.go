@@ -44,11 +44,11 @@ func applyBatchingDefaults(opts *BatchingOptions) *BatchingOptions {
 	if result.Linger == 0 {
 		result.Linger = 5 * time.Millisecond
 	}
-	if result.MaxRecords <= 0 || result.MaxRecords > maxBatchRecords {
-		result.MaxRecords = maxBatchRecords
+	if result.MaxRecords <= 0 || result.MaxRecords > MaxBatchRecords {
+		result.MaxRecords = MaxBatchRecords
 	}
-	if result.MaxMeteredBytes == 0 || result.MaxMeteredBytes > maxBatchMeteredBytes {
-		result.MaxMeteredBytes = maxBatchMeteredBytes
+	if result.MaxMeteredBytes == 0 || result.MaxMeteredBytes > MaxBatchMeteredBytes {
+		result.MaxMeteredBytes = MaxBatchMeteredBytes
 	}
 	if result.ChannelBuffer <= 0 {
 		result.ChannelBuffer = 100

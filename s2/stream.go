@@ -191,8 +191,10 @@ func convertPbAppendAck(pbAck *pb.AppendAck) *AppendAck {
 }
 
 const (
-	maxBatchRecords      = 1000
-	maxBatchMeteredBytes = 1 * 1024 * 1024 // 1 MiB
+	// MaxBatchRecords is the maximum number of records allowed in a single append batch.
+	MaxBatchRecords = 1000
+	// MaxBatchMeteredBytes is the maximum metered size in bytes for a single append batch (1 MiB).
+	MaxBatchMeteredBytes = 1 * 1024 * 1024 // 1 MiB
 )
 
 func prepareAppendInput(input *AppendInput) (*AppendInput, int64, error) {
@@ -202,14 +204,14 @@ func prepareAppendInput(input *AppendInput) (*AppendInput, int64, error) {
 	if len(input.Records) == 0 {
 		return nil, 0, fmt.Errorf("append input must contain at least one record")
 	}
-	if len(input.Records) > maxBatchRecords {
-		return nil, 0, fmt.Errorf("cannot append more than %d records at once, got %d", maxBatchRecords, len(input.Records))
+	if len(input.Records) > MaxBatchRecords {
+		return nil, 0, fmt.Errorf("cannot append more than %d records at once, got %d", MaxBatchRecords, len(input.Records))
 	}
 
 	cloned := cloneAppendInput(input)
 	size := MeteredBatchBytes(cloned.Records)
-	if size > maxBatchMeteredBytes {
-		return nil, 0, fmt.Errorf("batch size %d bytes exceeds maximum %d bytes (1 MiB)", size, maxBatchMeteredBytes)
+	if size > MaxBatchMeteredBytes {
+		return nil, 0, fmt.Errorf("batch size %d bytes exceeds maximum %d bytes (1 MiB)", size, MaxBatchMeteredBytes)
 	}
 	return cloned, size, nil
 }
