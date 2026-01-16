@@ -108,21 +108,15 @@ type InputConfig struct {
 	*Config
 	Streams               InputStreams
 	MaxInFlight           int
-	Logger                Logger
 	UpdateStreamsInterval time.Duration
 	Cache                 SeqNumCache
 	BackoffDuration       time.Duration
 	StartSeqNum           InputStartSeqNum
 }
 
-// RecordBatch wraps a batch of sequenced records.
-type RecordBatch struct {
-	Records []s2.SequencedRecord
-}
-
 type recvOutput struct {
 	Stream  string
-	Batch   *RecordBatch
+	Batch   []s2.SequencedRecord
 	AckFunc AckFunc
 	Err     error
 }

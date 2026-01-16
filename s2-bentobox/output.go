@@ -10,13 +10,10 @@ import (
 
 var ErrOutputClosed = errors.New("output closed")
 
-// ErrAppendRecordBatchFull is returned when a batch exceeds size limits.
-var ErrAppendRecordBatchFull = errors.New("append record batch full")
-
 type OutputConfig struct {
 	*Config
 	Stream       string
-	FencingToken []byte
+	FencingToken *string
 	MaxInFlight  int
 }
 
@@ -44,15 +41,9 @@ func ConnectOutput(ctx context.Context, config *OutputConfig) (*Output, error) {
 		return nil, err
 	}
 
-	var fencingToken *string
-	if len(config.FencingToken) > 0 {
-		s := string(config.FencingToken)
-		fencingToken = &s
-	}
-
 	return &Output{
 		session:      session,
-		fencingToken: fencingToken,
+		fencingToken: config.FencingToken,
 	}, nil
 }
 

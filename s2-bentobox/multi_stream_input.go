@@ -2,6 +2,7 @@ package bentobox
 
 import (
 	"context"
+	"log/slog"
 	"math/rand"
 	"time"
 
@@ -32,7 +33,7 @@ func ConnectMultiStreamInput(ctx context.Context, config *InputConfig) (*MultiSt
 	}, nil
 }
 
-func (msi *MultiStreamInput) ReadBatch(ctx context.Context) (*RecordBatch, AckFunc, Stream, error) {
+func (msi *MultiStreamInput) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, AckFunc, Stream, error) {
 	select {
 	case r, ok := <-msi.inputStream:
 		if !ok {
@@ -172,7 +173,7 @@ managerLoop:
 func streamSource(
 	ctx context.Context,
 	basin *s2.BasinClient,
-	logger Logger,
+	logger *slog.Logger,
 	cache *seqNumCache,
 	stream string,
 	maxInflight int,
@@ -217,7 +218,7 @@ func streamSourceRecvLoop(
 	input *streamInput,
 	stream string,
 	inputStream chan<- recvOutput,
-	logger Logger,
+	logger *slog.Logger,
 ) {
 	defer input.Close(ctx)
 
@@ -247,7 +248,7 @@ func streamSourceRecvLoop(
 		}
 
 		select {
-		case inputStream <- recvOutput{Stream: stream, Batch: &RecordBatch{Records: batch}, AckFunc: aFn}:
+		case inputStream <- recvOutput{Stream: stream, Batch: batch, AckFunc: aFn}:
 		case <-ctx.Done():
 			return
 		}

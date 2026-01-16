@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	s2 "github.com/s2-streamstore/s2-sdk-go/s2"
@@ -20,14 +21,14 @@ type batchAckStatus struct {
 
 type toAckMap struct {
 	stream string
-	logger Logger
+	logger *slog.Logger
 
 	mu    sync.Mutex
 	inner *btree.Map[uint64, batchAckStatus]
 	cache *seqNumCache
 }
 
-func newToAckMap(stream string, cache *seqNumCache, logger Logger) *toAckMap {
+func newToAckMap(stream string, cache *seqNumCache, logger *slog.Logger) *toAckMap {
 	return &toAckMap{
 		stream: stream,
 		logger: logger,
@@ -117,7 +118,7 @@ type streamInput struct {
 	cache        *seqNumCache
 	toAck        *toAckMap
 	nacks        chan []s2.SequencedRecord
-	logger       Logger
+	logger       *slog.Logger
 	closeSession func()
 	closedCh     chan struct{}
 	closeOnce    sync.Once
@@ -127,7 +128,7 @@ func connectStreamInput(
 	ctx context.Context,
 	basin *s2.BasinClient,
 	cache *seqNumCache,
-	logger Logger,
+	logger *slog.Logger,
 	stream string,
 	maxInflight int,
 	inputStartSeqNum InputStartSeqNum,
