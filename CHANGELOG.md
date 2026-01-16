@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.6] - 2026-01-16
+
+### Features
+
+- Re-enable compression for unary requests ([#138](https://github.com/s2-streamstore/s2-sdk-go/issues/138))
+
+### Bug Fixes
+
+- *(bentobox)* MultiStreamInput shutdown ([#135](https://github.com/s2-streamstore/s2-sdk-go/issues/135))
+
+### Testing
+
+- S2-lite integration ([#149](https://github.com/s2-streamstore/s2-sdk-go/issues/149))
+- Bento integration ([#152](https://github.com/s2-streamstore/s2-sdk-go/issues/152))
+
+### Miscellaneous Tasks
+
+- Rm accidentally committed bin ([#136](https://github.com/s2-streamstore/s2-sdk-go/issues/136))
+- Update specs ([#150](https://github.com/s2-streamstore/s2-sdk-go/issues/150))
+- Rename workflow and enable signed commits ([#151](https://github.com/s2-streamstore/s2-sdk-go/issues/151))
+
 ## [v0.11.5] - 2026-01-12
 
 ### Bug Fixes
@@ -13,6 +34,7 @@ All notable changes to this project will be documented in this file.
 
 - Update integration tests ([#131](https://github.com/s2-streamstore/s2-sdk-go/issues/131))
 - Improve starwars example ([#130](https://github.com/s2-streamstore/s2-sdk-go/issues/130))
+- *(release)* V0.11.5 ([#134](https://github.com/s2-streamstore/s2-sdk-go/issues/134))
 
 ## [v0.11.4] - 2026-01-09
 
