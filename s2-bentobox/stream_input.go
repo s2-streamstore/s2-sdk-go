@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 
 	s2 "github.com/s2-streamstore/s2-sdk-go/s2"
@@ -21,14 +20,14 @@ type batchAckStatus struct {
 
 type toAckMap struct {
 	stream string
-	logger *slog.Logger
+	logger Logger
 
 	mu    sync.Mutex
 	inner *btree.Map[uint64, batchAckStatus]
 	cache *seqNumCache
 }
 
-func newToAckMap(stream string, cache *seqNumCache, logger *slog.Logger) *toAckMap {
+func newToAckMap(stream string, cache *seqNumCache, logger Logger) *toAckMap {
 	return &toAckMap{
 		stream: stream,
 		logger: logger,
@@ -101,11 +100,7 @@ func (tam *toAckMap) MarkDone(ctx context.Context, records []s2.SequencedRecord,
 
 	if lastAcked != nil && updateCache {
 		nextSeqNum := lastAcked.LastSeqNum + 1
-		if tam.logger != nil {
-			tam.logger.Debug("updating cached sequence number",
-				"stream", tam.stream,
-				"start_seq_num", nextSeqNum)
-		}
+		tam.logger.With("stream", tam.stream, "start_seq_num", nextSeqNum).Debug("Updating cached sequence number")
 		return tam.cache.Set(ctx, tam.stream, nextSeqNum)
 	}
 
@@ -113,12 +108,12 @@ func (tam *toAckMap) MarkDone(ctx context.Context, records []s2.SequencedRecord,
 }
 
 type streamInput struct {
-	stream       string
+	Stream       string
 	session      *s2.ReadSession
 	cache        *seqNumCache
 	toAck        *toAckMap
 	nacks        chan []s2.SequencedRecord
-	logger       *slog.Logger
+	Logger       Logger
 	closeSession func()
 	closedCh     chan struct{}
 	closeOnce    sync.Once
@@ -128,7 +123,7 @@ func connectStreamInput(
 	ctx context.Context,
 	basin *s2.BasinClient,
 	cache *seqNumCache,
-	logger *slog.Logger,
+	logger Logger,
 	stream string,
 	maxInflight int,
 	inputStartSeqNum InputStartSeqNum,
@@ -149,9 +144,7 @@ func connectStreamInput(
 		opts.SeqNum = s2.Uint64(startSeqNum)
 	}
 
-	if logger != nil {
-		logger.Debug("starting to read", "stream", stream, "opts", opts)
-	}
+	logger.With("stream", stream, "start_seq_num", startSeqNum).Debug("Starting to read")
 
 	streamCtx, closeSession := context.WithCancel(ctx)
 
@@ -162,12 +155,12 @@ func connectStreamInput(
 	}
 
 	return &streamInput{
-		stream:       stream,
+		Stream:       stream,
 		session:      session,
 		cache:        cache,
 		toAck:        newToAckMap(stream, cache, logger),
 		nacks:        make(chan []s2.SequencedRecord, maxInflight),
-		logger:       logger,
+		Logger:       logger,
 		closeSession: closeSession,
 		closedCh:     make(chan struct{}),
 	}, nil
@@ -230,9 +223,7 @@ func (si *streamInput) handleBatch(_ context.Context, records []s2.SequencedReco
 }
 
 func (si *streamInput) nack(records []s2.SequencedRecord) error {
-	if si.logger != nil {
-		si.logger.Debug("nacking batch", "stream", si.stream)
-	}
+	si.Logger.With("stream", si.Stream).Debug("Nacking batch")
 
 	select {
 	case si.nacks <- records:
@@ -243,13 +234,14 @@ func (si *streamInput) nack(records []s2.SequencedRecord) error {
 }
 
 func (si *streamInput) ack(ctx context.Context, records []s2.SequencedRecord) error {
-	if si.logger != nil && len(records) > 0 {
+	withLog := []any{"stream", si.Stream}
+	if len(records) > 0 {
 		firstSeqNum := records[0].SeqNum
 		lastSeqNum := records[len(records)-1].SeqNum
-		si.logger.Debug("acknowledging batch",
-			"stream", si.stream,
-			"range", fmt.Sprintf("%d..=%d", firstSeqNum, lastSeqNum))
+		withLog = append(withLog, "range", fmt.Sprintf("%d..=%d", firstSeqNum, lastSeqNum))
 	}
+
+	si.Logger.With(withLog...).Debug("Acknowledging batch")
 
 	return si.toAck.MarkDone(ctx, records, !si.isClosed())
 }

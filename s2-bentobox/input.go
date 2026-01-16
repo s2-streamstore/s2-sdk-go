@@ -57,7 +57,6 @@ func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum uint64) error {
 	if s.inner != nil {
 		if err := s.inner.Set(ctx, stream, seqNum); err != nil {
-			s.mem.Remove(stream)
 			return err
 		}
 	}
@@ -111,6 +110,7 @@ type InputConfig struct {
 	MaxInFlight           int
 	UpdateStreamsInterval time.Duration
 	Cache                 SeqNumCache
+	Logger                Logger
 	BackoffDuration       time.Duration
 	StartSeqNum           InputStartSeqNum
 }

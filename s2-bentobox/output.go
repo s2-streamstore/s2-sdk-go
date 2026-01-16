@@ -35,7 +35,8 @@ func ConnectOutput(ctx context.Context, config *OutputConfig) (*Output, error) {
 		}
 	}
 
-	session, err := stream.AppendSession(ctx, opts)
+	// Use background context for session lifecycle - it should outlive individual requests
+	session, err := stream.AppendSession(context.Background(), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +64,13 @@ func (o *Output) WriteBatch(ctx context.Context, records []s2.AppendRecord) erro
 	if err != nil {
 		return err
 	}
-	_, err = future.Wait(ctx)
+
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = ticket.Ack(ctx)
 	return err
 }
 

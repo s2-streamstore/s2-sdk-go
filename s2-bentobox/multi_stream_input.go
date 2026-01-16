@@ -2,7 +2,7 @@ package bentobox
 
 import (
 	"context"
-	"log/slog"
+	"errors"
 	"math/rand"
 	"time"
 
@@ -125,9 +125,9 @@ managerLoop:
 
 		newStreams, err := config.Streams.list(ctx, basin)
 		if err != nil {
-			if config.Logger != nil {
-				config.Logger.Error("failed to list streams", "error", err)
-			}
+			config.Logger.
+				With("error", err).
+				Error("Failed to list streams")
 
 			// Try updating the update list notifier for retry
 			select {
@@ -143,18 +143,14 @@ managerLoop:
 			newStreamsSet[stream] = struct{}{}
 
 			if _, found := existingWorkers[stream]; !found {
-				if config.Logger != nil {
-					config.Logger.Info("reading from S2 source", "stream", stream)
-				}
+				config.Logger.With("stream", stream).Info("Reading from S2 source")
 				spawnWorker(stream)
 			}
 		}
 
 		for stream, worker := range existingWorkers {
 			if _, found := newStreamsSet[stream]; !found {
-				if config.Logger != nil {
-					config.Logger.Warn("not reading from S2 source anymore", "stream", stream)
-				}
+				config.Logger.With("stream", stream).Warn("Not reading from S2 source anymore")
 				worker.Close()
 				delete(existingWorkers, stream)
 			}
@@ -173,7 +169,7 @@ managerLoop:
 func streamSource(
 	ctx context.Context,
 	basin *s2.BasinClient,
-	logger *slog.Logger,
+	logger Logger,
 	cache *seqNumCache,
 	stream string,
 	maxInflight int,
@@ -199,9 +195,7 @@ func streamSource(
 
 		input, err := connectStreamInput(ctx, basin, cache, logger, stream, maxInflight, inputStartSeqNum)
 		if err != nil {
-			if logger != nil {
-				logger.Error("failed to connect, retrying", "error", err, "stream", stream)
-			}
+			logger.With("error", err, "stream", stream).Error("Failed to connect, retrying.")
 
 			jitter := time.Duration(rand.Int63n(int64(10 * time.Millisecond)))
 			backoff = time.After(backoffDuration + jitter)
@@ -218,7 +212,7 @@ func streamSourceRecvLoop(
 	input *streamInput,
 	stream string,
 	inputStream chan<- recvOutput,
-	logger *slog.Logger,
+	logger Logger,
 ) {
 	defer input.Close(ctx)
 
@@ -231,10 +225,9 @@ func streamSourceRecvLoop(
 
 		batch, aFn, err := input.ReadBatch(ctx)
 		if err != nil {
-			if err == ErrInputClosed {
-				if logger != nil {
-					logger.Debug("restarting source", "stream", stream)
-				}
+			if errors.Is(err, ErrInputClosed) {
+				logger.With("stream", stream).Debug("Restarting source")
+
 				return
 			}
 

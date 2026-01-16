@@ -1,7 +1,8 @@
 package bentobox
 
 import (
-	"log/slog"
+	"os"
+	"strings"
 
 	s2 "github.com/s2-streamstore/s2-sdk-go/s2"
 )
@@ -9,23 +10,89 @@ import (
 // Plugin name.
 const PluginName = "s2"
 
+const (
+	envAccountEndpoint = "S2_ACCOUNT_ENDPOINT"
+	envBasinEndpoint   = "S2_BASIN_ENDPOINT"
+)
+
 type Config struct {
 	Basin       string
 	AccessToken string
-	Logger      *slog.Logger
+}
+
+type Logger interface {
+	Tracef(template string, args ...any)
+	Trace(message string)
+	Debugf(template string, args ...any)
+	Debug(message string)
+	Infof(template string, args ...any)
+	Info(message string)
+	Warnf(template string, args ...any)
+	Warn(message string)
+	Errorf(template string, args ...any)
+	Error(message string)
+	With(keyValuePairs ...any) Logger
 }
 
 func newClient(config *Config) *s2.Client {
-	var opts *s2.ClientOptions
-	if config.Logger != nil {
-		opts = &s2.ClientOptions{Logger: config.Logger}
+	opts := &s2.ClientOptions{}
+
+	if endpoint := os.Getenv(envAccountEndpoint); endpoint != "" {
+		opts.BaseURL = parseEndpoint(endpoint) + "/v1"
+	}
+
+	if endpoint := os.Getenv(envBasinEndpoint); endpoint != "" {
+		opts.MakeBasinBaseURL = makeBasinURLFunc(parseEndpoint(endpoint))
 	}
 
 	return s2.New(config.AccessToken, opts)
 }
 
+func parseEndpoint(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		if isLocalhost(endpoint) {
+			endpoint = "http://" + endpoint
+		} else {
+			endpoint = "https://" + endpoint
+		}
+	}
+
+	endpoint = strings.TrimRight(endpoint, "/")
+	endpoint = strings.TrimSuffix(endpoint, "/v1")
+
+	return endpoint
+}
+
+func isLocalhost(endpoint string) bool {
+	host := endpoint
+	if idx := strings.Index(endpoint, ":"); idx != -1 {
+		host = endpoint[:idx]
+	}
+	return host == "localhost" || host == "127.0.0.1"
+}
+
+func makeBasinURLFunc(basinEndpoint string) func(basin string) string {
+	if basinEndpoint == "" {
+		return nil
+	}
+
+	if strings.Contains(basinEndpoint, "{basin}") {
+		return func(basin string) string {
+			return strings.ReplaceAll(basinEndpoint, "{basin}", basin) + "/v1"
+		}
+	}
+
+	return func(basin string) string {
+		return basinEndpoint + "/v1"
+	}
+}
+
 func newStreamClient(config *Config, stream string) *s2.StreamClient {
 	client := newClient(config)
-
 	return client.Basin(config.Basin).Stream(s2.StreamName(stream))
 }
