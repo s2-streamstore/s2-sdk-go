@@ -1,0 +1,76 @@
+name: Update s2-specs submodule
+
+permissions:
+  contents: write
+  pull-requests: write
+
+on:
+  repository_dispatch:
+    types: [s2-specs-update]
+  workflow_dispatch:
+
+jobs:
+  update-specs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Update Submodules
+        id: submodules
+        uses: sgoudham/update-git-submodules@v2.1.1
+        with:
+          submodules: s2-specs
+
+      - name: Setup Go
+        if: ${{ steps.submodules.outputs['s2-specs--updated'] }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Setup Task
+        if: ${{ steps.submodules.outputs['s2-specs--updated'] }}
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.40.x
+
+      - name: Setup Protoc
+        if: ${{ steps.submodules.outputs['s2-specs--updated'] }}
+        uses: arduino/setup-protoc@v3
+        with:
+          version: 30.2
+
+      - name: Install protoc-gen-go
+        if: ${{ steps.submodules.outputs['s2-specs--updated'] }}
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+      - name: Regenerate Proto files
+        if: ${{ steps.submodules.outputs['s2-specs--updated'] }}
+        run: |
+          task gen
+          git add generated
+
+      - name: Create Pull Request
+        if: ${{ steps.submodules.outputs['s2-specs--updated'] }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          committer: s2-helper[bot] <194906454+s2-helper[bot]@users.noreply.github.com>
+          author: s2-helper[bot] <194906454+s2-helper[bot]@users.noreply.github.com>
+          title: "chore: update s2-specs to ${{ steps.submodules.outputs['s2-specs--latestShortCommitSha'] }}"
+          branch: "specs/update-s2-specs-${{ steps.submodules.outputs['s2-specs--latestShortCommitSha'] }}"
+          body: |
+            ## s2-specs Update
+
+            ${{ steps.submodules.outputs.prBody }}
+
+            ### Changes
+            - Updated s2-specs submodule
+            - Regenerated proto Go files
+
+            **Commit:** ${{ steps.submodules.outputs['s2-specs--latestCommitSha'] }}
+          labels: |
+            dependencies
+            specs
