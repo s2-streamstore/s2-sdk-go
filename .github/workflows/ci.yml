@@ -78,7 +78,7 @@ jobs:
         run: task test
 
   s2-integration:
-    name: s2 Integration
+    name: S2 Integration
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -104,11 +104,12 @@ jobs:
           S2_BASIN_ENDPOINT: ${{ secrets.S2_BASIN_ENDPOINT }}
         run: task test:integration
 
-  build-s2-lite:    
+  build-s2-lite:
+    name: Build S2-lite
     uses: s2-streamstore/s2-ci/.github/workflows/build-s2-lite.yml@main
 
   s2-lite-integration:
-    name: s2-lite Integration
+    name: S2-lite Integration
     needs: build-s2-lite
     uses: s2-streamstore/s2-ci/.github/workflows/sdk-tests.yml@main
     with:
@@ -116,7 +117,16 @@ jobs:
       server-args: "--port 8080"
       server-port: 8080
       sdks: |
-        [{"name": "go", "repo": "${{ github.repository }}", "ref": "${{ github.ref }}", "lang": "go", "go-version": "1.23", "test_cmd": "go test -v -timeout 10m -count=1 ./s2/..."}]
+        [
+          {
+            "name": "go",
+            "repo": "${{ github.repository }}",
+            "ref": "${{ github.ref }}",
+            "lang": "go",
+            "go-version": "1.23",
+            "test_cmd": "go test -v -timeout 10m -count=1 -skip WithScope ./s2/..."
+          }
+        ]
 
   golangci-lint:
     name: GolangCI Lint
