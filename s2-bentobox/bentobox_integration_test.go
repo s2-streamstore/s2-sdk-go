@@ -129,7 +129,7 @@ func TestOutputAndInput_RoundTrip(t *testing.T) {
 		}
 		defer output.Close(ctx)
 
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			records := []s2.AppendRecord{
 				{
 					Body: []byte(fmt.Sprintf("test message %d", i)),
@@ -254,7 +254,7 @@ func TestInput_PrefixedStreams(t *testing.T) {
 		AccessToken: accessToken,
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		streamName := fmt.Sprintf("%sstream-%d", prefix, i)
 		createTestStream(ctx, t, client, basinName, streamName)
 
