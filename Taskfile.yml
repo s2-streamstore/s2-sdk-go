@@ -9,7 +9,7 @@ tasks:
       - sh: which protoc-gen-go
         msg: "`protoc-gen-go` not found. Install via: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest"
     sources:
-      - s2-protos/**/*.proto
+      - s2-specs/**/*.proto
     generates:
       - generated/**/*.go
     cmds:
@@ -17,8 +17,8 @@ tasks:
       - cmd: |
           protoc --go_out=generated \
             --go_opt=paths=import \
-            --go_opt=Ms2-protos/s2/v1/s2.proto=. \
-            s2-protos/s2/v1/s2.proto
+            --go_opt=Ms2-specs/s2/v1/s2.proto=. \
+            s2-specs/s2/v1/s2.proto
 
   test:
     deps: [gen]
