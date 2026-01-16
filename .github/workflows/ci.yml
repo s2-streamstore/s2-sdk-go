@@ -113,6 +113,9 @@ jobs:
     needs: build-s2-lite
     uses: s2-streamstore/s2-ci/.github/workflows/sdk-tests.yml@main
     with:
+      server-binary: server
+      server-args: "--port 8080"
+      server-port: 8080
       sdks: |
         [{"name": "go", "repo": "${{ github.repository }}", "ref": "${{ github.ref }}", "lang": "go", "go-version": "1.23", "test_cmd": "go test -v -timeout 10m -count=1 ./s2/..."}]
 
