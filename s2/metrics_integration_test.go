@@ -331,7 +331,7 @@ func TestBasinMetrics_ReadOps(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Expected non-nil response")
 	}
-	t.Logf("Got %d metrics (expected 2: segment, channel)", len(resp.Values))
+	t.Logf("Got %d metrics (expected 2: streaming, unary)", len(resp.Values))
 }
 
 func TestBasinMetrics_ReadThroughput(t *testing.T) {

@@ -58,16 +58,16 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `200` — Success
   - Body: `ListBasinsResponse`
 
-- `400` — Bad request
-  - Code: `invalid`
-  - Cause: invalid parameter format/value
-
 - `403` — Forbidden
   - Code: `permission_denied`
   - Cause: token lacks `list-basins` permission
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
+
+- `422` — Validation error
+  - Code: `invalid`
+  - Cause: invalid parameter format/value
 
 ### Response Schema: ListBasinsResponse
 
@@ -79,10 +79,6 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Indicates more basins match criteria
 
 ### Test Cases
-
-- **List includes deleting basins**
-  - Setup: delete a basin, then list
-  - Expected: 200, basin appears with `state: "deleting"`
 
 - **List all basins**
   - Parameters: none
@@ -214,20 +210,20 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `201` — Basin created
   - Body: `BasinInfo`
 
-- `400` — Bad request / invalid config
-  - Code: `invalid`
+- `400` — Bad request
+  - Codes: `bad_json`, `bad_query`, `bad_header`, `bad_path`
 
 - `403` — Forbidden / limit exhausted
   - Codes: `permission_denied`, `quota_exhausted`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
+
+- `422` — Validation error
+  - Code: `invalid`
 
 - `409` — Conflict
-  - Codes: `resource_already_exists`, `basin_deletion_pending`
-
-- `429` — Retryable conflict
-  - Code: `rate_limited`
+  - Codes: `resource_already_exists`, `basin_deletion_pending`, `transaction_conflict`
 
 ### Response Schema: BasinInfo
 
@@ -383,9 +379,6 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `200` — Success
   - Body: `BasinConfig`
 
-- `400` — Bad request
-  - Code: `invalid`
-
 - `403` — Forbidden
   - Code: `permission_denied`
 
@@ -393,7 +386,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `503` — Basin still creating
   - Code: `unavailable`
@@ -452,20 +445,20 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `201` — Basin created
   - Body: `BasinInfo`
 
-- `400` — Bad request / scope mismatch
-  - Code: `invalid`
+- `400` — Bad request
+  - Codes: `bad_json`
 
 - `403` — Forbidden / limit exhausted
   - Codes: `permission_denied`, `quota_exhausted`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
-- `409` — Basin deleted during reconfigure
-  - Code: `basin_deletion_pending`
+- `409` — Conflict
+  - Codes: `basin_deletion_pending`, `transaction_conflict`
 
-- `429` — Retryable conflict
-  - Code: `rate_limited`
+- `422` — Validation error / scope mismatch
+  - Code: `invalid`
 
 ### Test Cases
 
@@ -487,7 +480,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Attempt to change scope**
   - Input: different scope
-  - Expected: 400 (`invalid`)
+  - Expected: 422 (`invalid`)
 
 - **Create with defaults**
   - Input: new name, null body
@@ -517,9 +510,6 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - `202` — Deletion accepted (async operation)
 
-- `400` — Bad request
-  - Code: `invalid`
-
 - `403` — Forbidden
   - Code: `permission_denied`
 
@@ -527,7 +517,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `503` — Basin still creating
   - Code: `unavailable`
@@ -624,8 +614,8 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `200` — Success
   - Body: `BasinConfig` (updated)
 
-- `400` — Bad request / invalid config
-  - Code: `invalid`
+- `400` — Bad request
+  - Codes: `bad_json`, `bad_query`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -634,10 +624,13 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `409` — Conflict
   - Codes: `transaction_conflict`, `basin_deletion_pending`
+
+- `422` — Validation error
+  - Code: `invalid`
 
 ### Test Cases
 
@@ -808,7 +801,7 @@ When running against an account on the Free tier, certain configurations will be
 - `404` `basin_not_found`
   - Basin does not exist
 
-- `408` `timeout`
+- `408` `request_timeout`
   - Request timeout
 
 - `409` `resource_already_exists`
@@ -819,9 +812,6 @@ When running against an account on the Free tier, certain configurations will be
 
 - `409` `transaction_conflict`
   - Concurrent update conflict
-
-- `429` `rate_limited`
-  - Concurrent creation conflict, retry
 
 - `500` `storage`
   - Storage layer error
