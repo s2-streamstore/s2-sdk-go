@@ -14,6 +14,8 @@ import (
 
 const streamTestTimeout = 60 * time.Second
 
+const errCodeResourceAlreadyExists = "errCodeResourceAlreadyExists"
+
 var (
 	sharedTestClient    *s2.Client
 	sharedTestBasinName s2.BasinName
@@ -631,7 +633,7 @@ func TestCreateStream_DuplicateName(t *testing.T) {
 	if !errors.As(err, &s2Err) || s2Err.Status != 409 {
 		t.Errorf("Expected 409 conflict, got: %v", err)
 	}
-	if s2Err != nil && s2Err.Code != "resource_already_exists" {
+	if s2Err != nil && s2Err.Code != errCodeResourceAlreadyExists {
 		t.Errorf("Expected error code resource_already_exists, got: %s", s2Err.Code)
 	}
 	t.Logf("Got expected conflict error: %v", err)

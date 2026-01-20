@@ -222,7 +222,7 @@ func TestListBasins_PrefixWithPagination(t *testing.T) {
 	client := testClient(t)
 
 	basins := make([]s2.BasinName, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		basins[i] = uniqueBasinName("test-pxpg")
 		defer deleteBasin(ctx, client, basins[i])
 		_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basins[i]})
@@ -920,7 +920,7 @@ func TestCreateBasin_DuplicateName(t *testing.T) {
 	if !errors.As(err, &s2Err) || s2Err.Status != 409 {
 		t.Errorf("Expected 409 conflict, got: %v", err)
 	}
-	if s2Err != nil && s2Err.Code != "resource_already_exists" {
+	if s2Err != nil && s2Err.Code != errCodeResourceAlreadyExists {
 		t.Errorf("Expected code resource_already_exists, got: %s", s2Err.Code)
 	}
 	t.Logf("Got expected conflict error: %v", err)
@@ -952,7 +952,7 @@ func TestCreateBasin_WhileSameNameDeleting(t *testing.T) {
 			t.Log("Got expected basin_deletion_pending error")
 			return
 		}
-		if s2Err.Code == "resource_already_exists" {
+		if s2Err.Code == errCodeResourceAlreadyExists {
 			t.Log("Got resource_already_exists (basin still deleting)")
 			return
 		}
