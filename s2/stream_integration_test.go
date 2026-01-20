@@ -14,7 +14,7 @@ import (
 
 const streamTestTimeout = 60 * time.Second
 
-const errCodeResourceAlreadyExists = "errCodeResourceAlreadyExists"
+const errCodeResourceAlreadyExists = "resource_already_exists"
 
 var (
 	sharedTestClient    *s2.Client
