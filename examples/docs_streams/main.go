@@ -120,7 +120,7 @@ func main() {
 		fmt.Printf("[%d] %s\n", record.SeqNum, string(record.Body))
 	}
 	if err := readSession.Err(); err != nil {
-		// Handle error
+		log.Fatal(err)
 	}
 	// ANCHOR_END: read-session
 
