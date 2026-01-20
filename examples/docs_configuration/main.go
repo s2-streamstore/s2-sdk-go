@@ -34,9 +34,9 @@ func main() {
 		// ANCHOR: retry-config
 		client := s2.New(token, &s2.ClientOptions{
 			RetryConfig: &s2.RetryConfig{
-				MaxAttempts: 5,
-				MinDelay:    100 * time.Millisecond,
-				MaxDelay:    2 * time.Second,
+				MaxAttempts:  5,
+				MinBaseDelay: 100 * time.Millisecond,
+				MaxBaseDelay: 2 * time.Second,
 			},
 		})
 		// ANCHOR_END: retry-config
