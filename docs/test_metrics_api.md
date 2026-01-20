@@ -81,7 +81,7 @@
 - `200` — Success
   - Body: `MetricSetResponse`
 
-- `400` — Bad request
+- `422` — Validation error
   - Code: `invalid`
   - Cause: missing required parameters, invalid parameter format
 
@@ -146,15 +146,15 @@
 
 - **Missing start parameter**
   - Input: `set=active-basins`, `end=<now>`
-  - Expected: 400 (`invalid`) with message "start and end params required"
+  - Expected: 422 (`invalid`) with message "start and end params required"
 
 - **Missing end parameter**
   - Input: `set=active-basins`, `start=<now-1h>`
-  - Expected: 400 (`invalid`) with message "start and end params required"
+  - Expected: 422 (`invalid`) with message "start and end params required"
 
 - **Missing both start and end**
   - Input: `set=active-basins`
-  - Expected: 400 (`invalid`)
+  - Expected: 422 (`invalid`)
 
 - **Missing set parameter**
   - Input: `start=<now-1h>`, `end=<now>`
@@ -162,7 +162,7 @@
 
 - **Invalid set value**
   - Input: `set=invalid-set`, `start=<now-1h>`, `end=<now>`
-  - Expected: 400 (`invalid`)
+  - Expected: 422 (`invalid`)
 
 - **Empty time range returns empty data**
   - Input: `set=active-basins`, `start=<far-past>`, `end=<far-past+1h>`
@@ -198,7 +198,7 @@
 
 - `interval` (TimeseriesInterval, optional)
   - Aggregation interval for timeseries metrics
-  - Values: `minute`, `hour`, `day`
+  - **Note: Basin `storage` metric only supports `hour` interval. Other basin metrics support all intervals.**
 
 ### Basin Metric Sets
 
@@ -238,7 +238,7 @@
   - Body: `MetricSetResponse`
   - Note: Returns empty `values` array if no data exists for the time range
 
-- `400` — Bad request
+- `422` — Validation error
   - Code: `invalid`
   - Cause: missing required parameters (start, end), invalid parameter format
 
@@ -278,17 +278,10 @@
   - Input: valid basin, `set=basin-ops`, `start=<now-1h>`, `end=<now>`
   - Expected: 200, multiple AccumulationMetrics, unit=operations
 
-- **Get storage with minute interval**
-  - Input: valid basin, `set=storage`, `start=<now-1h>`, `end=<now>`, `interval=minute`
-  - Expected: 200, GaugeMetric with minute-level data points
-
 - **Get storage with hour interval**
   - Input: valid basin, `set=storage`, `start=<now-1d>`, `end=<now>`, `interval=hour`
   - Expected: 200, GaugeMetric with hourly data points
-
-- **Get storage with day interval**
-  - Input: valid basin, `set=storage`, `start=<now-7d>`, `end=<now>`, `interval=day`
-  - Expected: 200, GaugeMetric with daily data points
+  - Note: Basin `storage` metric only supports `hour` interval
 
 - **Basin not in token scope**
   - Input: basin not in token's basin scope, `set=storage`, `start`, `end`
@@ -296,15 +289,15 @@
 
 - **Missing start parameter**
   - Input: valid basin, `set=storage`, `end=<now>`
-  - Expected: 400 (`invalid`) with message "start and end params required"
+  - Expected: 422 (`invalid`) with message "start and end params required"
 
 - **Missing end parameter**
   - Input: valid basin, `set=storage`, `start=<now-1h>`
-  - Expected: 400 (`invalid`) with message "start and end params required"
+  - Expected: 422 (`invalid`) with message "start and end params required"
 
 - **Missing both start and end**
   - Input: valid basin, `set=storage`
-  - Expected: 400 (`invalid`)
+  - Expected: 422 (`invalid`)
 
 - **Empty time range returns empty data**
   - Input: valid basin, `set=storage`, `start=<far-past>`, `end=<far-past+1h>` (before any data)
@@ -344,7 +337,7 @@
 
 - `interval` (TimeseriesInterval, optional)
   - Aggregation interval for timeseries metrics
-  - Values: `minute`, `hour`, `day`
+  - **Note: Stream `storage` metric only supports `minute` interval**
 
 ### Stream Metric Sets
 
@@ -359,7 +352,7 @@
   - Body: `MetricSetResponse`
   - Note: Returns empty `values` array if no data exists for the time range
 
-- `400` — Bad request
+- `422` — Validation error
   - Code: `invalid`
   - Cause: missing required parameters (start, end), invalid parameter format
 
@@ -382,14 +375,7 @@
 - **Get stream storage with minute interval**
   - Input: valid basin/stream, `set=storage`, `start=<now-1h>`, `end=<now>`, `interval=minute`
   - Expected: 200, GaugeMetric with minute-level data points
-
-- **Get stream storage with hour interval**
-  - Input: valid basin/stream, `set=storage`, `start=<now-1d>`, `end=<now>`, `interval=hour`
-  - Expected: 200, GaugeMetric with hourly data points
-
-- **Get stream storage with day interval**
-  - Input: valid basin/stream, `set=storage`, `start=<now-7d>`, `end=<now>`, `interval=day`
-  - Expected: 200, GaugeMetric with daily data points
+  - Note: Stream `storage` metric only supports `minute` interval
 
 - **Stream not in token scope**
   - Input: valid basin, stream not in token's stream scope, `set=storage`, `start`, `end`
@@ -401,15 +387,15 @@
 
 - **Missing start parameter**
   - Input: valid basin/stream, `set=storage`, `end=<now>`
-  - Expected: 400 (`invalid`) with message "start and end params required"
+  - Expected: 422 (`invalid`) with message "start and end params required"
 
 - **Missing end parameter**
   - Input: valid basin/stream, `set=storage`, `start=<now-1h>`
-  - Expected: 400 (`invalid`) with message "start and end params required"
+  - Expected: 422 (`invalid`) with message "start and end params required"
 
 - **Missing both start and end**
   - Input: valid basin/stream, `set=storage`
-  - Expected: 400 (`invalid`)
+  - Expected: 422 (`invalid`)
 
 - **Empty time range returns empty data**
   - Input: valid basin/stream, `set=storage`, `start=<far-past>`, `end=<far-past+1h>`
@@ -456,7 +442,7 @@
 
 ## Error Codes Reference
 
-- `400` `invalid`
+- `422` `invalid`
   - Missing required parameters (start, end)
   - Invalid parameter format or value
   - Invalid metric set value

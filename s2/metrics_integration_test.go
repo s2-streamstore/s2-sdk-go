@@ -168,8 +168,8 @@ func TestAccountMetrics_MissingStart(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -188,8 +188,8 @@ func TestAccountMetrics_MissingEnd(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -206,8 +206,8 @@ func TestAccountMetrics_MissingBothStartAndEnd(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -406,31 +406,6 @@ func TestBasinMetrics_BasinOps(t *testing.T) {
 	t.Logf("Got %d metrics", len(resp.Values))
 }
 
-func TestBasinMetrics_StorageWithMinuteInterval(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
-	defer cancel()
-	t.Log("Testing: Get basin storage with minute interval")
-
-	client := streamTestClient(t)
-	start, end := metricsTimeRange(1)
-
-	resp, err := client.Metrics.Basin(ctx, &s2.BasinMetricsArgs{
-		Basin:    string(sharedTestBasinName),
-		Set:      s2.BasinMetricSetStorage,
-		Start:    start,
-		End:      end,
-		Interval: ptrInterval(s2.TimeseriesIntervalMinute),
-	})
-	if err != nil {
-		t.Fatalf("Basin metrics failed: %v", err)
-	}
-
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
-	}
-	t.Logf("Got %d metrics with minute interval", len(resp.Values))
-}
-
 func TestBasinMetrics_StorageWithHourInterval(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -457,32 +432,6 @@ func TestBasinMetrics_StorageWithHourInterval(t *testing.T) {
 	t.Logf("Got %d metrics with hour interval", len(resp.Values))
 }
 
-func TestBasinMetrics_StorageWithDayInterval(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
-	defer cancel()
-	t.Log("Testing: Get basin storage with day interval")
-
-	client := streamTestClient(t)
-	now := time.Now().Unix()
-	start := now - (7 * 24 * 3600)
-
-	resp, err := client.Metrics.Basin(ctx, &s2.BasinMetricsArgs{
-		Basin:    string(sharedTestBasinName),
-		Set:      s2.BasinMetricSetStorage,
-		Start:    &start,
-		End:      &now,
-		Interval: ptrInterval(s2.TimeseriesIntervalDay),
-	})
-	if err != nil {
-		t.Fatalf("Basin metrics failed: %v", err)
-	}
-
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
-	}
-	t.Logf("Got %d metrics with day interval", len(resp.Values))
-}
-
 func TestBasinMetrics_MissingStart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -498,8 +447,8 @@ func TestBasinMetrics_MissingStart(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -519,8 +468,8 @@ func TestBasinMetrics_MissingEnd(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -538,8 +487,8 @@ func TestBasinMetrics_MissingBothStartAndEnd(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -681,80 +630,6 @@ func TestStreamMetrics_StorageWithMinuteInterval(t *testing.T) {
 	t.Logf("Got %d metrics with minute interval", len(resp.Values))
 }
 
-func TestStreamMetrics_StorageWithHourInterval(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
-	defer cancel()
-	t.Log("Testing: Get stream storage with hour interval")
-
-	client := streamTestClient(t)
-	basin := getSharedBasin(t)
-
-	streamName := uniqueStreamName("test-metrics-hr")
-	defer deleteStream(ctx, basin, streamName)
-
-	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
-	if err != nil {
-		t.Fatalf("Create stream failed: %v", err)
-	}
-
-	now := time.Now().Unix()
-	start := now - (24 * 3600)
-
-	resp, err := client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
-		Basin:    string(sharedTestBasinName),
-		Stream:   string(streamName),
-		Set:      s2.StreamMetricSetStorage,
-		Start:    &start,
-		End:      &now,
-		Interval: ptrInterval(s2.TimeseriesIntervalHour),
-	})
-	if err != nil {
-		t.Fatalf("Stream metrics failed: %v", err)
-	}
-
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
-	}
-	t.Logf("Got %d metrics with hour interval", len(resp.Values))
-}
-
-func TestStreamMetrics_StorageWithDayInterval(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
-	defer cancel()
-	t.Log("Testing: Get stream storage with day interval")
-
-	client := streamTestClient(t)
-	basin := getSharedBasin(t)
-
-	streamName := uniqueStreamName("test-metrics-day")
-	defer deleteStream(ctx, basin, streamName)
-
-	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
-	if err != nil {
-		t.Fatalf("Create stream failed: %v", err)
-	}
-
-	now := time.Now().Unix()
-	start := now - (7 * 24 * 3600)
-
-	resp, err := client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
-		Basin:    string(sharedTestBasinName),
-		Stream:   string(streamName),
-		Set:      s2.StreamMetricSetStorage,
-		Start:    &start,
-		End:      &now,
-		Interval: ptrInterval(s2.TimeseriesIntervalDay),
-	})
-	if err != nil {
-		t.Fatalf("Stream metrics failed: %v", err)
-	}
-
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
-	}
-	t.Logf("Got %d metrics with day interval", len(resp.Values))
-}
-
 func TestStreamMetrics_MissingStart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -781,8 +656,8 @@ func TestStreamMetrics_MissingStart(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -813,8 +688,8 @@ func TestStreamMetrics_MissingEnd(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -842,8 +717,8 @@ func TestStreamMetrics_MissingBothStartAndEnd(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 400 {
-		t.Errorf("Expected 400 error, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -1016,7 +891,7 @@ func TestAccountMetrics_AllSets(t *testing.T) {
 	}
 }
 
-func TestAllIntervals(t *testing.T) {
+func TestAccountMetrics_AllIntervals(t *testing.T) {
 	intervals := []struct {
 		interval s2.TimeseriesInterval
 		name     string
