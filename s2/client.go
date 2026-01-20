@@ -17,8 +17,8 @@ import (
 
 const (
 	DefaultBaseURL           = "https://aws.s2.dev/v1"
-	defaultRequestTimeout    = 30 * time.Second
-	defaultConnectionTimeout = 10 * time.Second
+	defaultRequestTimeout    = 5 * time.Second
+	defaultConnectionTimeout = 3 * time.Second
 
 	// HTTP/2 transport settings for streaming operations
 	http2MaxReadFrameSize  = 16 * 1024 * 1024
@@ -43,10 +43,10 @@ type ClientOptions struct {
 	// Get SDK level logs.
 	Logger *slog.Logger
 	// Overall timeout for HTTP requests.
-	// Defaults to 30 seconds.
+	// Defaults to 5 seconds.
 	RequestTimeout time.Duration
 	// Timeout for establishing TCP connections.
-	// Defaults to 10 seconds.
+	// Defaults to 3 seconds.
 	ConnectionTimeout time.Duration
 	// Compression algorithm for request bodies.
 	// Defaults to CompressionNone (no compression).
