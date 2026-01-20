@@ -31,72 +31,82 @@ func main() {
 	streamName := fmt.Sprintf("docs-streams-%d", time.Now().UnixMilli())
 	basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: s2.StreamName(streamName)})
 
-	// ANCHOR: simple-append
 	stream := basin.Stream(s2.StreamName(streamName))
 
-	ack, _ := stream.Append(ctx, &s2.AppendInput{
-		Records: []s2.AppendRecord{
-			{Body: []byte("first event")},
-			{Body: []byte("second event")},
-		},
-	})
+	{
+		// ANCHOR: simple-append
+		ack, _ := stream.Append(ctx, &s2.AppendInput{
+			Records: []s2.AppendRecord{
+				{Body: []byte("first event")},
+				{Body: []byte("second event")},
+			},
+		})
 
-	// ack tells us where the records landed
-	fmt.Printf("Wrote records %d through %d\n", ack.Start.SeqNum, ack.End.SeqNum-1)
-	// ANCHOR_END: simple-append
-
-	// ANCHOR: simple-read
-	batch, _ := stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: s2.Uint64(0),
-		Count:  s2.Uint64(100),
-	})
-
-	for _, record := range batch.Records {
-		fmt.Printf("[%d] %s\n", record.SeqNum, string(record.Body))
+		// ack tells us where the records landed
+		fmt.Printf("Wrote records %d through %d\n", ack.Start.SeqNum, ack.End.SeqNum-1)
+		// ANCHOR_END: simple-append
 	}
-	// ANCHOR_END: simple-read
 
-	// ANCHOR: append-session
-	session, _ := stream.AppendSession(ctx, nil)
-	defer session.Close()
+	{
+		// ANCHOR: simple-read
+		batch, _ := stream.Read(ctx, &s2.ReadOptions{
+			SeqNum: s2.Uint64(0),
+			Count:  s2.Uint64(100),
+		})
 
-	// Submit a batch - this enqueues it and returns a ticket
-	fut, _ := session.Submit(&s2.AppendInput{
-		Records: []s2.AppendRecord{
-			{Body: []byte("event-1")},
-			{Body: []byte("event-2")},
-		},
-	})
+		for _, record := range batch.Records {
+			fmt.Printf("[%d] %s\n", record.SeqNum, string(record.Body))
+		}
+		// ANCHOR_END: simple-read
+	}
 
-	// Wait for enqueue (this is where backpressure happens)
-	ticket, _ := fut.Wait(ctx)
+	{
+		// ANCHOR: append-session
+		session, _ := stream.AppendSession(ctx, nil)
+		defer session.Close()
 
-	// Wait for durability
-	ack2, _ := ticket.Ack(ctx)
-	fmt.Printf("Durable at seqNum %d\n", ack2.Start.SeqNum)
-	// ANCHOR_END: append-session
+		// Submit a batch - this enqueues it and returns a ticket
+		fut, _ := session.Submit(&s2.AppendInput{
+			Records: []s2.AppendRecord{
+				{Body: []byte("event-1")},
+				{Body: []byte("event-2")},
+			},
+		})
 
-	// ANCHOR: producer
-	session2, _ := stream.AppendSession(ctx, nil)
-	batcher := s2.NewBatcher(ctx, &s2.BatchingOptions{
-		Linger: 5 * time.Millisecond,
-	})
-	producer := s2.NewProducer(ctx, batcher, session2)
+		// Wait for enqueue (this is where backpressure happens)
+		ticket, _ := fut.Wait(ctx)
 
-	// Submit individual records
-	fut2, _ := producer.Submit(s2.AppendRecord{Body: []byte("my event")})
-	ticket2, _ := fut2.Wait(ctx)
-	ack3, _ := ticket2.Ack(ctx)
+		// Wait for durability
+		ack, _ := ticket.Ack(ctx)
+		fmt.Printf("Durable at seqNum %d\n", ack.Start.SeqNum)
+		// ANCHOR_END: append-session
+	}
 
-	fmt.Printf("Record durable at seqNum %d\n", ack3.SeqNum())
+	{
+		// ANCHOR: producer
+		session, _ := stream.AppendSession(ctx, nil)
+		batcher := s2.NewBatcher(ctx, &s2.BatchingOptions{
+			Linger: 5 * time.Millisecond,
+		})
+		producer := s2.NewProducer(ctx, batcher, session)
 
-	producer.Close()
-	// ANCHOR_END: producer
+		// Submit individual records
+		fut, _ := producer.Submit(s2.AppendRecord{Body: []byte("my event")})
+		ticket, _ := fut.Wait(ctx)
+		ack, _ := ticket.Ack(ctx)
 
-	// ANCHOR: check-tail
-	tail, _ := stream.CheckTail(ctx)
-	fmt.Printf("Stream has %d records\n", tail.Tail.SeqNum)
-	// ANCHOR_END: check-tail
+		fmt.Printf("Record durable at seqNum %d\n", ack.SeqNum())
+
+		producer.Close()
+		// ANCHOR_END: producer
+	}
+
+	{
+		// ANCHOR: check-tail
+		tail, _ := stream.CheckTail(ctx)
+		fmt.Printf("Stream has %d records\n", tail.Tail.SeqNum)
+		// ANCHOR_END: check-tail
+	}
 
 	// Cleanup
 	basin.Streams.Delete(ctx, s2.StreamName(streamName))

@@ -26,40 +26,44 @@ func main() {
 
 	client := s2.New(token, nil)
 
-	// ANCHOR: basin-operations
-	// List basins
-	basins, _ := client.Basins.List(ctx, nil)
+	{
+		// ANCHOR: basin-operations
+		// List basins
+		basins, _ := client.Basins.List(ctx, nil)
 
-	// Create a basin
-	client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: "my-events"})
+		// Create a basin
+		client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: "my-events"})
 
-	// Get configuration
-	config, _ := client.Basins.GetConfig(ctx, "my-events")
+		// Get configuration
+		config, _ := client.Basins.GetConfig(ctx, "my-events")
 
-	// Delete
-	client.Basins.Delete(ctx, "my-events")
-	// ANCHOR_END: basin-operations
-	fmt.Printf("Basins: %+v, config: %+v\n", basins, config)
+		// Delete
+		client.Basins.Delete(ctx, "my-events")
+		// ANCHOR_END: basin-operations
+		fmt.Printf("Basins: %+v, config: %+v\n", basins, config)
+	}
 
 	basin := client.Basin(basinName)
 
-	// ANCHOR: stream-operations
-	// List streams
-	streams, _ := basin.Streams.List(ctx, &s2.ListStreamsArgs{Prefix: "user-"})
+	{
+		// ANCHOR: stream-operations
+		// List streams
+		streams, _ := basin.Streams.List(ctx, &s2.ListStreamsArgs{Prefix: "user-"})
 
-	// Create a stream
-	basin.Streams.Create(ctx, s2.CreateStreamArgs{
-		Stream: "user-actions",
-		Config: &s2.StreamConfig{ /* optional */ },
-	})
+		// Create a stream
+		basin.Streams.Create(ctx, s2.CreateStreamArgs{
+			Stream: "user-actions",
+			Config: &s2.StreamConfig{ /* optional */ },
+		})
 
-	// Get configuration
-	config2, _ := basin.Streams.GetConfig(ctx, "user-actions")
+		// Get configuration
+		config, _ := basin.Streams.GetConfig(ctx, "user-actions")
 
-	// Delete
-	basin.Streams.Delete(ctx, "user-actions")
-	// ANCHOR_END: stream-operations
-	fmt.Printf("Streams: %+v, config: %+v\n", streams, config2)
+		// Delete
+		basin.Streams.Delete(ctx, "user-actions")
+		// ANCHOR_END: stream-operations
+		fmt.Printf("Streams: %+v, config: %+v\n", streams, config)
+	}
 
 	// ANCHOR: access-token-basic
 	// List tokens (returns metadata, not the secret)
