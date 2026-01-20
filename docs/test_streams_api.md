@@ -507,7 +507,8 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - `201` — Stream created
   - Body: `StreamInfo`
 
-- `204` — No changes
+- `200` — Reconfigured
+  - Body: `StreamInfo`
 
 - `400` — Bad request / invalid config
   - Code: `invalid`
@@ -535,15 +536,15 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - **Reconfigure existing stream**
   - Input: existing name + new config
-  - Expected: 204
+  - Expected: 200
 
 - **PUT with null body (no-op)**
   - Input: existing stream, null body
-  - Expected: 204
+  - Expected: 200
 
 - **PUT with empty object**
   - Input: existing stream, `{}`
-  - Expected: 204
+  - Expected: 200
 
 - **Create with defaults**
   - Input: new name, null body
@@ -1378,6 +1379,15 @@ Several operations are eventually consistent. Tests should NOT assert on immedia
 - `400` `bad_header`
   - Invalid header value
 
+- `400` `bad_path`
+  - Invalid path parameter
+
+- `400` `bad_proto`
+  - Invalid proto format (S2S protocol)
+
+- `400` `bad_frame`
+  - Invalid frame in streaming request
+
 - `422` `invalid`
   - Validation errors (config, arguments, tier limits)
 
@@ -1399,6 +1409,9 @@ Several operations are eventually consistent. Tests should NOT assert on immedia
 - `409` `stream_deletion_pending`
   - Stream is being deleted
 
+- `409` `basin_deletion_pending`
+  - Parent basin is being deleted
+
 - `409` `transaction_conflict`
   - Concurrent reconfiguration conflict
 
@@ -1416,5 +1429,14 @@ Several operations are eventually consistent. Tests should NOT assert on immedia
 - `500` `other`
   - Internal server error
 
+- `500` `storage`
+  - Database/storage error
+
+- `502` `hot_server`
+  - Hot server error
+
 - `503` `unavailable`
   - Basin still initializing or service unavailable
+
+- `504` `upstream_timeout`
+  - Gateway timeout

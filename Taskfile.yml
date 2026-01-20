@@ -29,7 +29,7 @@ tasks:
     desc: "Run integration tests"
     deps: [gen]
     cmds:
-      - go test -v -timeout 10m -count=1 -run 'Test(List|Create|Get|Delete|Reconfigure)(Basin|Stream)|Test(CheckTail|Append|Read|Fence|Trim|Client|AppendSession|ReadSession)' ./s2
+      - go test -v -timeout 10m -count=1 -run 'Test(List|Create|Get|Delete|Reconfigure)(Basin|Stream)|Test(CheckTail|Append|Read|Fence|Trim|Client|AppendSession|ReadSession)|Test(Account|Basin|Stream)Metrics|TestAllIntervals' ./s2
 
   lint:
     deps: [gen]

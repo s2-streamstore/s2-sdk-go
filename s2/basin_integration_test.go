@@ -80,13 +80,34 @@ func TestListBasins_All(t *testing.T) {
 	t.Logf("Listed %d basins, has_more=%v", len(resp.Basins), resp.HasMore)
 }
 
+func TestListBasins_Empty(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: List basins with non-matching prefix returns empty")
+
+	client := testClient(t)
+	resp, err := client.Basins.List(ctx, &s2.ListBasinsArgs{
+		Prefix: "zzz-nonexistent-prefix-12345",
+	})
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(resp.Basins) != 0 {
+		t.Errorf("Expected 0 basins, got %d", len(resp.Basins))
+	}
+	if resp.HasMore {
+		t.Error("Expected has_more=false")
+	}
+	t.Log("Verified empty result")
+}
+
 func TestListBasins_WithPrefix(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 	t.Log("Testing: List basins with prefix")
 
 	client := testClient(t)
-	basinName := uniqueBasinName("test-list")
+	basinName := uniqueBasinName("test-pfx")
 	defer deleteBasin(ctx, client, basinName)
 
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
@@ -94,10 +115,9 @@ func TestListBasins_WithPrefix(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 	waitForBasinActive(ctx, t, client, basinName)
-	t.Logf("Created basin: %s", basinName)
 
 	resp, err := client.Basins.List(ctx, &s2.ListBasinsArgs{
-		Prefix: "test-list",
+		Prefix: "test-pfx",
 	})
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
@@ -107,10 +127,9 @@ func TestListBasins_WithPrefix(t *testing.T) {
 	for _, b := range resp.Basins {
 		if b.Name == basinName {
 			found = true
-			break
 		}
-		if !strings.HasPrefix(string(b.Name), "test-list") {
-			t.Errorf("Basin %s does not match prefix test-list", b.Name)
+		if !strings.HasPrefix(string(b.Name), "test-pfx") {
+			t.Errorf("Basin %s does not match prefix", b.Name)
 		}
 	}
 	if !found {
@@ -163,7 +182,7 @@ func TestListBasins_WithLimit(t *testing.T) {
 func TestListBasins_Pagination(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: List basins with pagination")
+	t.Log("Testing: List basins pagination")
 
 	client := testClient(t)
 	limit := 2
@@ -195,10 +214,55 @@ func TestListBasins_Pagination(t *testing.T) {
 	t.Logf("Page 1: %d basins, Page 2: %d basins", len(resp1.Basins), len(resp2.Basins))
 }
 
+func TestListBasins_PrefixWithPagination(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: List basins with prefix and pagination combined")
+
+	client := testClient(t)
+
+	basins := make([]s2.BasinName, 3)
+	for i := 0; i < 3; i++ {
+		basins[i] = uniqueBasinName("test-pxpg")
+		defer deleteBasin(ctx, client, basins[i])
+		_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basins[i]})
+		if err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+		waitForBasinActive(ctx, t, client, basins[i])
+	}
+
+	limit := 2
+	resp1, err := client.Basins.List(ctx, &s2.ListBasinsArgs{
+		Prefix: "test-pxpg",
+		Limit:  &limit,
+	})
+	if err != nil {
+		t.Fatalf("First list failed: %v", err)
+	}
+
+	if len(resp1.Basins) != 2 {
+		t.Errorf("Expected 2 basins in page 1, got %d", len(resp1.Basins))
+	}
+
+	if resp1.HasMore {
+		lastName := string(resp1.Basins[len(resp1.Basins)-1].Name)
+		resp2, err := client.Basins.List(ctx, &s2.ListBasinsArgs{
+			Prefix:     "test-pxpg",
+			StartAfter: lastName,
+			Limit:      &limit,
+		})
+		if err != nil {
+			t.Fatalf("Second list failed: %v", err)
+		}
+		t.Logf("Page 1: %d, Page 2: %d basins", len(resp1.Basins), len(resp2.Basins))
+	}
+}
+
 func TestListBasins_LimitZero(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: List basins with limit=0 (treated as default)")
+	t.Log("Testing: List basins with limit=0")
 
 	client := testClient(t)
 	limit := 0
@@ -212,13 +276,13 @@ func TestListBasins_LimitZero(t *testing.T) {
 	if len(resp.Basins) > 1000 {
 		t.Errorf("Expected at most 1000 basins, got %d", len(resp.Basins))
 	}
-	t.Logf("Listed %d basins with limit=0 (treated as default 1000)", len(resp.Basins))
+	t.Logf("Listed %d basins with limit=0", len(resp.Basins))
 }
 
 func TestListBasins_LimitExceeds1000(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: List basins with limit > 1000 (clamped to 1000)")
+	t.Log("Testing: List basins with limit > 1000")
 
 	client := testClient(t)
 	limit := 1500
@@ -232,7 +296,7 @@ func TestListBasins_LimitExceeds1000(t *testing.T) {
 	if len(resp.Basins) > 1000 {
 		t.Errorf("Expected at most 1000 basins (clamped), got %d", len(resp.Basins))
 	}
-	t.Logf("Listed %d basins with limit=1500 (clamped to 1000)", len(resp.Basins))
+	t.Logf("Listed %d basins with limit=1500 (clamped)", len(resp.Basins))
 }
 
 func TestListBasins_InvalidStartAfterLessThanPrefix(t *testing.T) {
@@ -251,6 +315,45 @@ func TestListBasins_InvalidStartAfterLessThanPrefix(t *testing.T) {
 		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
+}
+
+func TestListBasins_IncludesDeletingBasins(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: List basins includes deleting basins")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-ldel")
+
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	err = client.Basins.Delete(ctx, basinName)
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	resp, err := client.Basins.List(ctx, &s2.ListBasinsArgs{
+		Prefix: string(basinName),
+	})
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+
+	for _, b := range resp.Basins {
+		if b.Name == basinName {
+			if b.State != s2.BasinStateDeleting {
+				t.Errorf("Expected state=deleting, got %s", b.State)
+			} else {
+				t.Log("Verified deleting basin appears in list with state=deleting")
+			}
+			return
+		}
+	}
+	t.Log("Basin already fully deleted (not in list)")
 }
 
 func TestListBasins_Iterator(t *testing.T) {
@@ -486,7 +589,7 @@ func TestCreateBasin_StorageClassStandard(t *testing.T) {
 func TestCreateBasin_StorageClassExpress(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: Create basin with storage_class=express (default, may be omitted)")
+	t.Log("Testing: Create basin with storage_class=express")
 
 	client := testClient(t)
 	basinName := uniqueBasinName("test-scex")
@@ -503,8 +606,7 @@ func TestCreateBasin_StorageClassExpress(t *testing.T) {
 	})
 	if err != nil {
 		if isFreeTierLimitation(err) {
-			t.Log("Skipped: express storage class not available on free tier")
-			return
+			t.Skip("Skipped: express storage class not available on free tier")
 		}
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -520,10 +622,8 @@ func TestCreateBasin_StorageClassExpress(t *testing.T) {
 		if *config.DefaultStreamConfig.StorageClass != s2.StorageClassExpress {
 			t.Errorf("Expected storage_class=express, got %s", *config.DefaultStreamConfig.StorageClass)
 		}
-		t.Log("Verified storage_class=express (explicitly returned)")
-	} else {
-		t.Log("Verified storage_class=express (omitted as default)")
 	}
+	t.Log("Verified storage_class=express")
 }
 
 func TestCreateBasin_RetentionPolicyAge(t *testing.T) {
@@ -589,8 +689,7 @@ func TestCreateBasin_RetentionPolicyInfinite(t *testing.T) {
 	})
 	if err != nil {
 		if isFreeTierLimitation(err) {
-			t.Log("Skipped: infinite retention not available on free tier")
-			return
+			t.Skip("Skipped: infinite retention not available on free tier")
 		}
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -625,7 +724,6 @@ func TestCreateBasin_TimestampingModes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
-			t.Logf("Testing: Create basin with timestamping.mode=%s", tc.name)
 
 			client := testClient(t)
 			basinName := uniqueBasinName("test-tsm")
@@ -674,7 +772,6 @@ func TestCreateBasin_TimestampingUncapped(t *testing.T) {
 		t.Run(fmt.Sprintf("uncapped=%v", uncapped), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
-			t.Logf("Testing: Create basin with timestamping.uncapped=%v", uncapped)
 
 			client := testClient(t)
 			basinName := uniqueBasinName("test-tsu")
@@ -757,6 +854,52 @@ func TestCreateBasin_DeleteOnEmpty(t *testing.T) {
 	t.Log("Verified delete_on_empty.min_age_secs=3600")
 }
 
+func TestCreateBasin_NameValidation(t *testing.T) {
+	testCases := []struct {
+		name        string
+		basinName   s2.BasinName
+		expectError bool
+	}{
+		{"too_short", "short", true},
+		{"too_long", s2.BasinName(strings.Repeat("a", 49)), true},
+		{"with_uppercase", "Test-Basin-Name", true},
+		{"with_underscore", "test_basin_name", true},
+		{"starts_with_hyphen", "-test-basin", true},
+		{"ends_with_hyphen", "test-basin-", true},
+		{"empty_string", "", true},
+		{"min_length_valid", "abcdefgh", false},
+		{"max_length_valid", s2.BasinName(strings.Repeat("a", 48)), false},
+		{"starts_with_digit", "1abcdefg", false},
+		{"contains_hyphen", "abcd-efg", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+
+			client := testClient(t)
+			info, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: tc.basinName})
+
+			if tc.expectError {
+				if err == nil {
+					deleteBasin(ctx, client, tc.basinName)
+					t.Error("Expected error but got none")
+				} else {
+					t.Logf("Got expected error: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				} else {
+					deleteBasin(ctx, client, info.Name)
+					t.Logf("Created valid basin: %s", tc.basinName)
+				}
+			}
+		})
+	}
+}
+
 func TestCreateBasin_DuplicateName(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -778,43 +921,47 @@ func TestCreateBasin_DuplicateName(t *testing.T) {
 		t.Errorf("Expected 409 conflict, got: %v", err)
 	}
 	if s2Err != nil && s2Err.Code != "resource_already_exists" {
-		t.Errorf("Expected error code resource_already_exists, got: %s", s2Err.Code)
+		t.Errorf("Expected code resource_already_exists, got: %s", s2Err.Code)
 	}
 	t.Logf("Got expected conflict error: %v", err)
 }
 
-func TestCreateBasin_NameValidation(t *testing.T) {
-	testCases := []struct {
-		name        string
-		basinName   s2.BasinName
-		expectError bool
-	}{
-		{"too_short", "short", true},
-		{"too_long", s2.BasinName(strings.Repeat("a", 49)), true},
-		{"with_uppercase", "Test-Basin-Name", true},
-		{"with_underscore", "test_basin_name", true},
-		{"starts_with_hyphen", "-test-basin", true},
-		{"ends_with_hyphen", "test-basin-", true},
+func TestCreateBasin_WhileSameNameDeleting(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: Create basin while same name is deleting")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-cdel")
+
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
+	if err != nil {
+		t.Fatalf("First create failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	err = client.Basins.Delete(ctx, basinName)
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-			defer cancel()
-			t.Logf("Testing: Create basin with invalid name (%s)", tc.name)
-
-			client := testClient(t)
-			_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: tc.basinName})
-
-			if tc.expectError && err == nil {
-				t.Error("Expected error but got none")
-			} else if !tc.expectError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-			if tc.expectError {
-				t.Logf("Got expected error: %v", err)
-			}
-		})
+	_, err = client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
+	var s2Err *s2.S2Error
+	if errors.As(err, &s2Err) {
+		if s2Err.Code == "basin_deletion_pending" {
+			t.Log("Got expected basin_deletion_pending error")
+			return
+		}
+		if s2Err.Code == "resource_already_exists" {
+			t.Log("Got resource_already_exists (basin still deleting)")
+			return
+		}
+	}
+	if err == nil {
+		deleteBasin(ctx, client, basinName)
+		t.Log("Basin was fully deleted, create succeeded")
+	} else {
+		t.Logf("Got error: %v", err)
 	}
 }
 
@@ -891,51 +1038,15 @@ func TestGetBasinConfig_NonExistent(t *testing.T) {
 		t.Errorf("Expected 404 error, got: %v", err)
 	}
 	if s2Err != nil && s2Err.Code != "basin_not_found" {
-		t.Errorf("Expected error code basin_not_found, got: %s", s2Err.Code)
+		t.Errorf("Expected code basin_not_found, got: %s", s2Err.Code)
 	}
 	t.Logf("Got expected error: %v", err)
 }
 
-func TestGetBasinConfig_DefaultFieldsOmitted(t *testing.T) {
+func TestGetBasinConfig_VerifyAllFieldsReturned(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: Get basin config with defaults (fields should be omitted)")
-
-	client := testClient(t)
-	basinName := uniqueBasinName("test-gdef")
-	defer deleteBasin(ctx, client, basinName)
-
-	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
-		Basin: basinName,
-	})
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-	waitForBasinActive(ctx, t, client, basinName)
-
-	config, err := client.Basins.GetConfig(ctx, basinName)
-	if err != nil {
-		t.Fatalf("GetConfig failed: %v", err)
-	}
-
-	if config.CreateStreamOnAppend == nil {
-		t.Error("create_stream_on_append should always be present")
-	}
-	if config.CreateStreamOnRead == nil {
-		t.Error("create_stream_on_read should always be present")
-	}
-	if config.DefaultStreamConfig != nil {
-		t.Log("Note: default_stream_config is present (may contain non-default inherited values)")
-	} else {
-		t.Log("Verified: default_stream_config omitted when all defaults")
-	}
-	t.Log("Verified boolean fields always present, default_stream_config may be omitted")
-}
-
-func TestGetBasinConfig_NonDefaultFieldsPresent(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-	t.Log("Testing: Get basin config with non-default fields (should all be present)")
+	t.Log("Testing: Verify all config fields returned")
 
 	client := testClient(t)
 	basinName := uniqueBasinName("test-gall")
@@ -974,27 +1085,27 @@ func TestGetBasinConfig_NonDefaultFieldsPresent(t *testing.T) {
 	}
 
 	if config.CreateStreamOnAppend == nil {
-		t.Error("Missing create_stream_on_append (should always be present)")
+		t.Error("Missing create_stream_on_append")
 	}
 	if config.CreateStreamOnRead == nil {
-		t.Error("Missing create_stream_on_read (should always be present)")
+		t.Error("Missing create_stream_on_read")
 	}
 	if config.DefaultStreamConfig == nil {
-		t.Fatal("Missing default_stream_config (expected with non-default values)")
+		t.Fatal("Missing default_stream_config")
 	}
 	if config.DefaultStreamConfig.StorageClass == nil {
-		t.Error("Missing storage_class (non-default value should be present)")
+		t.Error("Missing storage_class")
 	}
 	if config.DefaultStreamConfig.RetentionPolicy == nil {
-		t.Error("Missing retention_policy (non-default value should be present)")
+		t.Error("Missing retention_policy")
 	}
 	if config.DefaultStreamConfig.Timestamping == nil {
-		t.Error("Missing timestamping (non-default values should be present)")
+		t.Error("Missing timestamping")
 	}
 	if config.DefaultStreamConfig.DeleteOnEmpty == nil {
-		t.Error("Missing delete_on_empty (non-default value should be present)")
+		t.Error("Missing delete_on_empty")
 	}
-	t.Log("Verified all non-default config fields are present")
+	t.Log("Verified all config fields present")
 }
 
 // --- Delete Basin Tests ---
@@ -1012,7 +1123,6 @@ func TestDeleteBasin_Existing(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 	waitForBasinActive(ctx, t, client, basinName)
-	t.Logf("Created basin: %s", basinName)
 
 	err = client.Basins.Delete(ctx, basinName)
 	if err != nil {
@@ -1039,7 +1149,7 @@ func TestDeleteBasin_NonExistent(t *testing.T) {
 func TestDeleteBasin_AlreadyDeleting(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: Delete basin that is already deleting (idempotent)")
+	t.Log("Testing: Delete basin that is already deleting")
 
 	client := testClient(t)
 	basinName := uniqueBasinName("test-deld")
@@ -1058,14 +1168,17 @@ func TestDeleteBasin_AlreadyDeleting(t *testing.T) {
 	err = client.Basins.Delete(ctx, basinName)
 	if err != nil {
 		var s2Err *s2.S2Error
-		if !errors.As(err, &s2Err) || (s2Err.Status != 202 && s2Err.Status != 404) {
-			t.Logf("Note: Second delete returned error (expected in some cases): %v", err)
+		if errors.As(err, &s2Err) && s2Err.Status == 404 {
+			t.Log("Basin already fully deleted")
+			return
 		}
+		t.Logf("Second delete error (may be expected): %v", err)
+	} else {
+		t.Log("Delete is idempotent")
 	}
-	t.Log("Delete is idempotent or returns expected error")
 }
 
-func TestDeleteBasin_VerifyState(t *testing.T) {
+func TestDeleteBasin_VerifyStateAfterDelete(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 	t.Log("Testing: Verify basin state after delete")
@@ -1227,7 +1340,6 @@ func TestReconfigureBasin_ChangeStorageClass(t *testing.T) {
 		t.Run(fmt.Sprintf("%s_to_%s", tc.from, tc.to), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
-			t.Logf("Testing: Reconfigure storage_class from %s to %s", tc.from, tc.to)
 
 			client := testClient(t)
 			basinName := uniqueBasinName("test-rcsc")
@@ -1244,8 +1356,7 @@ func TestReconfigureBasin_ChangeStorageClass(t *testing.T) {
 			})
 			if err != nil {
 				if isFreeTierLimitation(err) {
-					t.Logf("Skipped: %s storage class not available on free tier", tc.from)
-					return
+					t.Skipf("Skipped: %s storage class not available on free tier", tc.from)
 				}
 				t.Fatalf("Create failed: %v", err)
 			}
@@ -1262,8 +1373,7 @@ func TestReconfigureBasin_ChangeStorageClass(t *testing.T) {
 			})
 			if err != nil {
 				if isFreeTierLimitation(err) {
-					t.Logf("Skipped: %s storage class not available on free tier", tc.to)
-					return
+					t.Skipf("Skipped: %s storage class not available on free tier", tc.to)
 				}
 				t.Fatalf("Reconfigure failed: %v", err)
 			}
@@ -1300,8 +1410,7 @@ func TestReconfigureBasin_ChangeRetentionToAge(t *testing.T) {
 	})
 	if err != nil {
 		if isFreeTierLimitation(err) {
-			t.Log("Skipped: infinite retention not available on free tier")
-			return
+			t.Skip("Skipped: infinite retention not available on free tier")
 		}
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -1369,8 +1478,7 @@ func TestReconfigureBasin_ChangeRetentionToInfinite(t *testing.T) {
 	})
 	if err != nil {
 		if isFreeTierLimitation(err) {
-			t.Log("Skipped: infinite retention not available on free tier")
-			return
+			t.Skip("Skipped: infinite retention not available on free tier")
 		}
 		t.Fatalf("Reconfigure failed: %v", err)
 	}
@@ -1395,7 +1503,6 @@ func TestReconfigureBasin_ChangeTimestampingMode(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
-			t.Logf("Testing: Reconfigure timestamping.mode to %s", mode)
 
 			client := testClient(t)
 			basinName := uniqueBasinName("test-rtm")
@@ -1443,7 +1550,6 @@ func TestReconfigureBasin_ChangeTimestampingUncapped(t *testing.T) {
 		t.Run(fmt.Sprintf("uncapped=%v", uncapped), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
-			t.Logf("Testing: Reconfigure timestamping.uncapped to %v", uncapped)
 
 			client := testClient(t)
 			basinName := uniqueBasinName("test-rtu")
@@ -1545,7 +1651,7 @@ func TestReconfigureBasin_ChangeDeleteOnEmpty(t *testing.T) {
 func TestReconfigureBasin_DisableDeleteOnEmpty(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: Reconfigure to disable delete_on_empty (min_age_secs=0, field omitted)")
+	t.Log("Testing: Reconfigure to disable delete_on_empty")
 
 	client := testClient(t)
 	basinName := uniqueBasinName("test-rddoe")
@@ -1584,10 +1690,8 @@ func TestReconfigureBasin_DisableDeleteOnEmpty(t *testing.T) {
 		if config.DefaultStreamConfig.DeleteOnEmpty.MinAgeSecs != nil && *config.DefaultStreamConfig.DeleteOnEmpty.MinAgeSecs != 0 {
 			t.Errorf("Expected min_age_secs=0 or omitted, got %d", *config.DefaultStreamConfig.DeleteOnEmpty.MinAgeSecs)
 		}
-		t.Log("Verified delete_on_empty disabled (min_age_secs=0, explicitly returned)")
-	} else {
-		t.Log("Verified delete_on_empty disabled (field omitted as expected)")
 	}
+	t.Log("Verified delete_on_empty disabled")
 }
 
 func TestReconfigureBasin_NonExistent(t *testing.T) {
@@ -1610,10 +1714,54 @@ func TestReconfigureBasin_NonExistent(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
+func TestReconfigureBasin_DeletingBasin(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: Reconfigure deleting basin")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-rdel")
+
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	err = client.Basins.Delete(ctx, basinName)
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	_, err = client.Basins.Reconfigure(ctx, s2.ReconfigureBasinArgs{
+		Basin: basinName,
+		Config: s2.BasinReconfiguration{
+			CreateStreamOnAppend: ptr(true),
+		},
+	})
+
+	var s2Err *s2.S2Error
+	if errors.As(err, &s2Err) {
+		if s2Err.Code == "basin_deletion_pending" {
+			t.Log("Got expected basin_deletion_pending error")
+			return
+		}
+		if s2Err.Status == 404 {
+			t.Log("Basin already fully deleted")
+			return
+		}
+	}
+	if err != nil {
+		t.Logf("Got error: %v", err)
+	} else {
+		t.Error("Expected error for reconfiguring deleting basin")
+	}
+}
+
 func TestReconfigureBasin_EmptyConfig(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: Reconfigure with empty config (no changes)")
+	t.Log("Testing: Reconfigure with empty config")
 
 	client := testClient(t)
 	basinName := uniqueBasinName("test-remp")
@@ -1647,7 +1795,7 @@ func TestReconfigureBasin_EmptyConfig(t *testing.T) {
 func TestReconfigureBasin_PartialConfig(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: Reconfigure with partial config (only some fields changed)")
+	t.Log("Testing: Reconfigure with partial config")
 
 	client := testClient(t)
 	basinName := uniqueBasinName("test-rpar")
