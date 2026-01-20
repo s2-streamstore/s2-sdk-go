@@ -14,6 +14,8 @@ import (
 
 const streamTestTimeout = 60 * time.Second
 
+const errCodeResourceAlreadyExists = "resource_already_exists"
+
 var (
 	sharedTestClient    *s2.Client
 	sharedTestBasinName s2.BasinName
@@ -281,7 +283,7 @@ func TestListStreams_InvalidStartAfterLessThanPrefix(t *testing.T) {
 
 	var s2Err *s2.S2Error
 	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 400 error, got: %v", err)
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -631,7 +633,7 @@ func TestCreateStream_DuplicateName(t *testing.T) {
 	if !errors.As(err, &s2Err) || s2Err.Status != 409 {
 		t.Errorf("Expected 409 conflict, got: %v", err)
 	}
-	if s2Err != nil && s2Err.Code != "resource_already_exists" {
+	if s2Err != nil && s2Err.Code != errCodeResourceAlreadyExists {
 		t.Errorf("Expected error code resource_already_exists, got: %s", s2Err.Code)
 	}
 	t.Logf("Got expected conflict error: %v", err)
@@ -657,7 +659,7 @@ func TestCreateStream_InvalidRetentionAgeZero(t *testing.T) {
 
 	var s2Err *s2.S2Error
 	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 400 error, got: %v", err)
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -1684,7 +1686,7 @@ func TestAppend_WithoutTimestamp_ClientRequire(t *testing.T) {
 
 	var s2Err *s2.S2Error
 	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 400 error for missing timestamp on client-require, got: %v", err)
+		t.Errorf("Expected 422 error for missing timestamp on client-require, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -1845,7 +1847,7 @@ func TestAppend_FencingTokenTooLong(t *testing.T) {
 
 	var s2Err *s2.S2Error
 	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 400 error for fencing token too long, got: %v", err)
+		t.Errorf("Expected 422 error for fencing token too long, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -2067,9 +2069,9 @@ func TestAppend_HeaderWithEmptyName_NonCommand(t *testing.T) {
 
 	var s2Err *s2.S2Error
 	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 400 error for empty header name with non-command value, got: %v", err)
+		t.Errorf("Expected 422 error for empty header name with non-command value, got: %v", err)
 	}
-	t.Logf("Got expected 400 error: %v", err)
+	t.Logf("Got expected 422 error: %v", err)
 }
 
 func TestRead_FromTail(t *testing.T) {
@@ -2322,7 +2324,7 @@ func TestRead_MultipleStartParams(t *testing.T) {
 
 	var s2Err *s2.S2Error
 	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 400 error for mutually exclusive start params, got: %v", err)
+		t.Errorf("Expected 422 error for mutually exclusive start params, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -2763,7 +2765,7 @@ func TestReconfigureStream_InvalidRetentionAgeZero(t *testing.T) {
 
 	var s2Err *s2.S2Error
 	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 400 error, got: %v", err)
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }

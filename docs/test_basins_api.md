@@ -2,7 +2,7 @@
 
 > **LLM Instructions**
 >
-> This document is a reference for generating SDK test code. When writing tests:
+> This document is a reference for generating SDK test code. Write tests based on the following instructions:
 >
 > - Write clean, concise, idiomatic code for the target language
 > - Do not add comments unless they explain non-obvious business logic
@@ -17,6 +17,7 @@
 > - Set a timeout for each test
 > - If the PUT based API for CreateOrReconfigure is not used in the SDK, don't implement the test
 > - If idempotency tokens are an internal detail of the SDK, don't implement a specific test
+> - After a delete, basin MAY appear in list with state=deleting OR not appear at all
 
 ---
 
@@ -72,11 +73,16 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - `basins` (array of `BasinInfo`)
   - Matching basins (max 1000)
+  - Includes basins in "deleting" state with `state: "deleting"`
 
 - `has_more` (boolean)
   - Indicates more basins match criteria
 
 ### Test Cases
+
+- **List includes deleting basins**
+  - Setup: delete a basin, then list
+  - Expected: 200, basin appears with `state: "deleting"`
 
 - **List all basins**
   - Parameters: none
@@ -217,8 +223,8 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `408` — Timeout
   - Code: `timeout`
 
-- `409` — Conflict (name taken)
-  - Code: `resource_already_exists`
+- `409` — Conflict
+  - Codes: `resource_already_exists`, `basin_deletion_pending`
 
 - `429` — Retryable conflict
   - Code: `rate_limited`
@@ -308,6 +314,10 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Input: same basin name + different `s2-request-token`
   - Expected: 409 (`resource_already_exists`)
 
+- **Idempotent create (same token, different config)**
+  - Input: same `s2-request-token` + different config
+  - Expected: 409 (`resource_already_exists`)
+
 - **Name too short**
   - Input: `{"basin": "short"}` (< 8 chars)
   - Expected: 400
@@ -335,6 +345,10 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - **Duplicate name**
   - Input: create same basin twice (no token)
   - Expected: 409 (`resource_already_exists`)
+
+- **Create while same name is deleting**
+  - Setup: delete basin, immediately create same name
+  - Expected: 409 (`basin_deletion_pending`)
 
 - **Basin limit exhausted**
   - Setup: create beyond account limit
@@ -438,8 +452,6 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `201` — Basin created
   - Body: `BasinInfo`
 
-- `204` — No changes (null body on existing basin)
-
 - `400` — Bad request / scope mismatch
   - Code: `invalid`
 
@@ -467,7 +479,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **PUT with null body (no-op)**
   - Input: existing basin, null body
-  - Expected: 204
+  - Expected: 200
 
 - **PUT with empty object**
   - Input: existing basin, `{}`
@@ -624,10 +636,14 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `408` — Timeout
   - Code: `timeout`
 
-- `409` — Concurrent update
-  - Code: `transaction_conflict`
+- `409` — Conflict
+  - Codes: `transaction_conflict`, `basin_deletion_pending`
 
 ### Test Cases
+
+- **Reconfigure deleting basin**
+  - Setup: delete basin, then PATCH
+  - Expected: 409 (`basin_deletion_pending`)
 
 - **Enable create_stream_on_append**
   - Input: `{"create_stream_on_append": true}`
@@ -768,6 +784,18 @@ When running against an account on the Free tier, certain configurations will be
 - `400` `bad_query`
   - Invalid query parameters
 
+- `400` `bad_header`
+  - Invalid header value
+
+- `400` `bad_path`
+  - Invalid path parameter
+
+- `400` `bad_proto`
+  - Invalid protobuf message
+
+- `400` `bad_frame`
+  - Invalid frame format
+
 - `422` `invalid`
   - Validation errors (config, arguments, scope mismatch, tier limits)
 
@@ -795,8 +823,17 @@ When running against an account on the Free tier, certain configurations will be
 - `429` `rate_limited`
   - Concurrent creation conflict, retry
 
-- `503` `unavailable`
-  - Basin still in creating state or service unavailable
+- `500` `storage`
+  - Storage layer error
 
 - `500` `other`
   - Internal server error
+
+- `502` `hot_server`
+  - Hot server unavailable
+
+- `503` `unavailable`
+  - Basin still in creating state or service unavailable
+
+- `504` `upstream_timeout`
+  - Upstream service timeout
