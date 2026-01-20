@@ -49,11 +49,13 @@ func (b *BasinsClient) List(ctx context.Context, args *ListBasinsArgs) (*ListBas
 }
 
 // Iterate over basins.
+// By default, basins that are being deleted are excluded. Set IncludeDeleted to true to include them.
 func (b *BasinsClient) Iter(ctx context.Context, args *ListBasinsArgs) *BasinsIterator {
 	base := ListBasinsArgs{}
 	if args != nil {
 		base = *args
 	}
+	includeDeleted := base.IncludeDeleted
 	remaining := copyLimit(base.Limit)
 	base.Limit = nil
 	fetch := func(ctx context.Context, startAfter string) (*pagedResponse[BasinInfo], error) {
@@ -69,14 +71,24 @@ func (b *BasinsClient) Iter(ctx context.Context, args *ListBasinsArgs) *BasinsIt
 		if err != nil {
 			return nil, err
 		}
+		// Filter out deleted basins unless IncludeDeleted is true
+		basins := resp.Basins
+		if !includeDeleted {
+			basins = make([]BasinInfo, 0, len(resp.Basins))
+			for _, basin := range resp.Basins {
+				if basin.State != BasinStateDeleting {
+					basins = append(basins, basin)
+				}
+			}
+		}
 		next := ""
 		if resp.HasMore && len(resp.Basins) > 0 {
 			next = string(resp.Basins[len(resp.Basins)-1].Name)
 		}
-		if consumeRemaining(remaining, len(resp.Basins)) {
+		if consumeRemaining(remaining, len(basins)) {
 			next = ""
 		}
-		return &pagedResponse[BasinInfo]{items: resp.Basins, nextKey: next}, nil
+		return &pagedResponse[BasinInfo]{items: basins, nextKey: next}, nil
 	}
 	p := newPager(ctx, fetch)
 	if args != nil {

@@ -49,11 +49,13 @@ func (s *StreamsClient) List(ctx context.Context, args *ListStreamsArgs) (*ListS
 }
 
 // Iterate over streams in a basin.
+// By default, streams that are being deleted are excluded. Set IncludeDeleted to true to include them.
 func (s *StreamsClient) Iter(ctx context.Context, args *ListStreamsArgs) *StreamsIterator {
 	base := ListStreamsArgs{}
 	if args != nil {
 		base = *args
 	}
+	includeDeleted := base.IncludeDeleted
 	remaining := copyLimit(base.Limit)
 	base.Limit = nil
 	fetch := func(ctx context.Context, startAfter string) (*pagedResponse[StreamInfo], error) {
@@ -69,14 +71,24 @@ func (s *StreamsClient) Iter(ctx context.Context, args *ListStreamsArgs) *Stream
 		if err != nil {
 			return nil, err
 		}
+		// Filter out deleted streams unless IncludeDeleted is true
+		streams := resp.Streams
+		if !includeDeleted {
+			streams = make([]StreamInfo, 0, len(resp.Streams))
+			for _, stream := range resp.Streams {
+				if stream.DeletedAt == nil {
+					streams = append(streams, stream)
+				}
+			}
+		}
 		next := ""
 		if resp.HasMore && len(resp.Streams) > 0 {
 			next = string(resp.Streams[len(resp.Streams)-1].Name)
 		}
-		if consumeRemaining(remaining, len(resp.Streams)) {
+		if consumeRemaining(remaining, len(streams)) {
 			next = ""
 		}
-		return &pagedResponse[StreamInfo]{items: resp.Streams, nextKey: next}, nil
+		return &pagedResponse[StreamInfo]{items: streams, nextKey: next}, nil
 	}
 	p := newPager(ctx, fetch)
 	if args != nil {

@@ -96,4 +96,19 @@ func main() {
 		},
 	})
 	// ANCHOR_END: access-token-restricted
+
+	// Pagination example - not executed by default
+	if false {
+		// ANCHOR: pagination
+		// Iterate through all streams with automatic pagination
+		iter := basin.Streams.Iter(ctx, nil)
+		for iter.Next() {
+			stream := iter.Value()
+			fmt.Println(stream.Name)
+		}
+		if err := iter.Err(); err != nil {
+			log.Fatal(err)
+		}
+		// ANCHOR_END: pagination
+	}
 }
