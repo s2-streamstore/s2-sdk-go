@@ -136,11 +136,11 @@ func applyAppendSessionDefaults(opts *AppendSessionOptions, baseRetry *RetryConf
 		if userCfg.MaxAttempts > 0 {
 			effective.MaxAttempts = userCfg.MaxAttempts
 		}
-		if userCfg.MinDelay > 0 {
-			effective.MinDelay = userCfg.MinDelay
+		if userCfg.MinBaseDelay > 0 {
+			effective.MinBaseDelay = userCfg.MinBaseDelay
 		}
-		if userCfg.MaxDelay > 0 {
-			effective.MaxDelay = userCfg.MaxDelay
+		if userCfg.MaxBaseDelay > 0 {
+			effective.MaxBaseDelay = userCfg.MaxBaseDelay
 		}
 		if userCfg.AppendRetryPolicy != "" {
 			effective.AppendRetryPolicy = userCfg.AppendRetryPolicy
@@ -150,11 +150,11 @@ func applyAppendSessionDefaults(opts *AppendSessionOptions, baseRetry *RetryConf
 	if effective.MaxAttempts <= 0 {
 		effective.MaxAttempts = defaultMaxAttempts
 	}
-	if effective.MinDelay <= 0 {
-		effective.MinDelay = defaultMinDelay
+	if effective.MinBaseDelay <= 0 {
+		effective.MinBaseDelay = defaultMinBaseDelay
 	}
-	if effective.MaxDelay <= 0 {
-		effective.MaxDelay = defaultMaxDelay
+	if effective.MaxBaseDelay <= 0 {
+		effective.MaxBaseDelay = defaultMaxBaseDelay
 	}
 	if effective.AppendRetryPolicy == "" {
 		effective.AppendRetryPolicy = AppendRetryPolicyAll

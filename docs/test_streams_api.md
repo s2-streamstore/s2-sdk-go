@@ -182,7 +182,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `503` — Basin still creating
   - Code: `unavailable`
@@ -320,8 +320,8 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - `201` — Stream created
   - Body: `StreamInfo`
 
-- `400` — Bad request / invalid config
-  - Code: `invalid`
+- `400` — Bad request
+  - Codes: `bad_json`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -330,10 +330,13 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `409` — Stream already exists
   - Code: `resource_already_exists`
+
+- `422` — Validation error / invalid config
+  - Code: `invalid`
 
 - `503` — Basin still creating
   - Code: `unavailable`
@@ -455,7 +458,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
@@ -510,8 +513,8 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - `200` — Reconfigured
   - Body: `StreamInfo`
 
-- `400` — Bad request / invalid config
-  - Code: `invalid`
+- `400` — Bad request
+  - Codes: `bad_json`
 
 - `403` — Forbidden
   - Code: `permission_denied`
@@ -520,10 +523,13 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `basin_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `409` — Conflict
   - Codes: `stream_deletion_pending`, `transaction_conflict`
+
+- `422` — Validation error / invalid config
+  - Code: `invalid`
 
 - `503` — Basin still creating
   - Code: `unavailable`
@@ -584,7 +590,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 ### Test Cases
 
@@ -653,7 +659,10 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - `200` — Success
   - Body: `StreamConfig` (updated)
 
-- `400` — Bad request / invalid config
+- `400` — Bad request (malformed JSON)
+  - Code: `bad_json`
+
+- `422` — Invalid config
   - Code: `invalid`
 
 - `403` — Forbidden
@@ -663,7 +672,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `409` — Concurrent update
   - Code: `transaction_conflict`
@@ -753,7 +762,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
@@ -794,7 +803,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 > **Important - Timestamp behavior:**
 > - **Monotonicity guaranteed:** Timestamps are always adjusted UP to maintain monotonicity. If you provide a timestamp lower than the previous record's timestamp, it will be automatically increased.
-> - **`timestamping.mode=client-require`:** Appends WITHOUT a timestamp fail with 400 "Record timestamp missing".
+> - **`timestamping.mode=client-require`:** Appends WITHOUT a timestamp fail with 422 "Record timestamp missing".
 > - **`timestamping.mode=client-prefer` (default):** If timestamp is omitted, arrival time is used.
 > - **`timestamping.mode=arrival`:** Client timestamps are ignored; arrival time is always used.
 > - **`uncapped=false` (default):** Future timestamps (greater than arrival time) are capped to arrival time.
@@ -863,7 +872,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
@@ -1074,7 +1083,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Code: `stream_not_found`
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `409` — Stream being deleted
   - Code: `stream_deletion_pending`
@@ -1172,7 +1181,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - **Multiple start params**
   - Input: `seq_num=0`, `timestamp=0`
-  - Expected: 400 (mutually exclusive)
+  - Expected: 422 (`invalid`, mutually exclusive)
 
 - **Permission denied**
   - Setup: token without `read` op
@@ -1400,7 +1409,7 @@ Several operations are eventually consistent. Tests should NOT assert on immedia
 - `404` `basin_not_found`
   - Parent basin does not exist
 
-- `408` `timeout`
+- `408` `request_timeout`
   - Request timeout
 
 - `409` `resource_already_exists`

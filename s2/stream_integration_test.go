@@ -1660,7 +1660,7 @@ func TestAppend_WithTimestamp(t *testing.T) {
 func TestAppend_WithoutTimestamp_ClientRequire(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
-	t.Log("Testing: Append without timestamp on client-require stream (expects 400)")
+	t.Log("Testing: Append without timestamp on client-require stream (expects 422)")
 
 	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-awtcr")
@@ -2046,7 +2046,7 @@ func TestAppend_HeaderWithEmptyName(t *testing.T) {
 func TestAppend_HeaderWithEmptyName_NonCommand(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
-	t.Log("Testing: Append record with empty header name but non-command value (expect 400)")
+	t.Log("Testing: Append record with empty header name but non-command value (expect 422)")
 
 	basin := getSharedBasin(t)
 	streamName := uniqueStreamName("test-ahennc")

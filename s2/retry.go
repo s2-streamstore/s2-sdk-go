@@ -14,26 +14,27 @@ import (
 type RetryConfig struct {
 	// Total number of attempts, including the initial try. Must be >= 1. A value of 1 means no retries.
 	MaxAttempts int
-	// Minimum delay for exponential backoff. Defaults to 100ms.
-	MinDelay time.Duration
-	// Maximum delay for exponential backoff. Defaults to 1s.
-	MaxDelay time.Duration
+	// Minimum base delay for exponential backoff. Defaults to 100ms.
+	MinBaseDelay time.Duration
+	// Maximum base delay for exponential backoff. Defaults to 1s.
+	// Note: actual delay with jitter can be up to 2x this value.
+	MaxBaseDelay time.Duration
 	// Policy for retrying append operations.
 	AppendRetryPolicy AppendRetryPolicy
 }
 
 const (
-	defaultMaxAttempts = 3
-	defaultMinDelay    = 100 * time.Millisecond
-	defaultMaxDelay    = 1 * time.Second
+	defaultMaxAttempts   = 3
+	defaultMinBaseDelay  = 100 * time.Millisecond
+	defaultMaxBaseDelay  = 1 * time.Second
 )
 
 // Default retry configuration.
 // It retries up to 3 times with exponential backoff between 100ms and 1s.
 var DefaultRetryConfig = &RetryConfig{
 	MaxAttempts:       defaultMaxAttempts,
-	MinDelay:          defaultMinDelay,
-	MaxDelay:          defaultMaxDelay,
+	MinBaseDelay:      defaultMinBaseDelay,
+	MaxBaseDelay:      defaultMaxBaseDelay,
 	AppendRetryPolicy: AppendRetryPolicyAll,
 }
 
@@ -105,19 +106,19 @@ func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.L
 }
 
 func calculateRetryBackoff(config *RetryConfig, attempt int) time.Duration {
-	minDelay := config.MinDelay
-	if minDelay <= 0 {
-		minDelay = defaultMinDelay
+	minBaseDelay := config.MinBaseDelay
+	if minBaseDelay <= 0 {
+		minBaseDelay = defaultMinBaseDelay
 	}
-	maxDelay := config.MaxDelay
-	if maxDelay <= 0 {
-		maxDelay = defaultMaxDelay
+	maxBaseDelay := config.MaxBaseDelay
+	if maxBaseDelay <= 0 {
+		maxBaseDelay = defaultMaxBaseDelay
 	}
 
-	// baseDelay = min((minDelay * 2^(n-1)), maxDelay)
-	baseDelay := minDelay << (attempt - 1)            // minDelay * 2^(attempt-1)
-	if baseDelay > maxDelay || baseDelay < minDelay { // overflow check
-		baseDelay = maxDelay
+	// baseDelay = min((minBaseDelay * 2^(n-1)), maxBaseDelay)
+	baseDelay := minBaseDelay << (attempt - 1)               // minBaseDelay * 2^(attempt-1)
+	if baseDelay > maxBaseDelay || baseDelay < minBaseDelay { // overflow check
+		baseDelay = maxBaseDelay
 	}
 
 	// jitter = random(0, baseDelay)

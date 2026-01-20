@@ -90,7 +90,7 @@
   - Cause: token lacks `account-metrics` permission
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `503` — Service unavailable
   - Code: `unavailable`
@@ -213,7 +213,7 @@
   - Unit: `operations`
 
 - `read-ops`
-  - Returns: Accumulation metrics for read operations (segment, channel)
+  - Returns: Accumulation metrics for read operations (streaming, unary)
   - Type: `AccumulationMetric` (2 metrics)
   - Unit: `operations`
 
@@ -247,7 +247,7 @@
   - Cause: token lacks `basin-metrics` permission or basin not in token scope
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `503` — Service unavailable
   - Code: `unavailable`
@@ -264,7 +264,7 @@
 
 - **Get read ops metric**
   - Input: valid basin, `set=read-ops`, `start=<now-1h>`, `end=<now>`
-  - Expected: 200, two AccumulationMetrics (segment, channel), unit=operations
+  - Expected: 200, two AccumulationMetrics (streaming, unary), unit=operations
 
 - **Get read throughput metric**
   - Input: valid basin, `set=read-throughput`, `start=<now-1h>`, `end=<now>`
@@ -361,7 +361,7 @@
   - Cause: token lacks `stream-metrics` permission, basin not in scope, or stream not in scope
 
 - `408` — Timeout
-  - Code: `timeout`
+  - Code: `request_timeout`
 
 - `503` — Service unavailable
   - Code: `unavailable`
@@ -453,7 +453,7 @@
   - Basin name not in token's basin scope
   - Stream name not in token's stream scope
 
-- `408` `timeout`
+- `408` `request_timeout`
   - Request timeout
 
 - `500` `other`

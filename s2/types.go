@@ -485,6 +485,9 @@ type ListBasinsArgs struct {
 	StartAfter string `json:"start_after,omitempty"`
 	// Number of results, up to a maximum of 1000.
 	Limit *int `json:"limit,omitempty"`
+	// Include basins that are being deleted (default: false).
+	// Only applies to the Iter method.
+	IncludeDeleted bool `json:"-"`
 }
 
 type CreateBasinArgs struct {
@@ -513,6 +516,9 @@ type ListStreamsArgs struct {
 	StartAfter string `json:"start_after,omitempty"`
 	// Number of results, up to a maximum of 1000.
 	Limit *int `json:"limit,omitempty"`
+	// Include streams that are being deleted (default: false).
+	// Only applies to the Iter method.
+	IncludeDeleted bool `json:"-"`
 }
 
 type CreateStreamArgs struct {
