@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.7] - 2026-01-21
+
+### Features
+
+- Add SDK documentation examples + alter default timeouts, and pagination behavior ([#155](https://github.com/s2-streamstore/s2-sdk-go/issues/155))
+
+### Bug Fixes
+
+- Drain pending records when error channel closes in ReadSession.Next() ([#157](https://github.com/s2-streamstore/s2-sdk-go/issues/157))
+- Data race on inflightEntry.attemptStart in AppendSession ([#158](https://github.com/s2-streamstore/s2-sdk-go/issues/158))
+
+### Miscellaneous Tasks
+
+- Metrics tests ([#154](https://github.com/s2-streamstore/s2-sdk-go/issues/154))
+- Access token tests ([#156](https://github.com/s2-streamstore/s2-sdk-go/issues/156))
+
 ## [v0.11.6] - 2026-01-16
 
 ### Features
@@ -22,6 +38,7 @@ All notable changes to this project will be documented in this file.
 - Rm accidentally committed bin ([#136](https://github.com/s2-streamstore/s2-sdk-go/issues/136))
 - Update specs ([#150](https://github.com/s2-streamstore/s2-sdk-go/issues/150))
 - Rename workflow and enable signed commits ([#151](https://github.com/s2-streamstore/s2-sdk-go/issues/151))
+- *(release)* V0.11.6 ([#153](https://github.com/s2-streamstore/s2-sdk-go/issues/153))
 
 ## [v0.11.5] - 2026-01-12
 
