@@ -95,26 +95,6 @@ func deleteStream(ctx context.Context, basin *s2.BasinClient, name s2.StreamName
 	_ = basin.Streams.Delete(ctx, name)
 }
 
-func ptrU64(v uint64) *uint64 {
-	return &v
-}
-
-func ptrI64(v int64) *int64 {
-	return &v
-}
-
-func ptrStr(v string) *string {
-	return &v
-}
-
-func ptrBool(v bool) *bool {
-	return &v
-}
-
-func ptrI32(v int32) *int32 {
-	return &v
-}
-
 func isStreamFreeTierLimitation(err error) bool {
 	var s2Err *s2.S2Error
 	if errors.As(err, &s2Err) && s2Err.Code == "invalid" {
@@ -368,14 +348,14 @@ func TestCreateStream_WithFullConfig(t *testing.T) {
 		Config: &s2.StreamConfig{
 			StorageClass: &storageClass,
 			RetentionPolicy: &s2.RetentionPolicy{
-				Age: ptrI64(86400),
+				Age: s2.Ptr[int64](86400),
 			},
 			Timestamping: &s2.TimestampingConfig{
 				Mode:     &timestampMode,
-				Uncapped: ptrBool(true),
+				Uncapped: s2.Ptr(true),
 			},
 			DeleteOnEmpty: &s2.DeleteOnEmptyConfig{
-				MinAgeSecs: ptrI64(3600),
+				MinAgeSecs: s2.Ptr[int64](3600),
 			},
 		},
 	})
@@ -473,7 +453,7 @@ func TestCreateStream_RetentionPolicyAge(t *testing.T) {
 		Stream: streamName,
 		Config: &s2.StreamConfig{
 			RetentionPolicy: &s2.RetentionPolicy{
-				Age: ptrI64(86400),
+				Age: s2.Ptr[int64](86400),
 			},
 		},
 	})
@@ -592,7 +572,7 @@ func TestCreateStream_DeleteOnEmpty(t *testing.T) {
 		Stream: streamName,
 		Config: &s2.StreamConfig{
 			DeleteOnEmpty: &s2.DeleteOnEmptyConfig{
-				MinAgeSecs: ptrI64(3600),
+				MinAgeSecs: s2.Ptr[int64](3600),
 			},
 		},
 	})
@@ -652,7 +632,7 @@ func TestCreateStream_InvalidRetentionAgeZero(t *testing.T) {
 		Stream: streamName,
 		Config: &s2.StreamConfig{
 			RetentionPolicy: &s2.RetentionPolicy{
-				Age: ptrI64(0),
+				Age: s2.Ptr[int64](0),
 			},
 		},
 	})
@@ -851,7 +831,7 @@ func TestReconfigureStream_ChangeRetentionToAge(t *testing.T) {
 		Stream: streamName,
 		Config: s2.StreamReconfiguration{
 			RetentionPolicy: &s2.RetentionPolicy{
-				Age: ptrI64(3600),
+				Age: s2.Ptr[int64](3600),
 			},
 		},
 	})
@@ -881,7 +861,7 @@ func TestReconfigureStream_ChangeRetentionToInfinite(t *testing.T) {
 		Stream: streamName,
 		Config: &s2.StreamConfig{
 			RetentionPolicy: &s2.RetentionPolicy{
-				Age: ptrI64(86400),
+				Age: s2.Ptr[int64](86400),
 			},
 		},
 	})
@@ -1193,7 +1173,7 @@ func TestAppend_WithMatchSeqNum_Success(t *testing.T) {
 
 	ack, err := stream.Append(ctx, &s2.AppendInput{
 		Records:     []s2.AppendRecord{{Body: []byte("first")}},
-		MatchSeqNum: ptrU64(0),
+		MatchSeqNum: s2.Ptr[uint64](0),
 	})
 	if err != nil {
 		t.Fatalf("Append failed: %v", err)
@@ -1227,7 +1207,7 @@ func TestAppend_WithMatchSeqNum_Failure(t *testing.T) {
 
 	_, err = stream.Append(ctx, &s2.AppendInput{
 		Records:     []s2.AppendRecord{{Body: []byte("second")}},
-		MatchSeqNum: ptrU64(0),
+		MatchSeqNum: s2.Ptr[uint64](0),
 	})
 
 	var seqErr *s2.SeqNumMismatchError
@@ -1284,7 +1264,7 @@ func TestRead_FromBeginning(t *testing.T) {
 	}
 
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(0),
+		SeqNum: s2.Ptr[uint64](0),
 	})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -1322,8 +1302,8 @@ func TestRead_WithCountLimit(t *testing.T) {
 	}
 
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(0),
-		Count:  ptrU64(3),
+		SeqNum: s2.Ptr[uint64](0),
+		Count:  s2.Ptr[uint64](3),
 	})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -1351,7 +1331,7 @@ func TestRead_EmptyStream(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 	_, err = stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(0),
+		SeqNum: s2.Ptr[uint64](0),
 	})
 
 	var s2Err *s2.S2Error
@@ -1370,7 +1350,7 @@ func TestRead_NonExistentStream(t *testing.T) {
 	stream := basin.Stream("nonexistent-stream-12345")
 
 	_, err := stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(0),
+		SeqNum: s2.Ptr[uint64](0),
 	})
 
 	var s2Err *s2.S2Error
@@ -1404,8 +1384,8 @@ func TestRead_WithClampTrue(t *testing.T) {
 	}
 
 	_, err = stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(999999),
-		Clamp:  ptrBool(true),
+		SeqNum: s2.Ptr[uint64](999999),
+		Clamp:  s2.Ptr(true),
 	})
 
 	var s2Err *s2.S2Error
@@ -1439,9 +1419,9 @@ func TestRead_WithClampTrueAndWait(t *testing.T) {
 	}
 
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(999999),
-		Clamp:  ptrBool(true),
-		Wait:   ptrI32(1),
+		SeqNum: s2.Ptr[uint64](999999),
+		Clamp:  s2.Ptr(true),
+		Wait:   s2.Ptr[int32](1),
 	})
 	if err != nil {
 		t.Fatalf("Read with clamp+wait failed: %v", err)
@@ -1466,8 +1446,8 @@ func TestRead_EmptyStreamWithWait(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(0),
-		Wait:   ptrI32(1),
+		SeqNum: s2.Ptr[uint64](0),
+		Wait:   s2.Ptr[int32](1),
 	})
 	if err != nil {
 		t.Fatalf("Read with wait failed: %v", err)
@@ -1508,7 +1488,7 @@ func TestRead_VerifyRecordContent(t *testing.T) {
 	}
 
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(0),
+		SeqNum: s2.Ptr[uint64](0),
 	})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -1603,7 +1583,7 @@ func TestCreateStream_TimestampingUncapped(t *testing.T) {
 				Stream: streamName,
 				Config: &s2.StreamConfig{
 					Timestamping: &s2.TimestampingConfig{
-						Uncapped: ptrBool(tc.uncapped),
+						Uncapped: s2.Ptr(tc.uncapped),
 					},
 				},
 			})
@@ -1704,7 +1684,7 @@ func TestAppend_FutureTimestamp_Uncapped(t *testing.T) {
 		Stream: streamName,
 		Config: &s2.StreamConfig{
 			Timestamping: &s2.TimestampingConfig{
-				Uncapped: ptrBool(true),
+				Uncapped: s2.Ptr(true),
 			},
 		},
 	})
@@ -1746,7 +1726,7 @@ func TestAppend_FutureTimestamp_Capped(t *testing.T) {
 		Stream: streamName,
 		Config: &s2.StreamConfig{
 			Timestamping: &s2.TimestampingConfig{
-				Uncapped: ptrBool(false),
+				Uncapped: s2.Ptr(false),
 			},
 		},
 	})
@@ -1882,7 +1862,7 @@ func TestAppend_WithFencingToken_Success(t *testing.T) {
 
 	ack, err := stream.Append(ctx, &s2.AppendInput{
 		Records:      []s2.AppendRecord{{Body: []byte("test")}},
-		FencingToken: ptrStr("my-token"),
+		FencingToken: s2.Ptr("my-token"),
 	})
 	if err != nil {
 		t.Fatalf("Append with fencing token failed: %v", err)
@@ -1921,7 +1901,7 @@ func TestAppend_WithFencingToken_Failure(t *testing.T) {
 
 	_, err = stream.Append(ctx, &s2.AppendInput{
 		Records:      []s2.AppendRecord{{Body: []byte("test")}},
-		FencingToken: ptrStr("wrong-token"),
+		FencingToken: s2.Ptr("wrong-token"),
 	})
 
 	var fenceErr *s2.FencingTokenMismatchError
@@ -2100,7 +2080,7 @@ func TestRead_FromTail(t *testing.T) {
 	}
 
 	_, err = stream.Read(ctx, &s2.ReadOptions{
-		TailOffset: ptrI64(0),
+		TailOffset: s2.Ptr[int64](0),
 	})
 
 	var s2Err *s2.S2Error
@@ -2136,7 +2116,7 @@ func TestRead_WithTailOffset(t *testing.T) {
 	}
 
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		TailOffset: ptrI64(3),
+		TailOffset: s2.Ptr[int64](3),
 	})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -2182,7 +2162,7 @@ func TestRead_ByTimestamp(t *testing.T) {
 	}
 
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		Timestamp: ptrU64(firstTimestamp + 1),
+		Timestamp: s2.Ptr(firstTimestamp + 1),
 	})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -2221,8 +2201,8 @@ func TestRead_WithBytesLimit(t *testing.T) {
 	}
 
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(0),
-		Bytes:  ptrU64(250),
+		SeqNum: s2.Ptr[uint64](0),
+		Bytes:  s2.Ptr[uint64](250),
 	})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -2255,8 +2235,8 @@ func TestRead_UntilTimestamp(t *testing.T) {
 	}
 
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(0),
-		Until:  ptrU64(ack.End.Timestamp + 1),
+		SeqNum: s2.Ptr[uint64](0),
+		Until:  s2.Ptr(ack.End.Timestamp + 1),
 	})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -2289,8 +2269,8 @@ func TestRead_ClampFalse_BeyondTail(t *testing.T) {
 	}
 
 	_, err = stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: ptrU64(999999),
-		Clamp:  ptrBool(false),
+		SeqNum: s2.Ptr[uint64](999999),
+		Clamp:  s2.Ptr(false),
 	})
 
 	var s2Err *s2.S2Error
@@ -2318,8 +2298,8 @@ func TestRead_MultipleStartParams(t *testing.T) {
 
 	// Try to read with both seq_num and timestamp - should be an error
 	_, err = stream.Read(ctx, &s2.ReadOptions{
-		SeqNum:    ptrU64(0),
-		Timestamp: ptrU64(0),
+		SeqNum:    s2.Ptr[uint64](0),
+		Timestamp: s2.Ptr[uint64](0),
 	})
 
 	var s2Err *s2.S2Error
@@ -2609,7 +2589,7 @@ func TestReconfigureStream_ChangeTimestampingUncapped(t *testing.T) {
 		Stream: streamName,
 		Config: s2.StreamReconfiguration{
 			Timestamping: &s2.TimestampingReconfiguration{
-				Uncapped: ptrBool(true),
+				Uncapped: s2.Ptr(true),
 			},
 		},
 	})
@@ -2643,7 +2623,7 @@ func TestReconfigureStream_ChangeDeleteOnEmpty(t *testing.T) {
 		Stream: streamName,
 		Config: s2.StreamReconfiguration{
 			DeleteOnEmpty: &s2.DeleteOnEmptyReconfiguration{
-				MinAgeSecs: ptrI64(3600),
+				MinAgeSecs: s2.Ptr[int64](3600),
 			},
 		},
 	})
@@ -2673,7 +2653,7 @@ func TestReconfigureStream_DisableDeleteOnEmpty(t *testing.T) {
 		Stream: streamName,
 		Config: &s2.StreamConfig{
 			DeleteOnEmpty: &s2.DeleteOnEmptyConfig{
-				MinAgeSecs: ptrI64(3600),
+				MinAgeSecs: s2.Ptr[int64](3600),
 			},
 		},
 	})
@@ -2685,7 +2665,7 @@ func TestReconfigureStream_DisableDeleteOnEmpty(t *testing.T) {
 		Stream: streamName,
 		Config: s2.StreamReconfiguration{
 			DeleteOnEmpty: &s2.DeleteOnEmptyReconfiguration{
-				MinAgeSecs: ptrI64(0),
+				MinAgeSecs: s2.Ptr[int64](0),
 			},
 		},
 	})
@@ -2711,7 +2691,7 @@ func TestReconfigureStream_PartialConfig(t *testing.T) {
 		Config: &s2.StreamConfig{
 			StorageClass: &storageClass,
 			RetentionPolicy: &s2.RetentionPolicy{
-				Age: ptrI64(86400),
+				Age: s2.Ptr[int64](86400),
 			},
 		},
 	})
@@ -2723,7 +2703,7 @@ func TestReconfigureStream_PartialConfig(t *testing.T) {
 		Stream: streamName,
 		Config: s2.StreamReconfiguration{
 			RetentionPolicy: &s2.RetentionPolicy{
-				Age: ptrI64(3600),
+				Age: s2.Ptr[int64](3600),
 			},
 		},
 	})
@@ -2758,7 +2738,7 @@ func TestReconfigureStream_InvalidRetentionAgeZero(t *testing.T) {
 		Stream: streamName,
 		Config: s2.StreamReconfiguration{
 			RetentionPolicy: &s2.RetentionPolicy{
-				Age: ptrI64(0),
+				Age: s2.Ptr[int64](0),
 			},
 		},
 	})
@@ -2995,7 +2975,7 @@ func TestReadSession_Open(t *testing.T) {
 		}
 	}
 
-	session, err := stream.ReadSession(ctx, &s2.ReadOptions{SeqNum: ptrU64(0)})
+	session, err := stream.ReadSession(ctx, &s2.ReadOptions{SeqNum: s2.Ptr[uint64](0)})
 	if err != nil {
 		t.Fatalf("ReadSession failed: %v", err)
 	}
@@ -3042,7 +3022,7 @@ func TestReadSession_Cancel(t *testing.T) {
 		}
 	}
 
-	session, err := stream.ReadSession(ctx, &s2.ReadOptions{SeqNum: ptrU64(0)})
+	session, err := stream.ReadSession(ctx, &s2.ReadOptions{SeqNum: s2.Ptr[uint64](0)})
 	if err != nil {
 		t.Fatalf("ReadSession failed: %v", err)
 	}

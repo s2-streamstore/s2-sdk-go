@@ -15,10 +15,6 @@ func metricsTimeRange(hoursAgo int64) (*int64, *int64) {
 	return &start, &now
 }
 
-func ptrInterval(v s2.TimeseriesInterval) *s2.TimeseriesInterval {
-	return &v
-}
-
 // --- Account Metrics Tests ---
 
 func TestAccountMetrics_ActiveBasins(t *testing.T) {
@@ -92,7 +88,7 @@ func TestAccountMetrics_AccountOpsWithMinuteInterval(t *testing.T) {
 		Set:      s2.AccountMetricSetAccountOps,
 		Start:    start,
 		End:      end,
-		Interval: ptrInterval(s2.TimeseriesIntervalMinute),
+		Interval: s2.Ptr(s2.TimeseriesIntervalMinute),
 	})
 	if err != nil {
 		t.Fatalf("Account metrics failed: %v", err)
@@ -117,7 +113,7 @@ func TestAccountMetrics_AccountOpsWithHourInterval(t *testing.T) {
 		Set:      s2.AccountMetricSetAccountOps,
 		Start:    &start,
 		End:      &now,
-		Interval: ptrInterval(s2.TimeseriesIntervalHour),
+		Interval: s2.Ptr(s2.TimeseriesIntervalHour),
 	})
 	if err != nil {
 		t.Fatalf("Account metrics failed: %v", err)
@@ -142,7 +138,7 @@ func TestAccountMetrics_AccountOpsWithDayInterval(t *testing.T) {
 		Set:      s2.AccountMetricSetAccountOps,
 		Start:    &start,
 		End:      &now,
-		Interval: ptrInterval(s2.TimeseriesIntervalDay),
+		Interval: s2.Ptr(s2.TimeseriesIntervalDay),
 	})
 	if err != nil {
 		t.Fatalf("Account metrics failed: %v", err)
@@ -420,7 +416,7 @@ func TestBasinMetrics_StorageWithHourInterval(t *testing.T) {
 		Set:      s2.BasinMetricSetStorage,
 		Start:    &start,
 		End:      &now,
-		Interval: ptrInterval(s2.TimeseriesIntervalHour),
+		Interval: s2.Ptr(s2.TimeseriesIntervalHour),
 	})
 	if err != nil {
 		t.Fatalf("Basin metrics failed: %v", err)
@@ -618,7 +614,7 @@ func TestStreamMetrics_StorageWithMinuteInterval(t *testing.T) {
 		Set:      s2.StreamMetricSetStorage,
 		Start:    start,
 		End:      end,
-		Interval: ptrInterval(s2.TimeseriesIntervalMinute),
+		Interval: s2.Ptr(s2.TimeseriesIntervalMinute),
 	})
 	if err != nil {
 		t.Fatalf("Stream metrics failed: %v", err)
@@ -915,7 +911,7 @@ func TestAccountMetrics_AllIntervals(t *testing.T) {
 				Set:      s2.AccountMetricSetAccountOps,
 				Start:    &start,
 				End:      &now,
-				Interval: ptrInterval(tc.interval),
+				Interval: s2.Ptr(tc.interval),
 			})
 			if err != nil {
 				t.Fatalf("Account metrics failed: %v", err)
