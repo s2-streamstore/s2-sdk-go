@@ -278,18 +278,17 @@ func (r *AppendSession) submitInflightBatches() {
 		return
 	}
 
-	r.inflightMu.RLock()
+	r.inflightMu.Lock()
 	entries := make([]*inflightEntry, len(r.inflightQueue))
 	copy(entries, r.inflightQueue)
-	r.inflightMu.RUnlock()
+	for _, entry := range entries {
+		if entry.attemptStart.IsZero() {
+			entry.attemptStart = time.Now()
+		}
+	}
+	r.inflightMu.Unlock()
 
 	for _, entry := range entries {
-		if !entry.attemptStart.IsZero() {
-			continue
-		}
-
-		entry.attemptStart = time.Now()
-
 		if err := session.appendInput(entry.input); err != nil {
 			r.handleSessionError(err)
 			return
@@ -540,18 +539,19 @@ func (r *AppendSession) checkTimeouts() {
 	}
 
 	r.inflightMu.RLock()
-	var head *inflightEntry
+	var timedOut bool
+	var attemptStart time.Time
+	var requestTimeout time.Duration
 	if len(r.inflightQueue) > 0 {
-		head = r.inflightQueue[0]
+		head := r.inflightQueue[0]
+		attemptStart = head.attemptStart
+		requestTimeout = head.requestTimeout
+		timedOut = requestTimeout > 0 && !attemptStart.IsZero() && time.Since(attemptStart) > requestTimeout
 	}
 	r.inflightMu.RUnlock()
 
-	if head == nil {
-		return
-	}
-
-	if head.hasTimedOut() {
-		elapsed := time.Since(head.attemptStart)
+	if timedOut {
+		elapsed := time.Since(attemptStart)
 		r.stateMu.RLock()
 		attempt := r.currentAttempt
 		r.stateMu.RUnlock()
@@ -582,13 +582,6 @@ type inflightEntry struct {
 type inflightResult struct {
 	ack *AppendAck
 	err error
-}
-
-func (e *inflightEntry) hasTimedOut() bool {
-	if e.requestTimeout <= 0 || e.attemptStart.IsZero() {
-		return false
-	}
-	return time.Since(e.attemptStart) > e.requestTimeout
 }
 
 func isIdempotentEntry(entry *inflightEntry) bool {
