@@ -50,8 +50,18 @@ func (s *ReadSession) Next() bool {
 
 		case err, ok := <-s.reader.Errors():
 			if !ok {
-				s.Close()
-				return false
+				select {
+				case rec, ok := <-s.reader.Records():
+					if !ok {
+						s.Close()
+						return false
+					}
+					s.current = rec
+					return true
+				default:
+					s.Close()
+					return false
+				}
 			}
 			if err != nil {
 				s.err = err
