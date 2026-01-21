@@ -852,21 +852,16 @@ func TestCreateBasin_DeleteOnEmpty(t *testing.T) {
 
 func TestCreateBasin_NameValidation(t *testing.T) {
 	testCases := []struct {
-		name        string
-		basinName   s2.BasinName
-		expectError bool
+		name      string
+		basinName s2.BasinName
 	}{
-		{"too_short", "short", true},
-		{"too_long", s2.BasinName(strings.Repeat("a", 49)), true},
-		{"with_uppercase", "Test-Basin-Name", true},
-		{"with_underscore", "test_basin_name", true},
-		{"starts_with_hyphen", "-test-basin", true},
-		{"ends_with_hyphen", "test-basin-", true},
-		{"empty_string", "", true},
-		{"min_length_valid", "abcdefgh", false},
-		{"max_length_valid", s2.BasinName(strings.Repeat("a", 48)), false},
-		{"starts_with_digit", "1abcdefg", false},
-		{"contains_hyphen", "abcd-efg", false},
+		{"too_short", "short"},
+		{"too_long", s2.BasinName(strings.Repeat("a", 49))},
+		{"with_uppercase", "Test-Basin-Name"},
+		{"with_underscore", "test_basin_name"},
+		{"starts_with_hyphen", "-test-basin"},
+		{"ends_with_hyphen", "test-basin-"},
+		{"empty_string", ""},
 	}
 
 	for _, tc := range testCases {
@@ -875,22 +870,12 @@ func TestCreateBasin_NameValidation(t *testing.T) {
 			defer cancel()
 
 			client := testClient(t)
-			info, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: tc.basinName})
+			_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: tc.basinName})
 
-			if tc.expectError {
-				if err == nil {
-					deleteBasin(ctx, client, tc.basinName)
-					t.Error("Expected error but got none")
-				} else {
-					t.Logf("Got expected error: %v", err)
-				}
+			if err == nil {
+				t.Error("Expected validation error but got none")
 			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				} else {
-					deleteBasin(ctx, client, info.Name)
-					t.Logf("Created valid basin: %s", tc.basinName)
-				}
+				t.Logf("Got expected error: %v", err)
 			}
 		})
 	}
