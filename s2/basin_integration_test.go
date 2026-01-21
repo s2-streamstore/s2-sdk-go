@@ -52,10 +52,6 @@ func waitForBasinActive(ctx context.Context, t *testing.T, client *s2.Client, na
 	}
 }
 
-func ptr[T any](v T) *T {
-	return &v
-}
-
 func isFreeTierLimitation(err error) bool {
 	var s2Err *s2.S2Error
 	if errors.As(err, &s2Err) && s2Err.Code == "invalid" {
@@ -447,19 +443,19 @@ func TestCreateBasin_WithFullConfig(t *testing.T) {
 	info, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnAppend: ptr(true),
-			CreateStreamOnRead:   ptr(false),
+			CreateStreamOnAppend: s2.Ptr(true),
+			CreateStreamOnRead:   s2.Ptr(false),
 			DefaultStreamConfig: &s2.StreamConfig{
 				StorageClass: &storageClass,
 				RetentionPolicy: &s2.RetentionPolicy{
-					Age: ptr(int64(86400)),
+					Age: s2.Ptr(int64(86400)),
 				},
 				Timestamping: &s2.TimestampingConfig{
 					Mode:     &timestampMode,
-					Uncapped: ptr(false),
+					Uncapped: s2.Ptr(false),
 				},
 				DeleteOnEmpty: &s2.DeleteOnEmptyConfig{
-					MinAgeSecs: ptr(int64(3600)),
+					MinAgeSecs: s2.Ptr(int64(3600)),
 				},
 			},
 		},
@@ -496,7 +492,7 @@ func TestCreateBasin_CreateStreamOnAppendTrue(t *testing.T) {
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnAppend: ptr(true),
+			CreateStreamOnAppend: s2.Ptr(true),
 		},
 	})
 	if err != nil {
@@ -528,7 +524,7 @@ func TestCreateBasin_CreateStreamOnReadTrue(t *testing.T) {
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnRead: ptr(true),
+			CreateStreamOnRead: s2.Ptr(true),
 		},
 	})
 	if err != nil {
@@ -640,7 +636,7 @@ func TestCreateBasin_RetentionPolicyAge(t *testing.T) {
 		Config: &s2.BasinConfig{
 			DefaultStreamConfig: &s2.StreamConfig{
 				RetentionPolicy: &s2.RetentionPolicy{
-					Age: ptr(int64(86400)),
+					Age: s2.Ptr(int64(86400)),
 				},
 			},
 		},
@@ -782,7 +778,7 @@ func TestCreateBasin_TimestampingUncapped(t *testing.T) {
 				Config: &s2.BasinConfig{
 					DefaultStreamConfig: &s2.StreamConfig{
 						Timestamping: &s2.TimestampingConfig{
-							Uncapped: ptr(uncapped),
+							Uncapped: s2.Ptr(uncapped),
 						},
 					},
 				},
@@ -826,7 +822,7 @@ func TestCreateBasin_DeleteOnEmpty(t *testing.T) {
 		Config: &s2.BasinConfig{
 			DefaultStreamConfig: &s2.StreamConfig{
 				DeleteOnEmpty: &s2.DeleteOnEmptyConfig{
-					MinAgeSecs: ptr(int64(3600)),
+					MinAgeSecs: s2.Ptr(int64(3600)),
 				},
 			},
 		},
@@ -979,7 +975,7 @@ func TestCreateBasin_InvalidRetentionAgeZero(t *testing.T) {
 		Config: &s2.BasinConfig{
 			DefaultStreamConfig: &s2.StreamConfig{
 				RetentionPolicy: &s2.RetentionPolicy{
-					Age: ptr(int64(0)),
+					Age: s2.Ptr(int64(0)),
 				},
 			},
 		},
@@ -1006,7 +1002,7 @@ func TestGetBasinConfig_Existing(t *testing.T) {
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnAppend: ptr(true),
+			CreateStreamOnAppend: s2.Ptr(true),
 		},
 	})
 	if err != nil {
@@ -1057,19 +1053,19 @@ func TestGetBasinConfig_VerifyAllFieldsReturned(t *testing.T) {
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnAppend: ptr(true),
-			CreateStreamOnRead:   ptr(false),
+			CreateStreamOnAppend: s2.Ptr(true),
+			CreateStreamOnRead:   s2.Ptr(false),
 			DefaultStreamConfig: &s2.StreamConfig{
 				StorageClass: &storageClass,
 				RetentionPolicy: &s2.RetentionPolicy{
-					Age: ptr(int64(86400)),
+					Age: s2.Ptr(int64(86400)),
 				},
 				Timestamping: &s2.TimestampingConfig{
 					Mode:     &timestampMode,
-					Uncapped: ptr(true),
+					Uncapped: s2.Ptr(true),
 				},
 				DeleteOnEmpty: &s2.DeleteOnEmptyConfig{
-					MinAgeSecs: ptr(int64(7200)),
+					MinAgeSecs: s2.Ptr(int64(7200)),
 				},
 			},
 		},
@@ -1231,7 +1227,7 @@ func TestReconfigureBasin_EnableCreateStreamOnAppend(t *testing.T) {
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnAppend: ptr(false),
+			CreateStreamOnAppend: s2.Ptr(false),
 		},
 	})
 	if err != nil {
@@ -1242,7 +1238,7 @@ func TestReconfigureBasin_EnableCreateStreamOnAppend(t *testing.T) {
 	config, err := client.Basins.Reconfigure(ctx, s2.ReconfigureBasinArgs{
 		Basin: basinName,
 		Config: s2.BasinReconfiguration{
-			CreateStreamOnAppend: ptr(true),
+			CreateStreamOnAppend: s2.Ptr(true),
 		},
 	})
 	if err != nil {
@@ -1267,7 +1263,7 @@ func TestReconfigureBasin_DisableCreateStreamOnAppend(t *testing.T) {
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnAppend: ptr(true),
+			CreateStreamOnAppend: s2.Ptr(true),
 		},
 	})
 	if err != nil {
@@ -1278,7 +1274,7 @@ func TestReconfigureBasin_DisableCreateStreamOnAppend(t *testing.T) {
 	config, err := client.Basins.Reconfigure(ctx, s2.ReconfigureBasinArgs{
 		Basin: basinName,
 		Config: s2.BasinReconfiguration{
-			CreateStreamOnAppend: ptr(false),
+			CreateStreamOnAppend: s2.Ptr(false),
 		},
 	})
 	if err != nil {
@@ -1303,7 +1299,7 @@ func TestReconfigureBasin_EnableCreateStreamOnRead(t *testing.T) {
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnRead: ptr(false),
+			CreateStreamOnRead: s2.Ptr(false),
 		},
 	})
 	if err != nil {
@@ -1314,7 +1310,7 @@ func TestReconfigureBasin_EnableCreateStreamOnRead(t *testing.T) {
 	config, err := client.Basins.Reconfigure(ctx, s2.ReconfigureBasinArgs{
 		Basin: basinName,
 		Config: s2.BasinReconfiguration{
-			CreateStreamOnRead: ptr(true),
+			CreateStreamOnRead: s2.Ptr(true),
 		},
 	})
 	if err != nil {
@@ -1421,7 +1417,7 @@ func TestReconfigureBasin_ChangeRetentionToAge(t *testing.T) {
 		Config: s2.BasinReconfiguration{
 			DefaultStreamConfig: &s2.StreamReconfiguration{
 				RetentionPolicy: &s2.RetentionPolicy{
-					Age: ptr(int64(3600)),
+					Age: s2.Ptr(int64(3600)),
 				},
 			},
 		},
@@ -1456,7 +1452,7 @@ func TestReconfigureBasin_ChangeRetentionToInfinite(t *testing.T) {
 		Config: &s2.BasinConfig{
 			DefaultStreamConfig: &s2.StreamConfig{
 				RetentionPolicy: &s2.RetentionPolicy{
-					Age: ptr(int64(86400)),
+					Age: s2.Ptr(int64(86400)),
 				},
 			},
 		},
@@ -1560,7 +1556,7 @@ func TestReconfigureBasin_ChangeTimestampingUncapped(t *testing.T) {
 				Config: &s2.BasinConfig{
 					DefaultStreamConfig: &s2.StreamConfig{
 						Timestamping: &s2.TimestampingConfig{
-							Uncapped: ptr(!uncapped),
+							Uncapped: s2.Ptr(!uncapped),
 						},
 					},
 				},
@@ -1575,7 +1571,7 @@ func TestReconfigureBasin_ChangeTimestampingUncapped(t *testing.T) {
 				Config: s2.BasinReconfiguration{
 					DefaultStreamConfig: &s2.StreamReconfiguration{
 						Timestamping: &s2.TimestampingReconfiguration{
-							Uncapped: ptr(uncapped),
+							Uncapped: s2.Ptr(uncapped),
 						},
 					},
 				},
@@ -1612,7 +1608,7 @@ func TestReconfigureBasin_ChangeDeleteOnEmpty(t *testing.T) {
 		Config: &s2.BasinConfig{
 			DefaultStreamConfig: &s2.StreamConfig{
 				DeleteOnEmpty: &s2.DeleteOnEmptyConfig{
-					MinAgeSecs: ptr(int64(0)),
+					MinAgeSecs: s2.Ptr(int64(0)),
 				},
 			},
 		},
@@ -1627,7 +1623,7 @@ func TestReconfigureBasin_ChangeDeleteOnEmpty(t *testing.T) {
 		Config: s2.BasinReconfiguration{
 			DefaultStreamConfig: &s2.StreamReconfiguration{
 				DeleteOnEmpty: &s2.DeleteOnEmptyReconfiguration{
-					MinAgeSecs: ptr(int64(7200)),
+					MinAgeSecs: s2.Ptr(int64(7200)),
 				},
 			},
 		},
@@ -1662,7 +1658,7 @@ func TestReconfigureBasin_DisableDeleteOnEmpty(t *testing.T) {
 		Config: &s2.BasinConfig{
 			DefaultStreamConfig: &s2.StreamConfig{
 				DeleteOnEmpty: &s2.DeleteOnEmptyConfig{
-					MinAgeSecs: ptr(int64(3600)),
+					MinAgeSecs: s2.Ptr(int64(3600)),
 				},
 			},
 		},
@@ -1677,7 +1673,7 @@ func TestReconfigureBasin_DisableDeleteOnEmpty(t *testing.T) {
 		Config: s2.BasinReconfiguration{
 			DefaultStreamConfig: &s2.StreamReconfiguration{
 				DeleteOnEmpty: &s2.DeleteOnEmptyReconfiguration{
-					MinAgeSecs: ptr(int64(0)),
+					MinAgeSecs: s2.Ptr(int64(0)),
 				},
 			},
 		},
@@ -1703,7 +1699,7 @@ func TestReconfigureBasin_NonExistent(t *testing.T) {
 	_, err := client.Basins.Reconfigure(ctx, s2.ReconfigureBasinArgs{
 		Basin: "nonexistent-basin-name-12345",
 		Config: s2.BasinReconfiguration{
-			CreateStreamOnAppend: ptr(true),
+			CreateStreamOnAppend: s2.Ptr(true),
 		},
 	})
 
@@ -1736,7 +1732,7 @@ func TestReconfigureBasin_DeletingBasin(t *testing.T) {
 	_, err = client.Basins.Reconfigure(ctx, s2.ReconfigureBasinArgs{
 		Basin: basinName,
 		Config: s2.BasinReconfiguration{
-			CreateStreamOnAppend: ptr(true),
+			CreateStreamOnAppend: s2.Ptr(true),
 		},
 	})
 
@@ -1770,7 +1766,7 @@ func TestReconfigureBasin_EmptyConfig(t *testing.T) {
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnAppend: ptr(true),
+			CreateStreamOnAppend: s2.Ptr(true),
 		},
 	})
 	if err != nil {
@@ -1805,8 +1801,8 @@ func TestReconfigureBasin_PartialConfig(t *testing.T) {
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
-			CreateStreamOnAppend: ptr(true),
-			CreateStreamOnRead:   ptr(false),
+			CreateStreamOnAppend: s2.Ptr(true),
+			CreateStreamOnRead:   s2.Ptr(false),
 			DefaultStreamConfig: &s2.StreamConfig{
 				StorageClass: &storageClass,
 			},
@@ -1820,7 +1816,7 @@ func TestReconfigureBasin_PartialConfig(t *testing.T) {
 	config, err := client.Basins.Reconfigure(ctx, s2.ReconfigureBasinArgs{
 		Basin: basinName,
 		Config: s2.BasinReconfiguration{
-			CreateStreamOnRead: ptr(true),
+			CreateStreamOnRead: s2.Ptr(true),
 		},
 	})
 	if err != nil {
@@ -1861,7 +1857,7 @@ func TestReconfigureBasin_InvalidRetentionAgeZero(t *testing.T) {
 		Config: s2.BasinReconfiguration{
 			DefaultStreamConfig: &s2.StreamReconfiguration{
 				RetentionPolicy: &s2.RetentionPolicy{
-					Age: ptr(int64(0)),
+					Age: s2.Ptr(int64(0)),
 				},
 			},
 		},

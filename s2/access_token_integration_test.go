@@ -282,8 +282,8 @@ func TestIssueAccessToken_WithOpGroups_ReadWrite(t *testing.T) {
 	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
-			Basins:  &s2.ResourceSet{Prefix: ptr("")},
-			Streams: &s2.ResourceSet{Prefix: ptr("")},
+			Basins:  &s2.ResourceSet{Prefix: s2.Ptr("")},
+			Streams: &s2.ResourceSet{Prefix: s2.Ptr("")},
 			OpGroups: &s2.PermittedOperationGroups{
 				Stream: &s2.ReadWritePermissions{Read: true, Write: true},
 			},
@@ -310,7 +310,7 @@ func TestIssueAccessToken_WithBasinExactScope(t *testing.T) {
 	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
-			Basins: &s2.ResourceSet{Exact: ptr("my-test-basin")},
+			Basins: &s2.ResourceSet{Exact: s2.Ptr("my-test-basin")},
 			Ops:    []string{s2.OperationListStreams},
 		},
 	})
@@ -335,7 +335,7 @@ func TestIssueAccessToken_WithBasinPrefixScope(t *testing.T) {
 	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
-			Basins: &s2.ResourceSet{Prefix: ptr("test-")},
+			Basins: &s2.ResourceSet{Prefix: s2.Ptr("test-")},
 			Ops:    []string{s2.OperationCreateBasin},
 		},
 	})
@@ -360,8 +360,8 @@ func TestIssueAccessToken_WithStreamExactScope(t *testing.T) {
 	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
-			Basins:  &s2.ResourceSet{Prefix: ptr("")},
-			Streams: &s2.ResourceSet{Exact: ptr("my-stream")},
+			Basins:  &s2.ResourceSet{Prefix: s2.Ptr("")},
+			Streams: &s2.ResourceSet{Exact: s2.Ptr("my-stream")},
 			Ops:     []string{s2.OperationAppend},
 		},
 	})
@@ -386,8 +386,8 @@ func TestIssueAccessToken_WithStreamPrefixScope(t *testing.T) {
 	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
-			Basins:  &s2.ResourceSet{Prefix: ptr("")},
-			Streams: &s2.ResourceSet{Prefix: ptr("logs-")},
+			Basins:  &s2.ResourceSet{Prefix: s2.Ptr("")},
+			Streams: &s2.ResourceSet{Prefix: s2.Ptr("logs-")},
 			Ops:     []string{s2.OperationCreateStream},
 		},
 	})
@@ -412,8 +412,8 @@ func TestIssueAccessToken_WithAutoPrefixStreams(t *testing.T) {
 	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
-			Basins:  &s2.ResourceSet{Prefix: ptr("")},
-			Streams: &s2.ResourceSet{Prefix: ptr("tenant/")},
+			Basins:  &s2.ResourceSet{Prefix: s2.Ptr("")},
+			Streams: &s2.ResourceSet{Prefix: s2.Ptr("tenant/")},
 			Ops:     []string{s2.OperationCreateStream, s2.OperationListStreams},
 		},
 		AutoPrefixStreams: true,
@@ -619,7 +619,7 @@ func TestAccessToken_BasinPrefixScope_Allowed(t *testing.T) {
 	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
-			Basins: &s2.ResourceSet{Prefix: ptr("testscope-")},
+			Basins: &s2.ResourceSet{Prefix: s2.Ptr("testscope-")},
 			Ops:    []string{s2.OperationCreateBasin, s2.OperationCreateStream},
 		},
 	})
@@ -655,7 +655,7 @@ func TestAccessToken_BasinPrefixScope_Denied(t *testing.T) {
 	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
-			Basins: &s2.ResourceSet{Prefix: ptr("allowed-")},
+			Basins: &s2.ResourceSet{Prefix: s2.Ptr("allowed-")},
 			Ops:    []string{s2.OperationCreateBasin},
 		},
 	})
@@ -722,7 +722,7 @@ func TestAccessToken_EscalationDenied(t *testing.T) {
 		ID: tokenID1,
 		Scope: s2.AccessTokenScope{
 			Ops:          []string{s2.OperationListBasins, s2.OperationIssueAccessToken},
-			AccessTokens: &s2.ResourceSet{Prefix: ptr("")},
+			AccessTokens: &s2.ResourceSet{Prefix: s2.Ptr("")},
 		},
 	})
 	if err != nil {
@@ -809,8 +809,8 @@ func TestAccessToken_CrossBasinDenied(t *testing.T) {
 	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID,
 		Scope: s2.AccessTokenScope{
-			Basins:  &s2.ResourceSet{Exact: ptr(string(basinA))},
-			Streams: &s2.ResourceSet{Prefix: ptr("")},
+			Basins:  &s2.ResourceSet{Exact: s2.Ptr(string(basinA))},
+			Streams: &s2.ResourceSet{Prefix: s2.Ptr("")},
 			Ops:     []string{s2.OperationCreateStream},
 		},
 	})
