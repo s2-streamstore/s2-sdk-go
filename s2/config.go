@@ -17,6 +17,7 @@ type Config struct {
 	BasinEndpoint   string // Template (with {basin}) or fixed endpoint, without /v1
 }
 
+// Returns ClientOptions with endpoints from S2_ACCOUNT_ENDPOINT and S2_BASIN_ENDPOINT.
 func LoadConfigFromEnv() *ClientOptions {
 	cfg := loadConfigFromEnv()
 	opts := &ClientOptions{}
