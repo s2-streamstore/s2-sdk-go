@@ -16,11 +16,15 @@ const testTimeout = 60 * time.Second
 
 func testClient(t *testing.T) *s2.Client {
 	t.Helper()
-	token := os.Getenv("S2_ACCESS_TOKEN")
-	if token == "" {
+	if os.Getenv("S2_ACCESS_TOKEN") == "" {
 		t.Skip("S2_ACCESS_TOKEN not set")
 	}
 	return s2.NewFromEnvironment(nil)
+}
+
+func testClientWithToken(t *testing.T, token string) *s2.Client {
+	t.Helper()
+	return s2.New(token, s2.LoadConfigFromEnv())
 }
 
 func uniqueBasinName(prefix string) s2.BasinName {

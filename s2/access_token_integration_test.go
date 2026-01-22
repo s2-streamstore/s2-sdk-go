@@ -627,7 +627,7 @@ func TestAccessToken_BasinPrefixScope_Allowed(t *testing.T) {
 		t.Fatalf("Issue failed: %v", err)
 	}
 
-	limitedClient := s2.New(resp.AccessToken, nil)
+	limitedClient := testClientWithToken(t, resp.AccessToken)
 
 	_, err = limitedClient.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
 	if err != nil {
@@ -663,7 +663,7 @@ func TestAccessToken_BasinPrefixScope_Denied(t *testing.T) {
 		t.Fatalf("Issue failed: %v", err)
 	}
 
-	limitedClient := s2.New(resp.AccessToken, nil)
+	limitedClient := testClientWithToken(t, resp.AccessToken)
 	basinName := uniqueBasinName("denied")
 
 	_, err = limitedClient.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
@@ -694,7 +694,7 @@ func TestAccessToken_OperationDenied(t *testing.T) {
 		t.Fatalf("Issue failed: %v", err)
 	}
 
-	limitedClient := s2.New(resp.AccessToken, nil)
+	limitedClient := testClientWithToken(t, resp.AccessToken)
 
 	_, err = limitedClient.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: uniqueBasinName("shouldfail"),
@@ -729,7 +729,7 @@ func TestAccessToken_EscalationDenied(t *testing.T) {
 		t.Fatalf("Issue limited token failed: %v", err)
 	}
 
-	limitedClient := s2.New(resp.AccessToken, nil)
+	limitedClient := testClientWithToken(t, resp.AccessToken)
 
 	_, err = limitedClient.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
 		ID: tokenID2,
@@ -764,7 +764,7 @@ func TestAccessToken_ListWithoutPermission(t *testing.T) {
 		t.Fatalf("Issue failed: %v", err)
 	}
 
-	limitedClient := s2.New(resp.AccessToken, nil)
+	limitedClient := testClientWithToken(t, resp.AccessToken)
 
 	_, err = limitedClient.AccessTokens.List(ctx, nil)
 
@@ -818,7 +818,7 @@ func TestAccessToken_CrossBasinDenied(t *testing.T) {
 		t.Fatalf("Issue failed: %v", err)
 	}
 
-	limitedClient := s2.New(resp.AccessToken, nil)
+	limitedClient := testClientWithToken(t, resp.AccessToken)
 
 	_, err = limitedClient.Basin(string(basinB)).Streams.Create(ctx, s2.CreateStreamArgs{Stream: "test-stream"})
 
