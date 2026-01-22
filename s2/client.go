@@ -221,33 +221,42 @@ func createStreamingClient(connectionTimeout time.Duration) *http.Client {
 	}
 }
 
-// NewFromEnvironment creates a client using S2_ACCESS_TOKEN, S2_ACCOUNT_ENDPOINT, S2_BASIN_ENDPOINT.
-// Panics if S2_ACCESS_TOKEN is not set. ClientOptions fields override environment variables.
+// Create a client using configuration from environment variables.
+// Environment variables: S2_ACCESS_TOKEN, S2_ACCOUNT_ENDPOINT, S2_BASIN_ENDPOINT.
+// ClientOptions fields override environment variables.
+// Panics if S2_ACCESS_TOKEN is not set.
 func NewFromEnvironment(opts *ClientOptions) *Client {
-	envCfg := LoadConfigFromEnv()
+	if opts == nil {
+		opts = &ClientOptions{}
+	}
 
-	if envCfg.AccessToken == "" {
+	envConfig := loadConfigFromEnv()
+
+	if envConfig.AccessToken == "" {
 		panic("S2_ACCESS_TOKEN environment variable is required")
 	}
 
-	envOpts := envCfg.ClientOptions()
-
-	if opts != nil {
-		if opts.BaseURL != "" {
-			envOpts.BaseURL = opts.BaseURL
-		}
-		if opts.MakeBasinBaseURL != nil {
-			envOpts.MakeBasinBaseURL = opts.MakeBasinBaseURL
-		}
-		envOpts.HTTPClient = opts.HTTPClient
-		envOpts.RetryConfig = opts.RetryConfig
-		envOpts.Logger = opts.Logger
-		envOpts.RequestTimeout = opts.RequestTimeout
-		envOpts.ConnectionTimeout = opts.ConnectionTimeout
-		envOpts.Compression = opts.Compression
+	effectiveOpts := &ClientOptions{
+		HTTPClient:        opts.HTTPClient,
+		RetryConfig:       opts.RetryConfig,
+		Logger:            opts.Logger,
+		RequestTimeout:    opts.RequestTimeout,
+		ConnectionTimeout: opts.ConnectionTimeout,
 	}
 
-	return New(envCfg.AccessToken, envOpts)
+	if opts.BaseURL != "" {
+		effectiveOpts.BaseURL = opts.BaseURL
+	} else if envConfig.AccountEndpoint != "" {
+		effectiveOpts.BaseURL = envConfig.AccountEndpoint + "/v1"
+	}
+
+	if opts.MakeBasinBaseURL != nil {
+		effectiveOpts.MakeBasinBaseURL = opts.MakeBasinBaseURL
+	} else if envConfig.BasinEndpoint != "" {
+		effectiveOpts.MakeBasinBaseURL = makeBasinURLFunc(envConfig.BasinEndpoint)
+	}
+
+	return New(envConfig.AccessToken, effectiveOpts)
 }
 
 // Create a new BasinClient.

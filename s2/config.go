@@ -13,22 +13,23 @@ const (
 
 type Config struct {
 	AccessToken     string
-	AccountEndpoint string
-	BasinEndpoint   string
+	AccountEndpoint string // Parsed with scheme, without /v1
+	BasinEndpoint   string // Template (with {basin}) or fixed endpoint, without /v1
 }
 
-func (c *Config) ClientOptions() *ClientOptions {
+func LoadConfigFromEnv() *ClientOptions {
+	cfg := loadConfigFromEnv()
 	opts := &ClientOptions{}
-	if c.AccountEndpoint != "" {
-		opts.BaseURL = c.AccountEndpoint + "/v1"
+	if cfg.AccountEndpoint != "" {
+		opts.BaseURL = cfg.AccountEndpoint + "/v1"
 	}
-	if c.BasinEndpoint != "" {
-		opts.MakeBasinBaseURL = makeBasinURLFunc(c.BasinEndpoint)
+	if cfg.BasinEndpoint != "" {
+		opts.MakeBasinBaseURL = makeBasinURLFunc(cfg.BasinEndpoint)
 	}
 	return opts
 }
 
-func LoadConfigFromEnv() *Config {
+func loadConfigFromEnv() *Config {
 	cfg := &Config{
 		AccessToken: os.Getenv(envAccessToken),
 	}
