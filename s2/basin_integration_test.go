@@ -23,6 +23,16 @@ func testClient(t *testing.T) *s2.Client {
 	return s2.NewFromEnvironment(nil)
 }
 
+// testClientWithToken creates a client with the given token but using
+// the same endpoint configuration from environment variables.
+// This is needed when testing with limited-scope tokens that should
+// still connect to the same s2-mem instance.
+func testClientWithToken(t *testing.T, token string) *s2.Client {
+	t.Helper()
+	envCfg := s2.LoadConfigFromEnv()
+	return s2.New(token, envCfg.ClientOptions())
+}
+
 func uniqueBasinName(prefix string) s2.BasinName {
 	return s2.BasinName(fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()))
 }
