@@ -24,9 +24,9 @@ type RetryConfig struct {
 }
 
 const (
-	defaultMaxAttempts   = 3
-	defaultMinBaseDelay  = 100 * time.Millisecond
-	defaultMaxBaseDelay  = 1 * time.Second
+	defaultMaxAttempts  = 3
+	defaultMinBaseDelay = 100 * time.Millisecond
+	defaultMaxBaseDelay = 1 * time.Second
 )
 
 // Default retry configuration.
@@ -106,6 +106,11 @@ func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.L
 }
 
 func calculateRetryBackoff(config *RetryConfig, attempt int) time.Duration {
+	// guard against non-positive attempt to prevent negative bit shift panic.
+	if attempt < 1 {
+		return 0
+	}
+
 	minBaseDelay := config.MinBaseDelay
 	if minBaseDelay <= 0 {
 		minBaseDelay = defaultMinBaseDelay
@@ -116,7 +121,7 @@ func calculateRetryBackoff(config *RetryConfig, attempt int) time.Duration {
 	}
 
 	// baseDelay = min((minBaseDelay * 2^(n-1)), maxBaseDelay)
-	baseDelay := minBaseDelay << (attempt - 1)               // minBaseDelay * 2^(attempt-1)
+	baseDelay := minBaseDelay << (attempt - 1)                // minBaseDelay * 2^(attempt-1)
 	if baseDelay > maxBaseDelay || baseDelay < minBaseDelay { // overflow check
 		baseDelay = maxBaseDelay
 	}
