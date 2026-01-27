@@ -245,12 +245,13 @@ func (r *streamReader) run() {
 			return
 		}
 
-		delay := calculateRetryBackoff(cfg, consecutiveFailures)
+		// consecutiveFailures is a 0-based count; convert to 1-based attempt number
+		delay := calculateRetryBackoff(cfg, consecutiveFailures+1)
 		opts = r.buildAttemptOptions(delay)
 
 		logInfo(r.logger, "s2 read session retrying",
 			"stream", string(r.streamClient.name),
-			"attempt", consecutiveFailures,
+			"consecutive_failures", consecutiveFailures,
 			"max_attempts", maxAttempts,
 			"delay", delay,
 			"error", err)
