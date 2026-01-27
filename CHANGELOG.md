@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.8] - 2026-01-27
+
+### Bug Fixes
+
+- Access token tests ([#161](https://github.com/s2-streamstore/s2-sdk-go/issues/161))
+- Negative shift panic in retry logic ([#163](https://github.com/s2-streamstore/s2-sdk-go/issues/163))
+
+### Testing
+
+- Remove redundant basin name validation test cases ([#160](https://github.com/s2-streamstore/s2-sdk-go/issues/160))
+
+### Miscellaneous Tasks
+
+- Update s2-specs to 6f66731 ([#162](https://github.com/s2-streamstore/s2-sdk-go/issues/162))
+
 ## [v0.11.7] - 2026-01-21
 
 ### Features
@@ -17,6 +32,7 @@ All notable changes to this project will be documented in this file.
 
 - Metrics tests ([#154](https://github.com/s2-streamstore/s2-sdk-go/issues/154))
 - Access token tests ([#156](https://github.com/s2-streamstore/s2-sdk-go/issues/156))
+- *(release)* V0.11.7 ([#159](https://github.com/s2-streamstore/s2-sdk-go/issues/159))
 
 ## [v0.11.6] - 2026-01-16
 
