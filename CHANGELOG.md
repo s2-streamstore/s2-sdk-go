@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.11.9] - 2026-01-31
+
+### Bug Fixes
+
+- Prevent duplicate batch sending in AppendSession ([#165](https://github.com/s2-streamstore/s2-sdk-go/issues/165))
+
 ## [v0.11.8] - 2026-01-27
 
 ### Bug Fixes
@@ -16,6 +22,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Update s2-specs to 6f66731 ([#162](https://github.com/s2-streamstore/s2-sdk-go/issues/162))
+- *(release)* V0.11.8 ([#164](https://github.com/s2-streamstore/s2-sdk-go/issues/164))
 
 ## [v0.11.7] - 2026-01-21
 
