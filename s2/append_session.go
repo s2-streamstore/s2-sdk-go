@@ -281,14 +281,20 @@ func (r *AppendSession) submitInflightBatches() {
 	r.inflightMu.Lock()
 	entries := make([]*inflightEntry, len(r.inflightQueue))
 	copy(entries, r.inflightQueue)
-	for _, entry := range entries {
-		if entry.attemptStart.IsZero() {
-			entry.attemptStart = time.Now()
-		}
-	}
 	r.inflightMu.Unlock()
 
 	for _, entry := range entries {
+		if entry.sentOnSession == session {
+			continue // already sent on this session, skip
+		}
+
+		r.inflightMu.Lock()
+		entry.sentOnSession = session
+		if entry.attemptStart.IsZero() {
+			entry.attemptStart = time.Now()
+		}
+		r.inflightMu.Unlock()
+
 		if err := session.appendInput(entry.input); err != nil {
 			r.handleSessionError(err)
 			return
@@ -577,6 +583,7 @@ type inflightEntry struct {
 	requestTimeout time.Duration
 	resultCh       chan *inflightResult
 	completed      int32
+	sentOnSession  *transportAppendSession // tracks which session this entry was sent on
 }
 
 type inflightResult struct {
