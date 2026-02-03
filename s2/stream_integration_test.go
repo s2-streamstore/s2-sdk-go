@@ -1380,20 +1380,33 @@ func TestRead_WithBytesOverMax(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	body := bytes.Repeat([]byte("a"), 128*1024)
-	records := make([]s2.AppendRecord, 12)
-	for i := range records {
-		records[i] = s2.AppendRecord{Body: body}
+	body := bytes.Repeat([]byte("a"), 64*1024)
+	batch1 := make([]s2.AppendRecord, 15)
+	for i := range batch1 {
+		batch1[i] = s2.AppendRecord{Body: body}
+	}
+	batch2 := make([]s2.AppendRecord, 15)
+	for i := range batch2 {
+		batch2[i] = s2.AppendRecord{Body: body}
 	}
 
-	totalAppended := s2.MeteredBatchBytes(records)
+	batch1Size := s2.MeteredBatchBytes(batch1)
+	batch2Size := s2.MeteredBatchBytes(batch2)
+	if batch1Size > 1024*1024 || batch2Size > 1024*1024 {
+		t.Fatalf("Each batch must be <= 1 MiB: batch1=%d batch2=%d", batch1Size, batch2Size)
+	}
+	totalAppended := batch1Size + batch2Size
 	if totalAppended <= 1024*1024 {
-		t.Fatalf("Expected appended metered bytes > 1 MiB, got %d", totalAppended)
+		t.Fatalf("Expected total appended metered bytes > 1 MiB, got %d", totalAppended)
 	}
 
-	_, err = stream.Append(ctx, &s2.AppendInput{Records: records})
+	_, err = stream.Append(ctx, &s2.AppendInput{Records: batch1})
 	if err != nil {
-		t.Fatalf("Append failed: %v", err)
+		t.Fatalf("Append batch 1 failed: %v", err)
+	}
+	_, err = stream.Append(ctx, &s2.AppendInput{Records: batch2})
+	if err != nil {
+		t.Fatalf("Append batch 2 failed: %v", err)
 	}
 
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
@@ -1413,6 +1426,9 @@ func TestRead_WithBytesOverMax(t *testing.T) {
 	}
 	if len(batch.Records) == 0 {
 		t.Errorf("Expected at least 1 record, got 0")
+	}
+	if len(batch.Records) >= len(batch1)+len(batch2) {
+		t.Errorf("Expected read to be clamped below total records, got %d", len(batch.Records))
 	}
 	t.Logf("Read %d records with metered bytes=%d", len(batch.Records), totalRead)
 }
@@ -2526,6 +2542,7 @@ func TestRead_TimestampGreaterOrEqualUntil(t *testing.T) {
 	var s2Err *s2.S2Error
 	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
 		t.Errorf("Expected 422 error for timestamp >= until, got: %v", err)
+		return
 	}
 	t.Logf("Got expected 422 error: %v", err)
 }
