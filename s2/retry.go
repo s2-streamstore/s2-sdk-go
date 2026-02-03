@@ -181,8 +181,8 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 		lastError = err
 
 		if isNetworkError(ctx, err) {
-			if attemptNo == maxAttempts {
-				logError(logger, "s2 append network error, max attempts exhausted",
+			if attemptNo == maxAttempts || !shouldRetryNetworkError(config, input) {
+				logError(logger, "s2 append network error, max attempts exhausted or not retryable",
 					"attempts", maxAttempts,
 					"error", err)
 
@@ -213,4 +213,12 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 	}
 
 	return nil, lastError
+}
+
+func shouldRetryNetworkError(config *RetryConfig, input *AppendInput) bool {
+	if config.AppendRetryPolicy != AppendRetryPolicyNoSideEffects {
+		return true
+	}
+
+	return input != nil && input.MatchSeqNum != nil
 }
