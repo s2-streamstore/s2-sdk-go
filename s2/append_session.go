@@ -21,6 +21,7 @@ type AppendSession struct {
 
 	inflightQueue []*inflightEntry
 	inflightMu    sync.RWMutex
+	sessionRefs   map[*transportAppendSession]int
 	capacity      *capacityTracker
 
 	currentSession *transportAppendSession
@@ -58,6 +59,7 @@ func (s *StreamClient) AppendSession(ctx context.Context, opts *AppendSessionOpt
 		streamClient: s,
 		options:      opts,
 		capacity:     newCapacityTracker(int64(opts.MaxInflightBytes), int(opts.MaxInflightBatches)),
+		sessionRefs:  make(map[*transportAppendSession]int),
 		pumpCtx:      pumpCtx,
 		pumpCancel:   pumpCancel,
 		pumpDone:     make(chan struct{}),
@@ -114,13 +116,22 @@ func (r *AppendSession) Close() error {
 		r.pumpCancel()
 		<-r.pumpDone
 
-		r.readWG.Wait()
+		r.inflightMu.Lock()
+		sessionsToClose := r.collectSessionRefsLocked()
+		r.inflightMu.Unlock()
 
 		r.sessionMu.RLock()
-		if r.currentSession != nil {
-			closeErr = r.currentSession.Close()
-		}
+		current := r.currentSession
 		r.sessionMu.RUnlock()
+
+		if current != nil {
+			sessionsToClose = append(sessionsToClose, current)
+		}
+		if len(sessionsToClose) > 0 {
+			r.closeAllSessions(sessionsToClose)
+		}
+
+		r.readWG.Wait()
 	})
 
 	return closeErr
@@ -217,7 +228,7 @@ func (r *AppendSession) processInflightQueue() {
 			logError(r.streamClient.logger, "append pump transport start failed, will retry",
 				"stream", string(r.streamClient.name),
 				"error", err)
-			r.handleSessionError(err)
+			r.handleSessionError(nil, err)
 		} else {
 			logError(r.streamClient.logger, "append pump transport start failed fatally",
 				"stream", string(r.streamClient.name),
@@ -284,19 +295,24 @@ func (r *AppendSession) submitInflightBatches() {
 	r.inflightMu.Unlock()
 
 	for _, entry := range entries {
-		if entry.sentOnSession == session {
+		r.inflightMu.Lock()
+		if atomic.LoadInt32(&entry.completed) != 0 {
+			r.inflightMu.Unlock()
+			continue // entry already completed, skip
+		}
+		if entry.wasSentOnSessionLocked(session) {
+			r.inflightMu.Unlock()
 			continue // already sent on this session, skip
 		}
-
-		r.inflightMu.Lock()
-		entry.sentOnSession = session
+		entry.sentOnSessions = append(entry.sentOnSessions, session)
+		r.sessionRefs[session]++
 		if entry.attemptStart.IsZero() {
 			entry.attemptStart = time.Now()
 		}
 		r.inflightMu.Unlock()
 
 		if err := session.appendInput(entry.input); err != nil {
-			r.handleSessionError(err)
+			r.handleSessionError(session, err)
 			return
 		}
 	}
@@ -315,7 +331,7 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 			if !ok {
 				return
 			}
-			r.handleSessionError(err)
+			r.handleSessionError(session, err)
 			return
 
 		case <-r.pumpCtx.Done():
@@ -325,13 +341,6 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 }
 
 func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAck) {
-	r.sessionMu.RLock()
-	current := r.currentSession
-	r.sessionMu.RUnlock()
-	if current != session {
-		return
-	}
-
 	r.inflightMu.Lock()
 
 	if len(r.inflightQueue) == 0 {
@@ -340,6 +349,19 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 	}
 
 	entry := r.inflightQueue[0]
+
+	if !entry.wasSentOnSessionLocked(session) {
+		r.inflightMu.Unlock()
+		return
+	}
+
+	r.stateMu.RLock()
+	last := r.lastAckedPosition
+	r.stateMu.RUnlock()
+	if ack != nil && last != nil && ack.End.SeqNum <= last.End.SeqNum {
+		r.inflightMu.Unlock()
+		return // stale ack for an already-completed entry
+	}
 
 	if err := r.validateAckLocked(entry, ack); err != nil {
 		r.inflightMu.Unlock()
@@ -356,20 +378,23 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 	}
 
 	r.inflightQueue = r.inflightQueue[1:]
-	r.inflightMu.Unlock()
-
-	r.capacity.release(entry.meteredBytes)
+	sessionsToClose := r.releaseEntrySessionsLocked(entry)
 
 	r.stateMu.Lock()
 	r.lastAckedPosition = ack
 	r.currentAttempt = 0
 	r.stateMu.Unlock()
+	r.inflightMu.Unlock()
+
+	r.capacity.release(entry.meteredBytes)
 
 	select {
 	case entry.resultCh <- &inflightResult{ack: ack}:
 		close(entry.resultCh)
 	default:
 	}
+
+	r.closeStaleSessions(sessionsToClose)
 }
 
 func (r *AppendSession) validateAckLocked(entry *inflightEntry, ack *AppendAck) error {
@@ -405,12 +430,22 @@ func (r *AppendSession) validateAckLocked(entry *inflightEntry, ack *AppendAck) 
 	return nil
 }
 
-func (r *AppendSession) handleSessionError(err error) {
+func (r *AppendSession) handleSessionError(failedSession *transportAppendSession, err error) {
 	r.closedMu.RLock()
 	closed := r.closed
 	r.closedMu.RUnlock()
 	if closed {
 		return
+	}
+
+	if failedSession != nil {
+		r.sessionMu.RLock()
+		isCurrent := r.currentSession == failedSession
+		r.sessionMu.RUnlock()
+		if !isCurrent {
+			r.closeSessionIfUnused(failedSession)
+			return
+		}
 	}
 
 	logError(r.streamClient.logger, "append session transport error",
@@ -433,9 +468,18 @@ func (r *AppendSession) handleSessionError(err error) {
 		}
 	}
 
-	r.sessionMu.Lock()
-	r.currentSession = nil
-	r.sessionMu.Unlock()
+	if failedSession != nil {
+		r.sessionMu.Lock()
+		if r.currentSession == failedSession {
+			r.currentSession = nil
+		}
+		r.sessionMu.Unlock()
+		r.closeSessionIfUnused(failedSession)
+	} else {
+		r.sessionMu.Lock()
+		r.currentSession = nil
+		r.sessionMu.Unlock()
+	}
 
 	var s2Err *S2Error
 	if errors.As(err, &s2Err) && !s2Err.IsRetryable() {
@@ -489,11 +533,20 @@ func (r *AppendSession) failAllInflight(err error) {
 		"error", err)
 
 	r.inflightMu.Lock()
-	defer r.inflightMu.Unlock()
-	r.failAllInflightLocked(err)
+	sessionsToClose := r.failAllInflightLocked(err)
+	r.inflightMu.Unlock()
+
+	r.sessionMu.RLock()
+	current := r.currentSession
+	r.sessionMu.RUnlock()
+	if current != nil {
+		sessionsToClose = append(sessionsToClose, current)
+	}
+
+	r.closeAllSessions(sessionsToClose)
 }
 
-func (r *AppendSession) failAllInflightLocked(err error) {
+func (r *AppendSession) failAllInflightLocked(err error) []*transportAppendSession {
 	for _, entry := range r.inflightQueue {
 		if atomic.CompareAndSwapInt32(&entry.completed, 0, 1) {
 			select {
@@ -506,6 +559,7 @@ func (r *AppendSession) failAllInflightLocked(err error) {
 	}
 
 	r.inflightQueue = nil
+	sessionsToClose := r.collectSessionRefsLocked()
 
 	r.closedMu.Lock()
 	if !r.closed {
@@ -514,6 +568,7 @@ func (r *AppendSession) failAllInflightLocked(err error) {
 	}
 	r.closedMu.Unlock()
 	r.pumpCancel()
+	return sessionsToClose
 }
 
 func (r *AppendSession) scheduleRetry() {
@@ -583,7 +638,7 @@ type inflightEntry struct {
 	requestTimeout time.Duration
 	resultCh       chan *inflightResult
 	completed      int32
-	sentOnSession  *transportAppendSession // tracks which session this entry was sent on
+	sentOnSessions []*transportAppendSession // tracks sessions this entry was sent on
 }
 
 type inflightResult struct {
@@ -593,4 +648,84 @@ type inflightResult struct {
 
 func isIdempotentEntry(entry *inflightEntry) bool {
 	return entry != nil && entry.input != nil && entry.input.MatchSeqNum != nil
+}
+
+// Caller must hold inflightMu.
+func (entry *inflightEntry) wasSentOnSessionLocked(session *transportAppendSession) bool {
+	for _, sent := range entry.sentOnSessions {
+		if sent == session {
+			return true
+		}
+	}
+	return false
+}
+
+// Caller must hold inflightMu.
+func (r *AppendSession) releaseEntrySessionsLocked(entry *inflightEntry) []*transportAppendSession {
+	var sessionsToClose []*transportAppendSession
+	for _, session := range entry.sentOnSessions {
+		count, ok := r.sessionRefs[session]
+		if !ok {
+			continue
+		}
+		if count <= 1 {
+			delete(r.sessionRefs, session)
+			sessionsToClose = append(sessionsToClose, session)
+		} else {
+			r.sessionRefs[session] = count - 1
+		}
+	}
+	entry.sentOnSessions = nil
+	return sessionsToClose
+}
+
+func (r *AppendSession) collectSessionRefsLocked() []*transportAppendSession {
+	sessions := make([]*transportAppendSession, 0, len(r.sessionRefs))
+	for session := range r.sessionRefs {
+		sessions = append(sessions, session)
+	}
+	r.sessionRefs = make(map[*transportAppendSession]int)
+	return sessions
+}
+
+func (r *AppendSession) closeStaleSessions(sessions []*transportAppendSession) {
+	if len(sessions) == 0 {
+		return
+	}
+	r.sessionMu.RLock()
+	current := r.currentSession
+	r.sessionMu.RUnlock()
+	for _, session := range sessions {
+		if session == nil || session == current {
+			continue
+		}
+		session.Close()
+	}
+}
+
+func (r *AppendSession) closeAllSessions(sessions []*transportAppendSession) {
+	if len(sessions) == 0 {
+		return
+	}
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		session.Close()
+	}
+}
+
+func (r *AppendSession) closeSessionIfUnused(session *transportAppendSession) {
+	if session == nil {
+		return
+	}
+	r.inflightMu.Lock()
+	count := r.sessionRefs[session]
+	if count == 0 {
+		delete(r.sessionRefs, session)
+	}
+	r.inflightMu.Unlock()
+	if count == 0 {
+		session.Close()
+	}
 }
