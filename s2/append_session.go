@@ -296,7 +296,7 @@ func (r *AppendSession) submitInflightBatches() {
 
 	for _, entry := range entries {
 		r.inflightMu.Lock()
-		if entry.wasSentOnSession(session) {
+		if entry.wasSentOnSessionLocked(session) {
 			r.inflightMu.Unlock()
 			continue // already sent on this session, skip
 		}
@@ -346,7 +346,7 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 
 	entry := r.inflightQueue[0]
 
-	if !entry.wasSentOnSession(session) {
+	if !entry.wasSentOnSessionLocked(session) {
 		r.inflightMu.Unlock()
 		return
 	}
@@ -646,7 +646,8 @@ func isIdempotentEntry(entry *inflightEntry) bool {
 	return entry != nil && entry.input != nil && entry.input.MatchSeqNum != nil
 }
 
-func (entry *inflightEntry) wasSentOnSession(session *transportAppendSession) bool {
+// Caller must hold inflightMu.
+func (entry *inflightEntry) wasSentOnSessionLocked(session *transportAppendSession) bool {
 	for _, sent := range entry.sentOnSessions {
 		if sent == session {
 			return true
@@ -655,6 +656,7 @@ func (entry *inflightEntry) wasSentOnSession(session *transportAppendSession) bo
 	return false
 }
 
+// Caller must hold inflightMu.
 func (r *AppendSession) releaseEntrySessionsLocked(entry *inflightEntry) []*transportAppendSession {
 	var sessionsToClose []*transportAppendSession
 	for _, session := range entry.sentOnSessions {
