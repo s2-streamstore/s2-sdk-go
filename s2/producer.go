@@ -121,8 +121,8 @@ func (p *Producer) resolveBatchError(meta []recordMeta, err error) {
 // Stops the producer, flushes pending batches, and waits for completion.
 func (p *Producer) Close() error {
 	p.batcher.Close()
-	p.cancel()
 	p.wg.Wait()
+	p.cancel()
 	return nil
 }
 
