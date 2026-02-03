@@ -296,6 +296,10 @@ func (r *AppendSession) submitInflightBatches() {
 
 	for _, entry := range entries {
 		r.inflightMu.Lock()
+		if atomic.LoadInt32(&entry.completed) != 0 {
+			r.inflightMu.Unlock()
+			continue // entry already completed, skip
+		}
 		if entry.wasSentOnSessionLocked(session) {
 			r.inflightMu.Unlock()
 			continue // already sent on this session, skip
