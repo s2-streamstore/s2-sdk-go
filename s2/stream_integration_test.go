@@ -1,6 +1,7 @@
 package s2_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1315,6 +1316,179 @@ func TestRead_WithCountLimit(t *testing.T) {
 	t.Logf("Read %d records with count limit", len(batch.Records))
 }
 
+func TestRead_WithCountOverMax(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with count over max (expect clamp to 1000)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rdcom")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	records := make([]s2.AppendRecord, 1000)
+	for i := range records {
+		records[i] = s2.AppendRecord{Body: []byte(fmt.Sprintf("record-%d", i))}
+	}
+	_, err = stream.Append(ctx, &s2.AppendInput{Records: records})
+	if err != nil {
+		t.Fatalf("Append batch 1 failed: %v", err)
+	}
+
+	extra := make([]s2.AppendRecord, 100)
+	for i := range extra {
+		extra[i] = s2.AppendRecord{Body: []byte(fmt.Sprintf("record-extra-%d", i))}
+	}
+	_, err = stream.Append(ctx, &s2.AppendInput{Records: extra})
+	if err != nil {
+		t.Fatalf("Append batch 2 failed: %v", err)
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Ptr[uint64](0),
+		Count:  s2.Ptr[uint64](5000),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if len(batch.Records) != 1000 {
+		t.Errorf("Expected 1000 records due to clamp, got %d", len(batch.Records))
+	}
+	t.Logf("Read %d records with count over max", len(batch.Records))
+}
+
+func TestRead_WithBytesOverMax(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with bytes over max (expect clamp to 1 MiB)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rdbom")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	body := bytes.Repeat([]byte("a"), 128*1024)
+	records := make([]s2.AppendRecord, 12)
+	for i := range records {
+		records[i] = s2.AppendRecord{Body: body}
+	}
+
+	totalAppended := s2.MeteredBatchBytes(records)
+	if totalAppended <= 1024*1024 {
+		t.Fatalf("Expected appended metered bytes > 1 MiB, got %d", totalAppended)
+	}
+
+	_, err = stream.Append(ctx, &s2.AppendInput{Records: records})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Ptr[uint64](0),
+		Bytes:  s2.Ptr[uint64](10_000_000),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	var totalRead uint64
+	for _, rec := range batch.Records {
+		totalRead += s2.MeteredSequencedRecordBytes(rec)
+	}
+	if totalRead > 1024*1024 {
+		t.Errorf("Expected read metered bytes <= 1 MiB, got %d", totalRead)
+	}
+	if len(batch.Records) == 0 {
+		t.Errorf("Expected at least 1 record, got 0")
+	}
+	t.Logf("Read %d records with metered bytes=%d", len(batch.Records), totalRead)
+}
+
+func TestRead_WithCountZero(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with count=0 (expect empty records)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rdcz")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("record")}},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Ptr[uint64](0),
+		Count:  s2.Ptr[uint64](0),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if len(batch.Records) != 0 {
+		t.Errorf("Expected 0 records, got %d", len(batch.Records))
+	}
+	t.Log("Read returned empty records as expected")
+}
+
+func TestRead_WithBytesZero(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with bytes=0 (expect empty records)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rdbz")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("record")}},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Ptr[uint64](0),
+		Bytes:  s2.Ptr[uint64](0),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if len(batch.Records) != 0 {
+		t.Errorf("Expected 0 records, got %d", len(batch.Records))
+	}
+	t.Log("Read returned empty records as expected")
+}
+
 func TestRead_EmptyStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -1358,6 +1532,36 @@ func TestRead_NonExistentStream(t *testing.T) {
 		t.Errorf("Expected 404 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
+}
+
+func TestRead_DeletionPending(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read while stream deletion pending (expects 409)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rdp")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if err := basin.Streams.Delete(ctx, streamName); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Ptr[uint64](0),
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 409 {
+		t.Errorf("Expected 409 error for stream deletion pending, got: %v", err)
+	}
+	t.Logf("Got expected 409 error: %v", err)
 }
 
 func TestRead_WithClampTrue(t *testing.T) {
@@ -2054,6 +2258,70 @@ func TestAppend_HeaderWithEmptyName_NonCommand(t *testing.T) {
 	t.Logf("Got expected 422 error: %v", err)
 }
 
+func TestAppend_HeaderWithEmptyName_AdditionalHeaders(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append record with empty header name plus additional headers (expect 422)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-ahenah")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{
+				Headers: []s2.Header{
+					{Name: []byte(""), Value: []byte("fence")},
+					{Name: []byte("extra"), Value: []byte("value")},
+				},
+				Body: []byte("test"),
+			},
+		},
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error for empty header name with additional headers, got: %v", err)
+	}
+	t.Logf("Got expected 422 error: %v", err)
+}
+
+func TestAppend_DeletionPending(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append while stream deletion pending (expects 409)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-adp")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if err := basin.Streams.Delete(ctx, streamName); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("test")}},
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 409 {
+		t.Errorf("Expected 409 error for stream deletion pending, got: %v", err)
+	}
+	t.Logf("Got expected 409 error: %v", err)
+}
+
 func TestRead_FromTail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -2128,6 +2396,47 @@ func TestRead_WithTailOffset(t *testing.T) {
 	t.Logf("Read with tail_offset=3 returned %d records", len(batch.Records))
 }
 
+func TestRead_WithTailOffsetBeyondTail(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with tail_offset larger than tail (saturates to start)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rwtobt")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+
+	for i := range 3 {
+		_, err := stream.Append(ctx, &s2.AppendInput{
+			Records: []s2.AppendRecord{{Body: []byte(fmt.Sprintf("record-%d", i))}},
+		})
+		if err != nil {
+			t.Fatalf("Append %d failed: %v", i, err)
+		}
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		TailOffset: s2.Ptr[int64](10),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if len(batch.Records) != 3 {
+		t.Errorf("Expected 3 records, got %d", len(batch.Records))
+	}
+	if len(batch.Records) > 0 && batch.Records[0].SeqNum != 0 {
+		t.Errorf("Expected first seq_num=0, got %d", batch.Records[0].SeqNum)
+	}
+	t.Logf("Read with tail_offset=10 returned %d records", len(batch.Records))
+}
+
 func TestRead_ByTimestamp(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -2173,6 +2482,52 @@ func TestRead_ByTimestamp(t *testing.T) {
 	} else {
 		t.Logf("Read by timestamp returned %d records", len(batch.Records))
 	}
+}
+
+func TestRead_TimestampGreaterOrEqualUntil(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Read with timestamp >= until (expects 422)")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-rdtsgeu")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("record")}},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Ptr[uint64](0),
+		Count:  s2.Ptr[uint64](1),
+	})
+	if err != nil {
+		t.Fatalf("Baseline read failed: %v", err)
+	}
+	if len(batch.Records) == 0 {
+		t.Fatalf("Expected at least one record from baseline read")
+	}
+
+	ts := batch.Records[0].Timestamp
+	_, err = stream.Read(ctx, &s2.ReadOptions{
+		Timestamp: &ts,
+		Until:     &ts,
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error for timestamp >= until, got: %v", err)
+	}
+	t.Logf("Got expected 422 error: %v", err)
 }
 
 func TestRead_WithBytesLimit(t *testing.T) {
@@ -2903,6 +3258,98 @@ func TestAppendSession_MultipleBatches(t *testing.T) {
 	}
 
 	t.Log("Multiple batches submitted via session")
+}
+
+func TestAppendSession_ReadRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Append session round-trip read")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-asrr")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	session, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		t.Fatalf("AppendSession failed: %v", err)
+	}
+	defer session.Close()
+
+	records := []s2.AppendRecord{
+		{Body: []byte("alpha"), Headers: []s2.Header{s2.NewHeader("type", "alpha")}},
+		{Body: []byte("beta")},
+		{Body: []byte("gamma"), Headers: []s2.Header{s2.NewHeader("type", "gamma")}},
+	}
+
+	future, err := session.Submit(&s2.AppendInput{Records: records})
+	if err != nil {
+		t.Fatalf("Submit failed: %v", err)
+	}
+
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+
+	ack, err := ticket.Ack(ctx)
+	if err != nil {
+		t.Fatalf("Ack failed: %v", err)
+	}
+
+	if got := ack.End.SeqNum - ack.Start.SeqNum; got != uint64(len(records)) {
+		t.Fatalf("Expected %d appended, got %d", len(records), got)
+	}
+	if ack.Tail.SeqNum < ack.End.SeqNum {
+		t.Fatalf("Tail regressed: tail=%d end=%d", ack.Tail.SeqNum, ack.End.SeqNum)
+	}
+	if ack.Start.Timestamp == 0 || ack.End.Timestamp == 0 || ack.End.Timestamp < ack.Start.Timestamp {
+		t.Fatalf("Unexpected ack timestamps: start=%d end=%d", ack.Start.Timestamp, ack.End.Timestamp)
+	}
+
+	start := ack.Start.SeqNum
+	count := uint64(len(records))
+	batch, err := stream.Read(ctx, &s2.ReadOptions{SeqNum: &start, Count: &count})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if len(batch.Records) != len(records) {
+		t.Fatalf("Expected %d records, got %d", len(records), len(batch.Records))
+	}
+
+	for i, rec := range batch.Records {
+		expSeq := ack.Start.SeqNum + uint64(i)
+		if rec.SeqNum != expSeq {
+			t.Fatalf("Seq mismatch at %d: got %d want %d", i, rec.SeqNum, expSeq)
+		}
+		if !bytes.Equal(rec.Body, records[i].Body) {
+			t.Fatalf("Body mismatch at %d: got %q want %q", i, rec.Body, records[i].Body)
+		}
+		if len(rec.Headers) != len(records[i].Headers) {
+			t.Fatalf("Header count mismatch at %d: got %d want %d", i, len(rec.Headers), len(records[i].Headers))
+		}
+		for j, h := range rec.Headers {
+			if !bytes.Equal(h.Name, records[i].Headers[j].Name) || !bytes.Equal(h.Value, records[i].Headers[j].Value) {
+				t.Fatalf("Header mismatch at %d.%d", i, j)
+			}
+		}
+		if i > 0 && rec.Timestamp < batch.Records[i-1].Timestamp {
+			t.Fatalf("Timestamp not monotonic at %d", i)
+		}
+	}
+
+	if batch.Records[0].Timestamp != ack.Start.Timestamp {
+		t.Fatalf("Start timestamp mismatch: rec=%d ack=%d", batch.Records[0].Timestamp, ack.Start.Timestamp)
+	}
+	if batch.Records[len(batch.Records)-1].Timestamp != ack.End.Timestamp {
+		t.Fatalf("End timestamp mismatch: rec=%d ack=%d", batch.Records[len(batch.Records)-1].Timestamp, ack.End.Timestamp)
+	}
 }
 
 func TestAppendSession_Close(t *testing.T) {
