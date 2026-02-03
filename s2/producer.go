@@ -118,7 +118,8 @@ func (p *Producer) resolveBatchError(meta []recordMeta, err error) {
 	}
 }
 
-// Stops the producer, flushes pending batches, and waits for completion.
+// Stops the producer, flushes pending batches, and waits for in-flight acks.
+// Close blocks until in-flight work completes or the producer context is canceled.
 func (p *Producer) Close() error {
 	p.batcher.Close()
 	p.wg.Wait()
