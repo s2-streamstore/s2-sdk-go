@@ -13,14 +13,23 @@ import (
 //   - ticket.Ack() returns an IndexedAppendAck that resolves once the record is durable.
 type Producer struct {
 	batcher *Batcher
-	session *AppendSession
+	session appendSessionAPI
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 }
 
+type appendSessionAPI interface {
+	Submit(input *AppendInput) (*SubmitFuture, error)
+	Close() error
+}
+
 // Create a new [Producer].
 func NewProducer(ctx context.Context, batcher *Batcher, session *AppendSession) *Producer {
+	return newProducerWithSession(ctx, batcher, session)
+}
+
+func newProducerWithSession(ctx context.Context, batcher *Batcher, session appendSessionAPI) *Producer {
 	if ctx == nil {
 		ctx = context.Background()
 	}

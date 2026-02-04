@@ -75,6 +75,9 @@ type transportAppendSession struct {
 }
 
 func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppendSession, error) {
+	if s.appendSessionFactory != nil {
+		return s.appendSessionFactory(ctx)
+	}
 	logDebug(s.logger, "transport: creating append session",
 		"stream", string(s.name))
 

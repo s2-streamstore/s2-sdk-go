@@ -3492,3 +3492,140 @@ func TestReadSession_Cancel(t *testing.T) {
 
 	t.Log("Read session cancelled successfully")
 }
+
+func TestProducer_BytesRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Producer bytes round-trip")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("prod-bytes")
+	defer deleteStream(ctx, basin, streamName)
+
+	if _, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName}); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	session, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		t.Fatalf("AppendSession failed: %v", err)
+	}
+	defer session.Close()
+
+	batcher := s2.NewBatcher(ctx, &s2.BatchingOptions{
+		MaxRecords:    1,
+		Linger:        5 * time.Millisecond,
+		ChannelBuffer: 10,
+	})
+	producer := s2.NewProducer(ctx, batcher, session)
+	defer producer.Close()
+
+	payload := []byte{0x00, 0x01, 0x02, 0xff}
+	future, err := producer.Submit(s2.AppendRecord{Body: payload})
+	if err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait failed: %v", err)
+	}
+	ack, err := ticket.Ack(ctx)
+	if err != nil {
+		t.Fatalf("ack failed: %v", err)
+	}
+	t.Logf("Appended seq_num=%d", ack.SeqNum())
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{Count: s2.Uint64(1)})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if len(batch.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(batch.Records))
+	}
+	if !bytes.Equal(batch.Records[0].Body, payload) {
+		t.Fatalf("record body mismatch: got %v want %v", batch.Records[0].Body, payload)
+	}
+}
+
+func TestProducer_GaplessReadSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Producer + ReadSession gapless read")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("prod-gapless")
+	defer deleteStream(ctx, basin, streamName)
+
+	if _, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName}); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	session, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		t.Fatalf("AppendSession failed: %v", err)
+	}
+	defer session.Close()
+
+	batcher := s2.NewBatcher(ctx, &s2.BatchingOptions{
+		MaxRecords:    4,
+		Linger:        5 * time.Millisecond,
+		ChannelBuffer: 100,
+	})
+	producer := s2.NewProducer(ctx, batcher, session)
+	defer producer.Close()
+
+	const total = 20
+	readSession, err := stream.ReadSession(ctx, &s2.ReadOptions{
+		SeqNum: s2.Uint64(0),
+		Count:  s2.Uint64(total),
+		Wait:   s2.Int32(5),
+	})
+	if err != nil {
+		t.Fatalf("ReadSession failed: %v", err)
+	}
+	defer readSession.Close()
+
+	appendErrCh := make(chan error, 1)
+	go func() {
+		for i := 0; i < total; i++ {
+			future, err := producer.Submit(s2.AppendRecord{Body: []byte(fmt.Sprintf("rec-%d", i))})
+			if err != nil {
+				appendErrCh <- err
+				return
+			}
+			ticket, err := future.Wait(ctx)
+			if err != nil {
+				appendErrCh <- err
+				return
+			}
+			if _, err := ticket.Ack(ctx); err != nil {
+				appendErrCh <- err
+				return
+			}
+		}
+		close(appendErrCh)
+	}()
+
+	seqs := make([]uint64, 0, total)
+	for len(seqs) < total && readSession.Next() {
+		rec := readSession.Record()
+		seqs = append(seqs, rec.SeqNum)
+	}
+	if err := readSession.Err(); err != nil {
+		t.Fatalf("ReadSession error: %v", err)
+	}
+	if len(seqs) != total {
+		t.Fatalf("expected %d records, got %d", total, len(seqs))
+	}
+	for i := 0; i < total; i++ {
+		if seqs[i] != uint64(i) {
+			t.Fatalf("expected seq %d at index %d, got %d", i, i, seqs[i])
+		}
+	}
+
+	if err, ok := <-appendErrCh; ok && err != nil {
+		t.Fatalf("producer error: %v", err)
+	}
+}

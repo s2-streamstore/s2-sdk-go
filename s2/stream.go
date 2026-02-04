@@ -18,9 +18,10 @@ import (
 )
 
 type StreamClient struct {
-	name        StreamName
-	basinClient *BasinClient
-	logger      *slog.Logger
+	name                 StreamName
+	basinClient          *BasinClient
+	logger               *slog.Logger
+	appendSessionFactory func(ctx context.Context) (*transportAppendSession, error)
 }
 
 func (b *BasinClient) Stream(name StreamName) *StreamClient {

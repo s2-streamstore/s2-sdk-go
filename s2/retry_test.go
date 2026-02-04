@@ -102,3 +102,21 @@ func TestCalculateRetryBackoff_DefaultsForZeroConfig(t *testing.T) {
 			defaultMinBaseDelay, 2*defaultMinBaseDelay, delay)
 	}
 }
+
+func TestDefaultRetryConfig_Values(t *testing.T) {
+	if DefaultRetryConfig == nil {
+		t.Fatalf("expected DefaultRetryConfig to be set")
+	}
+	if DefaultRetryConfig.MaxAttempts != 3 {
+		t.Fatalf("expected max attempts 3, got %d", DefaultRetryConfig.MaxAttempts)
+	}
+	if DefaultRetryConfig.MinBaseDelay != 100*time.Millisecond {
+		t.Fatalf("expected min base delay 100ms, got %v", DefaultRetryConfig.MinBaseDelay)
+	}
+	if DefaultRetryConfig.MaxBaseDelay != time.Second {
+		t.Fatalf("expected max base delay 1s, got %v", DefaultRetryConfig.MaxBaseDelay)
+	}
+	if DefaultRetryConfig.AppendRetryPolicy != AppendRetryPolicyAll {
+		t.Fatalf("expected append retry policy %q, got %q", AppendRetryPolicyAll, DefaultRetryConfig.AppendRetryPolicy)
+	}
+}

@@ -37,7 +37,7 @@ and error mapping).
 
 - **Default endpoints**
   - Input: no endpoint configuration provided
-  - Expected: SDK uses default service endpoints and appends `/v1` as appropriate
+  - Expected: SDK uses its documented default service endpoint(s) and appends `/v1` as appropriate
 
 - **Implicit scheme**
   - Input: endpoint without scheme (e.g., `example.com:8443`)
@@ -64,8 +64,8 @@ and error mapping).
   - Expected: basin name is URL-encoded in the path (e.g., `a/b` -> `a%2Fb`)
 
 - **Shared basin endpoint uses basin header (if supported)**
-  - Input: basin endpoint without `{basin}`
-  - Expected: SDK includes basin header (or equivalent) on basin-scoped requests
+  - Input: basin endpoint without `{basin}` (shared endpoint)
+  - Expected: SDK includes basin identifier via header (or equivalent) on basin-scoped requests
 
 - **Reject empty endpoint**
   - Input: endpoint string is empty or whitespace
@@ -85,9 +85,10 @@ and error mapping).
   - Setup: server error response without `message`
   - Expected: SDK error message falls back to HTTP status text (or equivalent)
 
-- **Wrapped thrown errors**
+- **Transport/unknown errors**
   - Setup: transport throws a generic error
-  - Expected: SDK error preserves message and marks status as 0 or "unknown"
+  - Expected: If SDK wraps into its error type, it preserves message and marks status as 0/unknown.
+    If SDK does not wrap, ensure the original error is surfaced (not swallowed).
 
 ---
 
@@ -96,7 +97,8 @@ and error mapping).
 ### Test Cases
 
 - **Default retry config**
-  - Expected: default maxAttempts/min/max base delay match SDK defaults
+  - Expected: default maxAttempts/min/max base delay (and appendRetryPolicy if present) match SDK defaults.
+  - If request/connection timeouts live outside retry config, test them in config tests instead.
 
 - **Retryable vs non-retryable**
   - Setup: operation fails with 5xx or 408 then succeeds
@@ -189,7 +191,7 @@ and error mapping).
 
 - **Invalid configuration handling**
   - Input: maxBatchRecords>1000 or maxBatchBytes>1 MiB
-  - Expected: SDK either rejects config or clamps to limits; tests should accept documented behavior
+  - Expected: SDK either rejects config or clamps to limits; tests should match the SDK's documented behavior
 
 ---
 
