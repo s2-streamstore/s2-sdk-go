@@ -13,7 +13,9 @@ const (
 	envAccountEndpoint = "S2_ACCOUNT_ENDPOINT"
 	envBasinEndpoint   = "S2_BASIN_ENDPOINT"
 
-	defaultScheme            = "https"
+	schemeHTTP               = "http"
+	schemeHTTPS              = "https"
+	defaultScheme            = schemeHTTPS
 	defaultAPIPath           = "/v1"
 	basinPlaceholder         = "{basin}"
 	basinPlaceholderSentinel = "__basin__"
@@ -135,7 +137,7 @@ func normalizeForURLParsing(input string) string {
 	if !schemePattern.MatchString(trimmed) {
 		scheme := defaultScheme
 		if isLocalhostEndpoint(trimmed) {
-			scheme = "http"
+			scheme = schemeHTTP
 		}
 		withScheme = fmt.Sprintf("%s://%s", scheme, trimmed)
 	}
@@ -155,7 +157,7 @@ func newEndpointTemplate(endpoint string) (*endpointTemplate, error) {
 	}
 
 	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
+	if scheme != schemeHTTP && scheme != schemeHTTPS {
 		return nil, fmt.Errorf("unsupported scheme: %s", parsed.Scheme)
 	}
 

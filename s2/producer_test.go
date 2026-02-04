@@ -149,7 +149,7 @@ func TestProducer_ConcurrentSubmitsAreGapless(t *testing.T) {
 	var mu sync.Mutex
 	tickets := make(chan *RecordSubmitTicket, total)
 
-	for i := 0; i < total; i++ {
+	for range total {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -187,7 +187,7 @@ func TestProducer_ConcurrentSubmitsAreGapless(t *testing.T) {
 	}
 
 	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
-	for i := 0; i < total; i++ {
+	for i := range total {
 		if seqs[i] != uint64(i) {
 			t.Fatalf("expected seq %d at index %d, got %d", i, i, seqs[i])
 		}

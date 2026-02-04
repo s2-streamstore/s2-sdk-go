@@ -169,7 +169,7 @@ type schemeAwareTransport struct {
 }
 
 func (t *schemeAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Scheme == "http" {
+	if req.URL.Scheme == schemeHTTP {
 		return t.h2c.RoundTrip(req)
 	}
 	return t.https.RoundTrip(req)

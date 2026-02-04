@@ -3592,7 +3592,7 @@ func TestProducer_GaplessReadSession(t *testing.T) {
 
 	appendErrCh := make(chan error, 1)
 	go func() {
-		for i := 0; i < total; i++ {
+		for i := range total {
 			future, err := producer.Submit(s2.AppendRecord{Body: []byte(fmt.Sprintf("rec-%d", i))})
 			if err != nil {
 				appendErrCh <- err
@@ -3622,7 +3622,7 @@ func TestProducer_GaplessReadSession(t *testing.T) {
 	if len(seqs) != total {
 		t.Fatalf("expected %d records, got %d", total, len(seqs))
 	}
-	for i := 0; i < total; i++ {
+	for i := range total {
 		if seqs[i] != uint64(i) {
 			t.Fatalf("expected seq %d at index %d, got %d", i, i, seqs[i])
 		}
