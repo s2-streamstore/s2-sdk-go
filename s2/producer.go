@@ -54,16 +54,12 @@ func newProducerWithSession(ctx context.Context, batcher *Batcher, session appen
 func (p *Producer) Submit(record AppendRecord) (*RecordSubmitFuture, error) {
 	ticketCh := make(chan *RecordSubmitTicket, 1)
 	errCh := make(chan error, 1)
-
 	resultCh := make(chan *producerOutcome, 1)
 
-	go func() {
-		if err := p.batcher.Add(record, resultCh); err != nil {
-			errCh <- err
-			return
-		}
-		ticketCh <- &RecordSubmitTicket{ackCh: resultCh}
-	}()
+	if err := p.batcher.Add(record, resultCh); err != nil {
+		return nil, err
+	}
+	ticketCh <- &RecordSubmitTicket{ackCh: resultCh}
 
 	return &RecordSubmitFuture{ticketCh: ticketCh, errCh: errCh}, nil
 }

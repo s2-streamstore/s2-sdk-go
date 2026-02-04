@@ -98,6 +98,8 @@ func TestProducer_PreservesOrderAcrossBatches(t *testing.T) {
 		t.Fatalf("submit failed: %v", err)
 	}
 
+	batcher.Flush()
+
 	t1, err := f1.Wait(ctx)
 	if err != nil {
 		t.Fatalf("wait failed: %v", err)
