@@ -2778,7 +2778,7 @@ func TestClient_Initialization(t *testing.T) {
 func TestClient_InvalidToken(t *testing.T) {
 	t.Log("Testing: Client with invalid token")
 
-	client := s2.New("invalid-token", nil)
+	client := s2.New("invalid-token", s2.LoadConfigFromEnv())
 
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
