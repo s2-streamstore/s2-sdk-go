@@ -137,7 +137,7 @@ func TestProducer_ConcurrentSubmitsAreGapless(t *testing.T) {
 	ctx := context.Background()
 	batcher := NewBatcher(ctx, &BatchingOptions{
 		MaxRecords:    3,
-		Linger:        time.Hour,
+		Linger:        5 * time.Millisecond,
 		ChannelBuffer: 100,
 	})
 	session := &fakeAppendSession{}
@@ -147,6 +147,7 @@ func TestProducer_ConcurrentSubmitsAreGapless(t *testing.T) {
 	var wg sync.WaitGroup
 	seqs := make([]uint64, 0, total)
 	var mu sync.Mutex
+	tickets := make(chan *RecordSubmitTicket, total)
 
 	for i := 0; i < total; i++ {
 		wg.Add(1)
@@ -162,18 +163,23 @@ func TestProducer_ConcurrentSubmitsAreGapless(t *testing.T) {
 				t.Errorf("wait failed: %v", err)
 				return
 			}
-			ack, err := ticket.Ack(ctx)
-			if err != nil {
-				t.Errorf("ack failed: %v", err)
-				return
-			}
-			mu.Lock()
-			seqs = append(seqs, ack.SeqNum())
-			mu.Unlock()
+			tickets <- ticket
 		}()
 	}
 
 	wg.Wait()
+	batcher.Flush()
+	close(tickets)
+
+	for ticket := range tickets {
+		ack, err := ticket.Ack(ctx)
+		if err != nil {
+			t.Fatalf("ack failed: %v", err)
+		}
+		mu.Lock()
+		seqs = append(seqs, ack.SeqNum())
+		mu.Unlock()
+	}
 	_ = producer.Close()
 
 	if len(seqs) != total {
