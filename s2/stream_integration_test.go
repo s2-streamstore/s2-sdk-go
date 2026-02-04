@@ -3536,7 +3536,10 @@ func TestProducer_BytesRoundTrip(t *testing.T) {
 	}
 	t.Logf("Appended seq_num=%d", ack.SeqNum())
 
-	batch, err := stream.Read(ctx, &s2.ReadOptions{Count: s2.Uint64(1)})
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Uint64(ack.SeqNum()),
+		Count:  s2.Uint64(1),
+	})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}

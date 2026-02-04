@@ -391,11 +391,7 @@ func TestProducer_OversizedRecordRejected(t *testing.T) {
 	session := &fakeAppendSession{}
 	producer := newProducerWithSession(ctx, batcher, session)
 
-	future, err := producer.Submit(AppendRecord{Body: make([]byte, 100)})
-	if err != nil {
-		t.Fatalf("submit failed: %v", err)
-	}
-	if _, err := future.Wait(ctx); err == nil {
+	if _, err := producer.Submit(AppendRecord{Body: make([]byte, 100)}); err == nil {
 		t.Fatalf("expected error for oversized record")
 	}
 
