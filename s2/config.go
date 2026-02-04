@@ -80,7 +80,7 @@ func lookupEnvNonEmpty(name string) (string, bool) {
 		return "", false
 	}
 	if strings.TrimSpace(value) == "" {
-		panic(fmt.Errorf("%s cannot be empty", name))
+		return "", false
 	}
 	return value, true
 }
