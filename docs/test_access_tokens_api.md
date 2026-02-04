@@ -258,6 +258,11 @@
   - Input: `id=test-tok-8b`, `streams={exact: "tenant/stream"}`, `auto_prefix_streams=true`
   - Expected: 422 (`invalid`, auto-prefix requires stream prefix scope)
 
+- **Auto-prefix create + list behavior**
+  - Setup: issue token with `streams={prefix: "tenant/"}`, `auto_prefix_streams=true`, `ops=[create-stream, list-streams]`
+  - Input: create stream named `my-stream` using limited token; list streams with prefix `my-`
+  - Expected: create succeeds; limited list returns `my-stream` (prefix stripped); admin list shows `tenant/my-stream`
+
 - **Issue token with expires_at**
   - Input: `id=test-tok-9`, `expires_at=<future timestamp>`, ops
   - Expected: 201, token with custom expiration

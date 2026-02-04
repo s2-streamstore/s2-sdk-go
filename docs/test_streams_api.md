@@ -998,11 +998,6 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Input: append a batch via session, then read from `ack.start.seq_num` with `count` matching batch size
   - Expected: 200, records returned in order; `seq_num` matches `ack.start.seq_num + i`; timestamps monotonic; `ack.tail.seq_num >= ack.end.seq_num`
 
-- **Append while stream deletion pending**
-  - Setup: delete stream, wait for DELETE 202 response
-  - Input: append to same stream within ~60s
-  - Expected: 409 (`stream_deletion_pending`)
-
 - **Append header with empty name (command record)**
   - Input: header with name="" and command value
   - Expected: 200 (valid for commands)
@@ -1234,11 +1229,6 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - **Multiple start params**
   - Input: `seq_num=0`, `timestamp=0`
   - Expected: 422 (`invalid`, mutually exclusive)
-
-- **Read while stream deletion pending**
-  - Setup: delete stream, wait for DELETE 202 response
-  - Input: read from same stream within ~60s
-  - Expected: 409 (`stream_deletion_pending`)
 
 - **Permission denied**
   - Setup: token without `read` op

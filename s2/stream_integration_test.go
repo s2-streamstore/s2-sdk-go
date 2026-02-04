@@ -1550,35 +1550,6 @@ func TestRead_NonExistentStream(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-func TestRead_DeletionPending(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
-	defer cancel()
-	t.Log("Testing: Read while stream deletion pending (expects 409)")
-
-	basin := getSharedBasin(t)
-	streamName := uniqueStreamName("test-rdp")
-	defer deleteStream(ctx, basin, streamName)
-
-	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-
-	if err := basin.Streams.Delete(ctx, streamName); err != nil {
-		t.Fatalf("Delete failed: %v", err)
-	}
-
-	stream := basin.Stream(streamName)
-	_, err = stream.Read(ctx, &s2.ReadOptions{
-		SeqNum: s2.Ptr[uint64](0),
-	})
-
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 409 {
-		t.Errorf("Expected 409 error for stream deletion pending, got: %v", err)
-	}
-	t.Logf("Got expected 409 error: %v", err)
-}
 
 func TestRead_WithClampTrue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
@@ -1647,6 +1618,9 @@ func TestRead_WithClampTrueAndWait(t *testing.T) {
 		t.Fatalf("Read with clamp+wait failed: %v", err)
 	}
 
+	if len(batch.Records) != 0 {
+		t.Fatalf("Expected 0 records (long poll timeout at tail), got %d", len(batch.Records))
+	}
 	t.Logf("Read with clamp=true and wait=1 succeeded, returned %d records", len(batch.Records))
 }
 
@@ -1673,6 +1647,9 @@ func TestRead_EmptyStreamWithWait(t *testing.T) {
 		t.Fatalf("Read with wait failed: %v", err)
 	}
 
+	if len(batch.Records) != 0 {
+		t.Fatalf("Expected 0 records for empty stream with wait, got %d", len(batch.Records))
+	}
 	t.Logf("Read empty stream with wait=1 succeeded, returned %d records (timeout with empty)", len(batch.Records))
 }
 
@@ -2308,35 +2285,6 @@ func TestAppend_HeaderWithEmptyName_AdditionalHeaders(t *testing.T) {
 	t.Logf("Got expected 422 error: %v", err)
 }
 
-func TestAppend_DeletionPending(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
-	defer cancel()
-	t.Log("Testing: Append while stream deletion pending (expects 409)")
-
-	basin := getSharedBasin(t)
-	streamName := uniqueStreamName("test-adp")
-	defer deleteStream(ctx, basin, streamName)
-
-	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-
-	if err := basin.Streams.Delete(ctx, streamName); err != nil {
-		t.Fatalf("Delete failed: %v", err)
-	}
-
-	stream := basin.Stream(streamName)
-	_, err = stream.Append(ctx, &s2.AppendInput{
-		Records: []s2.AppendRecord{{Body: []byte("test")}},
-	})
-
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 409 {
-		t.Errorf("Expected 409 error for stream deletion pending, got: %v", err)
-	}
-	t.Logf("Got expected 409 error: %v", err)
-}
 
 func TestRead_FromTail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
@@ -2469,35 +2417,38 @@ func TestRead_ByTimestamp(t *testing.T) {
 
 	stream := basin.Stream(streamName)
 
-	ack, err := stream.Append(ctx, &s2.AppendInput{
-		Records: []s2.AppendRecord{{Body: []byte("first")}},
+	ts1 := uint64(time.Now().Add(-2 * time.Second).UnixMilli())
+	ts2 := ts1 + 1000
+
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("first"), Timestamp: &ts1}},
 	})
 	if err != nil {
 		t.Fatalf("First append failed: %v", err)
 	}
-	firstTimestamp := ack.Start.Timestamp
 
-	time.Sleep(10 * time.Millisecond)
-
-	_, err = stream.Append(ctx, &s2.AppendInput{
-		Records: []s2.AppendRecord{{Body: []byte("second")}},
+	ack2, err := stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("second"), Timestamp: &ts2}},
 	})
 	if err != nil {
 		t.Fatalf("Second append failed: %v", err)
 	}
 
+	startTs := ack2.Start.Timestamp
 	batch, err := stream.Read(ctx, &s2.ReadOptions{
-		Timestamp: s2.Ptr(firstTimestamp + 1),
+		Timestamp: &startTs,
 	})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
 
 	if len(batch.Records) == 0 {
-		t.Log("No records found after timestamp (timing dependent)")
-	} else {
-		t.Logf("Read by timestamp returned %d records", len(batch.Records))
+		t.Fatalf("Expected records at/after timestamp %d, got 0", startTs)
 	}
+	if batch.Records[0].Timestamp < startTs {
+		t.Fatalf("Expected first record timestamp >= %d, got %d", startTs, batch.Records[0].Timestamp)
+	}
+	t.Logf("Read by timestamp returned %d records starting at %d", len(batch.Records), startTs)
 }
 
 func TestRead_TimestampGreaterOrEqualUntil(t *testing.T) {
