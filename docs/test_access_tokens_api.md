@@ -254,6 +254,15 @@
   - Input: `id=test-tok-8`, `streams={prefix: "tenant/"}`, `auto_prefix_streams=true`, ops
   - Expected: 201, token with auto-prefixing enabled
 
+- **Issue token with auto_prefix_streams + exact stream scope (invalid)**
+  - Input: `id=test-tok-8b`, `streams={exact: "tenant/stream"}`, `auto_prefix_streams=true`
+  - Expected: 422 (`invalid`, auto-prefix requires stream prefix scope)
+
+- **Auto-prefix create + list behavior**
+  - Setup: issue token with `streams={prefix: "tenant/"}`, `auto_prefix_streams=true`, `ops=[create-stream, list-streams]`
+  - Input: create stream named `my-stream` using limited token; list streams with prefix `my-`
+  - Expected: create succeeds; limited list returns `my-stream` (prefix stripped); admin list shows `tenant/my-stream`
+
 - **Issue token with expires_at**
   - Input: `id=test-tok-9`, `expires_at=<future timestamp>`, ops
   - Expected: 201, token with custom expiration
@@ -433,6 +442,10 @@ These tests verify that issued tokens respect their configured scope.
   - Issue token with `streams={prefix: "tenant/"}`, `auto_prefix_streams=true`, `list-streams`
   - List streams
   - Verify: returned names are `stream1`, `stream2` (prefix stripped)
+
+- **Auto-prefix requires prefix scope**
+  - Setup: issue token with `streams={exact: "tenant/stream"}`, `auto_prefix_streams=true`
+  - Expected: 422 (`invalid`)
 
 ### Cross-Basin Access Tests
 

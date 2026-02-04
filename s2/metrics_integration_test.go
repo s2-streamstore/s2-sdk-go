@@ -208,6 +208,39 @@ func TestAccountMetrics_MissingBothStartAndEnd(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
+func TestAccountMetrics_InvalidTimeRange(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Account metrics invalid time ranges")
+
+	client := streamTestClient(t)
+	now := time.Now().Unix()
+
+	testCases := []struct {
+		name  string
+		start int64
+		end   int64
+	}{
+		{name: "start-after-end", start: now, end: now - 3600},
+		{name: "end-too-far-future", start: now - 3600, end: now + 600},
+		{name: "range-too-large", start: now - 40*24*3600, end: now},
+	}
+
+	for _, tc := range testCases {
+		_, err := client.Metrics.Account(ctx, &s2.AccountMetricsArgs{
+			Set:   s2.AccountMetricSetActiveBasins,
+			Start: &tc.start,
+			End:   &tc.end,
+		})
+		var s2Err *s2.S2Error
+		if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+			t.Errorf("%s: expected 422 error, got: %v", tc.name, err)
+		} else {
+			t.Logf("%s: got expected error: %v", tc.name, err)
+		}
+	}
+}
+
 func TestAccountMetrics_NilArgs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -482,6 +515,62 @@ func TestBasinMetrics_MissingBothStartAndEnd(t *testing.T) {
 		Set:   s2.BasinMetricSetStorage,
 	})
 
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+func TestBasinMetrics_InvalidTimeRange(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Basin metrics invalid time ranges")
+
+	client := streamTestClient(t)
+	now := time.Now().Unix()
+
+	testCases := []struct {
+		name  string
+		start int64
+		end   int64
+	}{
+		{name: "start-after-end", start: now, end: now - 3600},
+		{name: "end-too-far-future", start: now - 3600, end: now + 600},
+		{name: "range-too-large", start: now - 40*24*3600, end: now},
+	}
+
+	for _, tc := range testCases {
+		_, err := client.Metrics.Basin(ctx, &s2.BasinMetricsArgs{
+			Basin: string(sharedTestBasinName),
+			Set:   s2.BasinMetricSetStorage,
+			Start: &tc.start,
+			End:   &tc.end,
+		})
+		var s2Err *s2.S2Error
+		if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+			t.Errorf("%s: expected 422 error, got: %v", tc.name, err)
+		} else {
+			t.Logf("%s: got expected error: %v", tc.name, err)
+		}
+	}
+}
+
+func TestBasinMetrics_StorageInvalidInterval(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Basin storage metric invalid interval (expect 422)")
+
+	client := streamTestClient(t)
+	start, end := metricsTimeRange(1)
+
+	_, err := client.Metrics.Basin(ctx, &s2.BasinMetricsArgs{
+		Basin:    string(sharedTestBasinName),
+		Set:      s2.BasinMetricSetStorage,
+		Start:    start,
+		End:      end,
+		Interval: s2.Ptr(s2.TimeseriesIntervalMinute),
+	})
 	var s2Err *s2.S2Error
 	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
 		t.Errorf("Expected 422 error, got: %v", err)
@@ -773,6 +862,83 @@ func TestStreamMetrics_NilArgs(t *testing.T) {
 	_, err := client.Metrics.Stream(ctx, nil)
 	if err == nil {
 		t.Error("Expected error for nil args")
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+func TestStreamMetrics_InvalidTimeRange(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Stream metrics invalid time ranges")
+
+	client := streamTestClient(t)
+	basin := getSharedBasin(t)
+
+	streamName := uniqueStreamName("test-metrics-it")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create stream failed: %v", err)
+	}
+
+	now := time.Now().Unix()
+	testCases := []struct {
+		name  string
+		start int64
+		end   int64
+	}{
+		{name: "start-after-end", start: now, end: now - 3600},
+		{name: "end-too-far-future", start: now - 3600, end: now + 600},
+		{name: "range-too-large", start: now - 40*24*3600, end: now},
+	}
+
+	for _, tc := range testCases {
+		_, err := client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
+			Basin:  string(sharedTestBasinName),
+			Stream: string(streamName),
+			Set:    s2.StreamMetricSetStorage,
+			Start:  &tc.start,
+			End:    &tc.end,
+		})
+		var s2Err *s2.S2Error
+		if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+			t.Errorf("%s: expected 422 error, got: %v", tc.name, err)
+		} else {
+			t.Logf("%s: got expected error: %v", tc.name, err)
+		}
+	}
+}
+
+func TestStreamMetrics_StorageInvalidInterval(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Stream storage metric invalid interval (expect 422)")
+
+	client := streamTestClient(t)
+	basin := getSharedBasin(t)
+
+	streamName := uniqueStreamName("test-metrics-ii")
+	defer deleteStream(ctx, basin, streamName)
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create stream failed: %v", err)
+	}
+
+	start, end := metricsTimeRange(1)
+
+	_, err = client.Metrics.Stream(ctx, &s2.StreamMetricsArgs{
+		Basin:    string(sharedTestBasinName),
+		Stream:   string(streamName),
+		Set:      s2.StreamMetricSetStorage,
+		Start:    start,
+		End:      end,
+		Interval: s2.Ptr(s2.TimeseriesIntervalHour),
+	})
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
