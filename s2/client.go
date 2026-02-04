@@ -84,6 +84,9 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	}
 
 	baseURL := opts.BaseURL
+	if opts.BaseURL != "" && strings.TrimSpace(opts.BaseURL) == "" {
+		panic("base URL cannot be empty")
+	}
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
@@ -246,14 +249,14 @@ func NewFromEnvironment(opts *ClientOptions) *Client {
 
 	if opts.BaseURL != "" {
 		effectiveOpts.BaseURL = opts.BaseURL
-	} else if envConfig.AccountEndpoint != "" {
-		effectiveOpts.BaseURL = envConfig.AccountEndpoint + "/v1"
+	} else if envConfig.AccountTemplate != nil {
+		effectiveOpts.BaseURL = envConfig.AccountTemplate.baseURL("")
 	}
 
 	if opts.MakeBasinBaseURL != nil {
 		effectiveOpts.MakeBasinBaseURL = opts.MakeBasinBaseURL
-	} else if envConfig.BasinEndpoint != "" {
-		effectiveOpts.MakeBasinBaseURL = makeBasinURLFunc(envConfig.BasinEndpoint)
+	} else if envConfig.BasinTemplate != nil {
+		effectiveOpts.MakeBasinBaseURL = envConfig.BasinTemplate.baseURL
 	}
 
 	return New(envConfig.AccessToken, effectiveOpts)

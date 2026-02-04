@@ -43,6 +43,10 @@ and error mapping).
   - Input: endpoint without scheme (e.g., `example.com:8443`)
   - Expected: SDK assumes `https` and preserves host/port
 
+- **Implicit scheme for localhost**
+  - Input: endpoint without scheme pointing at `localhost` or `127.0.0.1`
+  - Expected: SDK assumes `http` and preserves host/port
+
 - **Explicit path**
   - Input: endpoint containing a path or trailing slash
   - Expected: SDK uses the path verbatim and does not append `/v1`

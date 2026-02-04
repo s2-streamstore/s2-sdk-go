@@ -251,6 +251,47 @@ func TestListStreams_Iterator(t *testing.T) {
 	t.Logf("Iterated over %d streams", count)
 }
 
+func TestListStreams_IteratorIncludeDeleted(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Iterator includes deleting streams when requested")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-iter-del")
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	err = basin.Streams.Delete(ctx, streamName)
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	iter := basin.Streams.Iter(ctx, &s2.ListStreamsArgs{
+		Prefix:         string(streamName),
+		IncludeDeleted: true,
+	})
+
+	found := false
+	for iter.Next() {
+		stream := iter.Value()
+		if stream.Name == streamName {
+			found = true
+			if stream.DeletedAt == nil {
+				t.Errorf("Expected deleted_at to be set for deleting stream")
+			}
+		}
+	}
+	if err := iter.Err(); err != nil {
+		t.Fatalf("Iterator error: %v", err)
+	}
+	if !found {
+		t.Log("Stream already fully deleted (not returned by iterator)")
+	}
+}
+
 func TestListStreams_InvalidStartAfterLessThanPrefix(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -1550,7 +1591,6 @@ func TestRead_NonExistentStream(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-
 func TestRead_WithClampTrue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -2284,7 +2324,6 @@ func TestAppend_HeaderWithEmptyName_AdditionalHeaders(t *testing.T) {
 	}
 	t.Logf("Got expected 422 error: %v", err)
 }
-
 
 func TestRead_FromTail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
