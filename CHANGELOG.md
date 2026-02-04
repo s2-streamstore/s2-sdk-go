@@ -2,11 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.12.0] - 2026-02-04
+
+### Features
+
+- Add release skill for Claude Code ([#183](https://github.com/s2-streamstore/s2-sdk-go/issues/183))
+
+### Bug Fixes
+
+- Prevent context cancellation race in Producer.Close ([#177](https://github.com/s2-streamstore/s2-sdk-go/issues/177))
+- Batcher Close() cancels context before final flush ([#178](https://github.com/s2-streamstore/s2-sdk-go/issues/178))
+- RequestProto does not decompress compressed error bodies ([#179](https://github.com/s2-streamstore/s2-sdk-go/issues/179))
+- Append retries on network errors ([#180](https://github.com/s2-streamstore/s2-sdk-go/issues/180))
+- AppendSession retries to accept old-session acks and close stale sessions ([#181](https://github.com/s2-streamstore/s2-sdk-go/issues/181))
+
+### Miscellaneous Tasks
+
+- Test updates ([#182](https://github.com/s2-streamstore/s2-sdk-go/issues/182))
+
 ## [v0.11.9] - 2026-01-31
 
 ### Bug Fixes
 
 - Prevent duplicate batch sending in AppendSession ([#165](https://github.com/s2-streamstore/s2-sdk-go/issues/165))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.11.9 ([#166](https://github.com/s2-streamstore/s2-sdk-go/issues/166))
 
 ## [v0.11.8] - 2026-01-27
 

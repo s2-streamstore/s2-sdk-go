@@ -1312,6 +1312,132 @@ func TestReconfigureBasin_EnableCreateStreamOnRead(t *testing.T) {
 	t.Log("Verified create_stream_on_read enabled")
 }
 
+func TestCreateStreamOnAppend_AutoCreate(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: Create stream on append auto-creates stream")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-csoa")
+	defer deleteBasin(ctx, client, basinName)
+
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
+		Basin: basinName,
+		Config: &s2.BasinConfig{
+			CreateStreamOnAppend: s2.Ptr(true),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := s2.StreamName(fmt.Sprintf("auto-append-%d", time.Now().UnixNano()))
+	defer basin.Streams.Delete(ctx, streamName)
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("auto-create")}},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	if _, err := basin.Streams.GetConfig(ctx, streamName); err != nil {
+		t.Fatalf("Expected stream to exist after append, got error: %v", err)
+	}
+	t.Log("Verified stream auto-created on append")
+}
+
+func TestCreateStreamOnRead_AutoCreate(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: Create stream on read auto-creates stream")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-csor")
+	defer deleteBasin(ctx, client, basinName)
+
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
+		Basin: basinName,
+		Config: &s2.BasinConfig{
+			CreateStreamOnRead: s2.Ptr(true),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := s2.StreamName(fmt.Sprintf("auto-read-%d", time.Now().UnixNano()))
+	defer basin.Streams.Delete(ctx, streamName)
+
+	stream := basin.Stream(streamName)
+	_, err = stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Ptr[uint64](0),
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 416 {
+		t.Fatalf("Expected 416 error for empty stream auto-created on read, got: %v", err)
+	}
+
+	if _, err := basin.Streams.GetConfig(ctx, streamName); err != nil {
+		t.Fatalf("Expected stream to exist after read, got error: %v", err)
+	}
+	t.Log("Verified stream auto-created on read")
+}
+
+func TestCreateStreamOnAppend_DefaultStreamConfigApplied(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: Auto-created stream inherits default stream config")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-csod")
+	defer deleteBasin(ctx, client, basinName)
+
+	retentionAge := int64(3600)
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
+		Basin: basinName,
+		Config: &s2.BasinConfig{
+			CreateStreamOnAppend: s2.Ptr(true),
+			DefaultStreamConfig: &s2.StreamConfig{
+				RetentionPolicy: &s2.RetentionPolicy{Age: &retentionAge},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := s2.StreamName(fmt.Sprintf("auto-default-%d", time.Now().UnixNano()))
+	defer basin.Streams.Delete(ctx, streamName)
+
+	_, err = basin.Stream(streamName).Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{{Body: []byte("auto-create")}},
+	})
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	cfg, err := basin.Streams.GetConfig(ctx, streamName)
+	if err != nil {
+		t.Fatalf("GetConfig failed: %v", err)
+	}
+	if cfg.RetentionPolicy == nil || cfg.RetentionPolicy.Age == nil {
+		t.Fatalf("Expected retention_policy.age to be set on auto-created stream")
+	}
+	if *cfg.RetentionPolicy.Age != retentionAge {
+		t.Errorf("Expected retention_policy.age=%d, got %d", retentionAge, *cfg.RetentionPolicy.Age)
+	}
+	t.Log("Verified default stream config applied on auto-created stream")
+}
+
 func TestReconfigureBasin_ChangeStorageClass(t *testing.T) {
 	testCases := []struct {
 		from s2.StorageClass

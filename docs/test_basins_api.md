@@ -272,6 +272,11 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Input: config with flag
   - Expected: 201, verify auto-create on read
 
+- **auto-created stream inherits default_stream_config**
+  - Setup: create basin with `create_stream_on_append=true` and `default_stream_config` set (e.g., retention age)
+  - Input: append to non-existent stream
+  - Expected: 200, stream auto-created with matching default stream config
+
 - **create_stream_on_append = false**
   - Input: config with flag
   - Expected: 201, verify no auto-create

@@ -18,6 +18,9 @@
 > - Metrics may return empty results if no data exists for the time range - this is NOT an error
 > - Time ranges use Unix epoch seconds (not milliseconds)
 > - Both `start` and `end` parameters are REQUIRED for all metric sets
+> - `start` must be <= `end`
+> - `end` must not be more than ~60 seconds in the future
+> - Time range must not exceed 30 days
 > - Metric values are floating point numbers
 > - Timeseries data points are tuples of `[timestamp, value]`
 > - The metrics API does NOT return 404 for non-existent basins/streams - it returns permission errors or empty data
@@ -168,6 +171,18 @@
   - Input: `set=invalid-set`, `start=<now-1h>`, `end=<now>`
   - Expected: 422 (`invalid`)
 
+- **Start > end**
+  - Input: `set=active-basins`, `start=<now>`, `end=<now-1h>`
+  - Expected: 422 (`invalid`)
+
+- **End too far in future**
+  - Input: `set=active-basins`, `start=<now-1h>`, `end=<now+10m>`
+  - Expected: 422 (`invalid`)
+
+- **Time range > 30 days**
+  - Input: `set=active-basins`, `start=<now-40d>`, `end=<now>`
+  - Expected: 422 (`invalid`)
+
 - **Empty time range returns empty data**
   - Input: `set=active-basins`, `start=<far-past>`, `end=<far-past+1h>`
   - Expected: 200, LabelMetric with empty values array (not an error)
@@ -302,9 +317,6 @@
 - **Missing both start and end**
   - Input: valid basin, `set=storage`
   - Expected: 422 (`invalid`)
-
-<<<<<<< Updated upstream
-=======
 - **Empty basin name**
   - Input: `basin=""`, valid `set`, `start`, `end`
   - Expected: SDK validation error or 422 (`invalid`)
@@ -312,7 +324,6 @@
 - **Nil args / missing request object (SDK validation)**
   - Input: call basin metrics method with nil/undefined args
   - Expected: SDK validation error
-
 - **Start > end**
   - Input: valid basin, `set=storage`, `start=<now>`, `end=<now-1h>`
   - Expected: 422 (`invalid`)
@@ -328,8 +339,6 @@
 - **Storage interval invalid**
   - Input: valid basin, `set=storage`, `interval=minute`
   - Expected: 422 (`invalid`, only hour supported)
-
->>>>>>> Stashed changes
 - **Empty time range returns empty data**
   - Input: valid basin, `set=storage`, `start=<far-past>`, `end=<far-past+1h>` (before any data)
   - Expected: 200, empty or zero values (not an error)
@@ -427,9 +436,6 @@
 - **Missing both start and end**
   - Input: valid basin/stream, `set=storage`
   - Expected: 422 (`invalid`)
-
-<<<<<<< Updated upstream
-=======
 - **Empty basin name**
   - Input: `basin=""`, valid `stream`, `set`, `start`, `end`
   - Expected: SDK validation error or 422 (`invalid`)
@@ -441,7 +447,6 @@
 - **Nil args / missing request object (SDK validation)**
   - Input: call stream metrics method with nil/undefined args
   - Expected: SDK validation error
-
 - **Start > end**
   - Input: valid basin/stream, `set=storage`, `start=<now>`, `end=<now-1h>`
   - Expected: 422 (`invalid`)
@@ -457,8 +462,6 @@
 - **Storage interval invalid**
   - Input: valid basin/stream, `set=storage`, `interval=hour`
   - Expected: 422 (`invalid`, only minute supported)
-
->>>>>>> Stashed changes
 - **Empty time range returns empty data**
   - Input: valid basin/stream, `set=storage`, `start=<far-past>`, `end=<far-past+1h>`
   - Expected: 200, empty or zero values (not an error)

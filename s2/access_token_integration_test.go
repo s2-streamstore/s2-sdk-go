@@ -427,6 +427,31 @@ func TestIssueAccessToken_WithAutoPrefixStreams(t *testing.T) {
 	t.Logf("Issued token with auto_prefix_streams: %s", tokenID)
 }
 
+func TestIssueAccessToken_AutoPrefixStreamsExactScopeInvalid(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), accessTokenTestTimeout)
+	defer cancel()
+	t.Log("Testing: Issue access token with auto_prefix_streams + exact stream scope (expect 422)")
+
+	client := testClient(t)
+	tokenID := uniqueTokenID("test-autoprefix-exact")
+
+	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Basins:  &s2.ResourceSet{Prefix: s2.Ptr("")},
+			Streams: &s2.ResourceSet{Exact: s2.Ptr("tenant/stream")},
+			Ops:     []string{s2.OperationCreateStream},
+		},
+		AutoPrefixStreams: true,
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
+		t.Errorf("Expected 422 error for invalid auto_prefix_streams scope, got: %v", err)
+	}
+	t.Logf("Got expected 422 error: %v", err)
+}
+
 func TestIssueAccessToken_WithExpiresAt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), accessTokenTestTimeout)
 	defer cancel()
@@ -451,6 +476,81 @@ func TestIssueAccessToken_WithExpiresAt(t *testing.T) {
 		t.Error("Expected non-empty access token")
 	}
 	t.Logf("Issued token with expires_at: %s", tokenID)
+}
+
+func TestAccessToken_AutoPrefix_CreateAndList(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), accessTokenTestTimeout)
+	defer cancel()
+	t.Log("Testing: Auto-prefix streams behavior on create and list")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-apx")
+	defer deleteBasin(ctx, client, basinName)
+
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
+	if err != nil {
+		t.Fatalf("Create basin failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	tokenID := uniqueTokenID("test-autoprefix-behavior")
+	defer revokeToken(ctx, client, tokenID)
+
+	resp, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
+		ID: tokenID,
+		Scope: s2.AccessTokenScope{
+			Basins:  &s2.ResourceSet{Exact: s2.Ptr(string(basinName))},
+			Streams: &s2.ResourceSet{Prefix: s2.Ptr("tenant/")},
+			Ops:     []string{s2.OperationCreateStream, s2.OperationListStreams},
+		},
+		AutoPrefixStreams: true,
+	})
+	if err != nil {
+		t.Fatalf("Issue token failed: %v", err)
+	}
+
+	limitedClient := testClientWithToken(t, resp.AccessToken)
+	limitedBasin := limitedClient.Basin(string(basinName))
+
+	rawName := s2.StreamName(fmt.Sprintf("mystream-%d", time.Now().UnixNano()))
+	prefixedName := s2.StreamName("tenant/" + string(rawName))
+	defer client.Basin(string(basinName)).Streams.Delete(ctx, prefixedName)
+
+	_, err = limitedBasin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: rawName})
+	if err != nil {
+		t.Fatalf("Create stream with auto-prefix failed: %v", err)
+	}
+
+	limitedList, err := limitedBasin.Streams.List(ctx, &s2.ListStreamsArgs{Prefix: string(rawName)})
+	if err != nil {
+		t.Fatalf("List streams with auto-prefix failed: %v", err)
+	}
+	found := false
+	for _, s := range limitedList.Streams {
+		if s.Name == rawName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected listed stream name %s (prefix stripped)", rawName)
+	}
+
+	adminList, err := client.Basin(string(basinName)).Streams.List(ctx, &s2.ListStreamsArgs{Prefix: "tenant/"})
+	if err != nil {
+		t.Fatalf("Admin list streams failed: %v", err)
+	}
+	found = false
+	for _, s := range adminList.Streams {
+		if s.Name == prefixedName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected prefixed stream name %s in admin list", prefixedName)
+	}
+	t.Log("Verified auto-prefix create and list behavior")
 }
 
 func TestIssueAccessToken_DuplicateID(t *testing.T) {

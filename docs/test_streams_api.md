@@ -1023,20 +1023,16 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - **Append to non-existent stream**
   - Input: invalid name
   - Expected: 404 (`stream_not_found`)
-<<<<<<< Updated upstream
-=======
   - Note: If basin config has `create_stream_on_append=true`, expect 200 and stream auto-created
 
 - **Append auto-creates stream with default config**
   - Setup: basin config has `create_stream_on_append=true` and `default_stream_config` set
   - Input: append to a new stream name
   - Expected: append succeeds; stream exists; stream config inherits `default_stream_config`
-
 - **Append session round-trip read (S2S transport only)**
   - Setup: SDK exposes append session API; new stream
   - Input: append a batch via session, then read from `ack.start.seq_num` with `count` matching batch size
   - Expected: 200, records returned in order; `seq_num` matches `ack.start.seq_num + i`; timestamps monotonic; `ack.tail.seq_num >= ack.end.seq_num`
->>>>>>> Stashed changes
 
 - **Append header with empty name (command record)**
   - Input: header with name="" and command value
@@ -1044,6 +1040,14 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - **Append header with empty name (non-command)**
   - Input: header name="" without command value
+  - Expected: 422 (`invalid`)
+
+- **Append header with empty name + unknown command**
+  - Input: header name="" with unrecognized command value
+  - Expected: 422 (`invalid`)
+
+- **Append header with empty name and additional headers**
+  - Input: header name="" plus at least one other header
   - Expected: 422 (`invalid`)
 
 - **Permission denied**
@@ -1170,6 +1174,24 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Input: `seq_num=0`
   - Expected: 200, records from start
 
+- **Read with count > 1000**
+  - Input: `count=5000`
+  - Expected: 200, server clamps to max 1000 records
+
+- **Read with bytes > 1 MiB**
+  - Input: `bytes=10_000_000`
+  - Expected: 200, server clamps to max 1 MiB
+
+- **Read with count=0**
+  - Setup: stream with records
+  - Input: `count=0`
+  - Expected: 200, empty records (explicit bound prevents returning data)
+
+- **Read with bytes=0**
+  - Setup: stream with records
+  - Input: `bytes=0`
+  - Expected: 200, empty records (explicit bound prevents returning data)
+
 - **Read from tail (no wait)**
   - Input: `tail_offset=0`
   - Expected: 416 (tail position has no record yet)
@@ -1182,6 +1204,11 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Setup: stream with >=10 records
   - Input: `tail_offset=10`
   - Expected: 200, last 10 records
+
+- **Read with tail_offset larger than tail**
+  - Setup: stream with <10 records
+  - Input: `tail_offset=10`
+  - Expected: 200, reads from seq_num=0 (saturating to start)
 
 - **Read by timestamp**
   - Input: `timestamp=<ms>`
@@ -1198,6 +1225,15 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - **Read until timestamp**
   - Input: `until=<ms>`
   - Expected: 200, records before timestamp
+
+- **Read with until earlier than first record**
+  - Setup: stream with records
+  - Input: `until=<timestamp_before_first_record>`
+  - Expected: 200, empty records (explicit bound prevents returning data)
+
+- **Read with timestamp >= until**
+  - Input: `timestamp=<ms>`, `until=<same or earlier>`
+  - Expected: 422 (`invalid`)
 
 - **Read with clamp=true (beyond tail)**
   - Input: `seq_num=999999`, `clamp=true`
@@ -1224,6 +1260,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - **Read non-existent stream**
   - Input: invalid name
   - Expected: 404 (`stream_not_found`)
+  - Note: If basin config has `create_stream_on_read=true`, expect 200 and stream auto-created
 
 - **Read auto-creates stream with default config**
   - Setup: basin config has `create_stream_on_read=true` and `default_stream_config` set
@@ -1276,6 +1313,11 @@ Trims (deletes) all records before the specified sequence number.
   - Input: `fencing_token="wrong"`
   - Expected: 412 (`fencing_token_mismatch`)
 
+- **Fence permission denied**
+  - Setup: token without `fence` op
+  - Input: append fence command
+  - Expected: 403 (`permission_denied`)
+
 - **Clear fencing token**
   - Input: append fence command with empty body
   - Expected: 200, token cleared
@@ -1287,6 +1329,11 @@ Trims (deletes) all records before the specified sequence number.
 - **Trim to future seq_num**
   - Input: trim_point > tail
   - Expected: 200 (no-op, nothing to trim)
+
+- **Trim permission denied**
+  - Setup: token without `trim` op
+  - Input: append trim command
+  - Expected: 403 (`permission_denied`)
 
 > **Note:** If the SDK exposes `fence()` or `trim()` helper methods, test those instead of manually constructing command records.
 
