@@ -460,7 +460,7 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		}
 		r.inflightMu.RUnlock()
 
-		if head == nil || !isIdempotentEntry(head) {
+		if head != nil && !isIdempotentEntry(head) {
 			logError(r.streamClient.logger, "append session cannot retry (non-idempotent head entry)",
 				"stream", string(r.streamClient.name))
 			r.failAllInflight(err)
