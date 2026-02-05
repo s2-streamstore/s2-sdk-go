@@ -24,8 +24,10 @@ func (f *fakeAppendSession) Submit(input *AppendInput) (*SubmitFuture, error) {
 	ackCh := make(chan *inflightResult, 1)
 
 	ticketCh <- &BatchSubmitTicket{ackCh: ackCh}
-	ackCh <- &inflightResult{ack: ack}
-	close(ackCh)
+	go func() {
+		ackCh <- &inflightResult{ack: ack}
+		close(ackCh)
+	}()
 
 	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}, nil
 }

@@ -53,7 +53,6 @@ func newProducerWithSession(ctx context.Context, batcher *Batcher, session appen
 // accepted. Blocks if the underlying [AppendSession] is at capacity.
 func (p *Producer) Submit(record AppendRecord) (*RecordSubmitFuture, error) {
 	ticketCh := make(chan *RecordSubmitTicket, 1)
-	errCh := make(chan error, 1)
 	resultCh := make(chan *producerOutcome, 1)
 
 	if err := p.batcher.Add(record, resultCh); err != nil {
@@ -61,7 +60,7 @@ func (p *Producer) Submit(record AppendRecord) (*RecordSubmitFuture, error) {
 	}
 	ticketCh <- &RecordSubmitTicket{ackCh: resultCh}
 
-	return &RecordSubmitFuture{ticketCh: ticketCh, errCh: errCh}, nil
+	return &RecordSubmitFuture{ticketCh: ticketCh}, nil
 }
 
 func (p *Producer) consumeBatches() {
@@ -135,7 +134,6 @@ func (p *Producer) Close() error {
 // Represents a pending single-record submission to a [Producer].
 type RecordSubmitFuture struct {
 	ticketCh <-chan *RecordSubmitTicket
-	errCh    <-chan error
 }
 
 // Blocks until the record is accepted and returns a [RecordSubmitTicket].
@@ -146,8 +144,6 @@ func (f *RecordSubmitFuture) Wait(ctx context.Context) (*RecordSubmitTicket, err
 	select {
 	case ticket := <-f.ticketCh:
 		return ticket, nil
-	case err := <-f.errCh:
-		return nil, err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

@@ -73,7 +73,6 @@ type endpointTemplate struct {
 	port                 string
 	pathTemplate         string
 	explicitPathProvided bool
-	hasBasinPlaceholder  bool
 }
 
 func lookupEnvNonEmpty(name string) (string, bool) {
@@ -186,7 +185,6 @@ func newEndpointTemplate(endpoint string) (*endpointTemplate, error) {
 		port:                 port,
 		pathTemplate:         pathTemplate,
 		explicitPathProvided: explicitPathProvided,
-		hasBasinPlaceholder:  strings.Contains(raw, basinPlaceholder),
 	}, nil
 }
 
