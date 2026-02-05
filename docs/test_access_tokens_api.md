@@ -101,6 +101,10 @@
   - Parameters: `prefix=test-tok-`
   - Expected: 200, only tokens starting with "test-tok-"
 
+- **Prefix with no matches**
+  - Parameters: `prefix=does-not-exist-`
+  - Expected: 200, empty list
+
 - **List with start_after**
   - Setup: create tokens `aaa-tok`, `bbb-tok`, `ccc-tok`
   - Parameters: `start_after=aaa-tok`
@@ -296,6 +300,26 @@
 
 - **Permission denied (no issue permission)**
   - Setup: token without `issue-access-token` op
+  - Expected: 403 (`permission_denied`)
+
+- **Allows basin prefix scope**
+  - Setup: issue token with `basins={prefix: "team-a-"}` and required ops
+  - Input: use token against a basin named `team-a-...`
+  - Expected: operation succeeds
+
+- **Denies non-matching basin prefix scope**
+  - Setup: token with `basins={prefix: "team-a-"}` and required ops
+  - Input: attempt operation on basin `team-b-...`
+  - Expected: 403 (`permission_denied`)
+
+- **Denies missing operation**
+  - Setup: token missing required op (e.g., no `list-streams`)
+  - Input: attempt that operation
+  - Expected: 403 (`permission_denied`)
+
+- **Denies cross-basin access**
+  - Setup: token scoped to basin A
+  - Input: perform any basin/stream operation on basin B
   - Expected: 403 (`permission_denied`)
 
 ---

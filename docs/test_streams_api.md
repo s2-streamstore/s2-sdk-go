@@ -166,6 +166,10 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - 0 is treated as default (1000)
   - Values > 1000 are clamped to 1000
 
+- `include_deleted` (boolean, optional, SDK iterator only)
+  - SDK-only flag used by listAll/Iter to include streams in deleting state
+  - Not sent as an API query parameter; implemented client-side
+
 ### Response Codes
 
 - `200` — Success
@@ -228,6 +232,25 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - **Pagination**
   - Parameters: `start_after` + `limit`
   - Expected: 200, correct pagination
+
+- **List order (lexicographic)**
+  - Setup: create streams `test/0001`, `test/0002`, `test/0003`
+  - Input: `prefix=test/`
+  - Expected: names returned in lexicographic order
+
+- **Iterator/listAll (if SDK exposes)**
+  - Setup: create >1000 streams with a common prefix to force pagination
+  - Input: SDK iterator/listAll with that prefix
+  - Expected: all streams returned exactly once, in lexicographic order
+
+- **Include deleting streams (iterator)**
+  - Setup: delete a stream
+  - Input: SDK listAll/Iter with `include_deleted=true`
+  - Expected: stream may appear with `deleted_at` set
+
+- **Deleted stream has deleted_at when listed**
+  - Setup: delete a stream, then list with `prefix=<stream>`
+  - Expected: if stream appears in list, `deleted_at` is set
 
 - **Empty prefix**
   - Parameters: `prefix=""`
@@ -346,6 +369,11 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - **Create minimal stream**
   - Input: `{"stream": "test-stream"}`
   - Expected: 201
+
+- **Create stream inherits basin default config**
+  - Setup: basin has `default_stream_config` (e.g., retention + delete_on_empty)
+  - Input: create stream with no config
+  - Expected: 201; stream config matches basin defaults
 
 - **Create with full config**
   - Input: all config fields
@@ -960,6 +988,10 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Input: correct seq_num
   - Expected: 200
 
+- **Append with match_seq_num=0 (success)**
+  - Input: `match_seq_num=0` on a fresh stream
+  - Expected: 200 (0 is a valid explicit value; must not be treated as “unset”)
+
 - **Append with match_seq_num (failure)**
   - Input: wrong seq_num
   - Expected: 412 (`seq_num_mismatch`)
@@ -993,6 +1025,10 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Expected: 404 (`stream_not_found`)
   - Note: If basin config has `create_stream_on_append=true`, expect 200 and stream auto-created
 
+- **Append auto-creates stream with default config**
+  - Setup: basin config has `create_stream_on_append=true` and `default_stream_config` set
+  - Input: append to a new stream name
+  - Expected: append succeeds; stream exists; stream config inherits `default_stream_config`
 - **Append session round-trip read (S2S transport only)**
   - Setup: SDK exposes append session API; new stream
   - Input: append a batch via session, then read from `ack.start.seq_num` with `count` matching batch size
@@ -1226,6 +1262,11 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Expected: 404 (`stream_not_found`)
   - Note: If basin config has `create_stream_on_read=true`, expect 200 and stream auto-created
 
+- **Read auto-creates stream with default config**
+  - Setup: basin config has `create_stream_on_read=true` and `default_stream_config` set
+  - Input: read from a new stream name (e.g., `seq_num=0`)
+  - Expected: read returns 416 (empty) or 200 with wait; stream exists; stream config inherits `default_stream_config`
+
 - **Multiple start params**
   - Input: `seq_num=0`, `timestamp=0`
   - Expected: 422 (`invalid`, mutually exclusive)
@@ -1366,6 +1407,72 @@ Test client initialization, configuration, and cleanup patterns exposed by the S
 - **Session timeout**
   - Description: session idle beyond timeout
   - Expected: session closed, reconnect works
+
+#### Append Session Behavior (if SDK exposes)
+
+- **Ordered acks for sequential submits**
+  - Description: submit multiple batches sequentially
+  - Expected: ack seq_nums are strictly increasing
+
+- **Concurrent submits are serialized**
+  - Description: submit multiple batches concurrently
+  - Expected: acks are ordered; no seq_num mismatch or reordering
+
+- **LastAckedPosition updates**
+  - Description: submit a batch and await ack
+  - Expected: LastAckedPosition matches the latest ack end position
+
+- **Close drains pending work**
+  - Description: submit multiple batches, then call close
+  - Expected: close waits for pending acks; submit futures resolve
+
+- **Submit after close**
+  - Description: call submit after close
+  - Expected: error returned
+
+- **Backpressure respects max inflight limits**
+  - Description: set small max inflight bytes/batches and submit beyond capacity
+  - Expected: submit blocks or backpressure is signaled until capacity frees
+
+- **Ack stream closes cleanly (if SDK exposes)**
+  - Description: consume acks() while submitting batches
+  - Expected: acks stream yields all acks in order and closes on session close
+
+- **Ack stream yields successes then errors (if SDK exposes)**
+  - Description: induce a fatal append error mid-stream (e.g., seq_num mismatch)
+  - Expected: acks() yields prior successful acks, then terminates with error
+
+- **Writable/pipe errors propagate (if SDK exposes)**
+  - Description: pipe batches including a known failing batch (e.g., seq_num mismatch or oversized record)
+  - Expected: pipeTo rejects; acks stream reports error; session fails
+
+- **Ack timeout aborts inflight (if SDK exposes)**
+  - Description: submit batch and simulate no acknowledgments until timeout
+  - Expected: ack future rejects with timeout; session aborts inflight
+
+- **Non-monotonic ack detection (if SDK exposes)**
+  - Description: simulate transport returning non-increasing seq_num acks
+  - Expected: session aborts with fatal error; subsequent submits fail
+
+#### Read Session Behavior (if SDK exposes)
+
+- **NextReadPosition updates**
+  - Description: read several records from a session
+  - Expected: NextReadPosition advances after records are consumed
+
+- **Read session supports bytes format**
+  - Description: read session with bytes format
+  - Expected: bodies are byte arrays and decode to original content
+
+- **Wait at tail honors wait duration**
+  - Description: start at tail with wait set and no new records
+  - Expected: session stays open at least wait duration, then completes with no records
+
+#### Record Format Consistency (if SDK exposes string/bytes APIs)
+
+- **Mixed string/bytes across unary + session**
+  - Description: append mixed string/bytes via unary and session APIs, then read as string and bytes
+  - Expected: bodies and headers match original content in both formats
 
 > **Note:** Test all client/session creation patterns the SDK exposes (builders, factory methods, config objects, etc.)
 

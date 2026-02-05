@@ -53,6 +53,10 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - 0 is treated as default (1000)
   - Values > 1000 are clamped to 1000
 
+- `include_deleted` (boolean, optional, SDK iterator only)
+  - SDK-only flag used by listAll/Iter to include basins in deleting state
+  - Not sent as an API query parameter; implemented client-side
+
 ### Response Codes
 
 - `200` — Success
@@ -88,6 +92,10 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Parameters: `prefix=test-`
   - Expected: 200, only basins with names starting with "test-"
 
+- **Prefix with no matches**
+  - Parameters: `prefix=does-not-exist-`
+  - Expected: 200, empty list
+
 - **List with start_after**
   - Parameters: `start_after=my-basin`
   - Expected: 200, basins lexicographically after "my-basin"
@@ -99,6 +107,16 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - **Pagination**
   - Parameters: `start_after` + `limit`
   - Expected: 200, correct pagination behavior
+
+- **Iterator/listAll (if SDK exposes)**
+  - Setup: create multiple basins with a common prefix
+  - Input: SDK iterator/listAll with that prefix
+  - Expected: all matching basins returned exactly once
+
+- **Include deleting basins (iterator)**
+  - Setup: delete a basin
+  - Input: SDK listAll/Iter with `include_deleted=true`
+  - Expected: basin may appear with `state=deleting`
 
 - **Empty prefix**
   - Parameters: `prefix=""`
@@ -321,6 +339,10 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Name too short**
   - Input: `{"basin": "short"}` (< 8 chars)
+  - Expected: 400
+
+- **Name empty**
+  - Input: `{"basin": ""}`
   - Expected: 400
 
 - **Name too long**

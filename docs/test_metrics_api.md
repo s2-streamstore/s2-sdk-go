@@ -159,6 +159,10 @@
   - Input: `set=active-basins`
   - Expected: 422 (`invalid`)
 
+- **Nil args / missing request object (SDK validation)**
+  - Input: call metrics method with nil/undefined args
+  - Expected: SDK validation error
+
 - **Missing set parameter**
   - Input: `start=<now-1h>`, `end=<now>`
   - Expected: Error (SDK validation or 400)
@@ -313,7 +317,13 @@
 - **Missing both start and end**
   - Input: valid basin, `set=storage`
   - Expected: 422 (`invalid`)
+- **Empty basin name**
+  - Input: `basin=""`, valid `set`, `start`, `end`
+  - Expected: SDK validation error or 422 (`invalid`)
 
+- **Nil args / missing request object (SDK validation)**
+  - Input: call basin metrics method with nil/undefined args
+  - Expected: SDK validation error
 - **Start > end**
   - Input: valid basin, `set=storage`, `start=<now>`, `end=<now-1h>`
   - Expected: 422 (`invalid`)
@@ -329,7 +339,6 @@
 - **Storage interval invalid**
   - Input: valid basin, `set=storage`, `interval=minute`
   - Expected: 422 (`invalid`, only hour supported)
-
 - **Empty time range returns empty data**
   - Input: valid basin, `set=storage`, `start=<far-past>`, `end=<far-past+1h>` (before any data)
   - Expected: 200, empty or zero values (not an error)
@@ -427,7 +436,17 @@
 - **Missing both start and end**
   - Input: valid basin/stream, `set=storage`
   - Expected: 422 (`invalid`)
+- **Empty basin name**
+  - Input: `basin=""`, valid `stream`, `set`, `start`, `end`
+  - Expected: SDK validation error or 422 (`invalid`)
 
+- **Empty stream name**
+  - Input: valid `basin`, `stream=""`, `set`, `start`, `end`
+  - Expected: SDK validation error or 422 (`invalid`)
+
+- **Nil args / missing request object (SDK validation)**
+  - Input: call stream metrics method with nil/undefined args
+  - Expected: SDK validation error
 - **Start > end**
   - Input: valid basin/stream, `set=storage`, `start=<now>`, `end=<now-1h>`
   - Expected: 422 (`invalid`)
@@ -443,7 +462,6 @@
 - **Storage interval invalid**
   - Input: valid basin/stream, `set=storage`, `interval=hour`
   - Expected: 422 (`invalid`, only minute supported)
-
 - **Empty time range returns empty data**
   - Input: valid basin/stream, `set=storage`, `start=<far-past>`, `end=<far-past+1h>`
   - Expected: 200, empty or zero values (not an error)

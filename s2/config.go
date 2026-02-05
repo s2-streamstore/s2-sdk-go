@@ -1,7 +1,10 @@
 package s2
 
 import (
+	"fmt"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -9,23 +12,30 @@ const (
 	envAccessToken     = "S2_ACCESS_TOKEN"
 	envAccountEndpoint = "S2_ACCOUNT_ENDPOINT"
 	envBasinEndpoint   = "S2_BASIN_ENDPOINT"
+
+	schemeHTTP               = "http"
+	schemeHTTPS              = "https"
+	defaultScheme            = schemeHTTPS
+	defaultAPIPath           = "/v1"
+	basinPlaceholder         = "{basin}"
+	basinPlaceholderSentinel = "__basin__"
 )
 
 type Config struct {
 	AccessToken     string
-	AccountEndpoint string // Parsed with scheme, without /v1
-	BasinEndpoint   string // Template (with {basin}) or fixed endpoint, without /v1
+	AccountTemplate *endpointTemplate
+	BasinTemplate   *endpointTemplate
 }
 
 // Returns ClientOptions with endpoints from S2_ACCOUNT_ENDPOINT and S2_BASIN_ENDPOINT.
 func LoadConfigFromEnv() *ClientOptions {
 	cfg := loadConfigFromEnv()
 	opts := &ClientOptions{}
-	if cfg.AccountEndpoint != "" {
-		opts.BaseURL = cfg.AccountEndpoint + "/v1"
+	if cfg.AccountTemplate != nil {
+		opts.BaseURL = cfg.AccountTemplate.baseURL("")
 	}
-	if cfg.BasinEndpoint != "" {
-		opts.MakeBasinBaseURL = makeBasinURLFunc(cfg.BasinEndpoint)
+	if cfg.BasinTemplate != nil {
+		opts.MakeBasinBaseURL = cfg.BasinTemplate.baseURL
 	}
 	return opts
 }
@@ -35,59 +45,160 @@ func loadConfigFromEnv() *Config {
 		AccessToken: os.Getenv(envAccessToken),
 	}
 
-	if endpoint := os.Getenv(envAccountEndpoint); endpoint != "" {
-		cfg.AccountEndpoint = parseEndpoint(endpoint)
+	if endpoint, ok := lookupEnvNonEmpty(envAccountEndpoint); ok {
+		template, err := newEndpointTemplate(endpoint)
+		if err != nil {
+			panic(err)
+		}
+		cfg.AccountTemplate = template
 	}
 
-	if endpoint := os.Getenv(envBasinEndpoint); endpoint != "" {
-		cfg.BasinEndpoint = parseEndpoint(endpoint)
+	if endpoint, ok := lookupEnvNonEmpty(envBasinEndpoint); ok {
+		template, err := newEndpointTemplate(endpoint)
+		if err != nil {
+			panic(err)
+		}
+		cfg.BasinTemplate = template
 	}
 
 	return cfg
 }
 
-func parseEndpoint(endpoint string) string {
-	endpoint = strings.TrimSpace(endpoint)
-	if endpoint == "" {
-		return ""
-	}
+var schemePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
-	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		if isLocalhost(endpoint) {
-			endpoint = "http://" + endpoint
-		} else {
-			endpoint = "https://" + endpoint
-		}
-	}
-
-	endpoint = strings.TrimRight(endpoint, "/")
-	endpoint = strings.TrimSuffix(endpoint, "/v1")
-
-	return endpoint
+type endpointTemplate struct {
+	raw                  string
+	scheme               string
+	hostTemplate         string
+	port                 string
+	pathTemplate         string
+	explicitPathProvided bool
 }
 
-func isLocalhost(endpoint string) bool {
-	host := endpoint
-	if idx := strings.Index(endpoint, ":"); idx != -1 {
-		host = endpoint[:idx]
+func lookupEnvNonEmpty(name string) (string, bool) {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return "", false
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", false
+	}
+	return value, true
+}
+
+func hasExplicitPath(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	authorityStart := 0
+	if schemePattern.MatchString(trimmed) {
+		if idx := strings.Index(trimmed, "://"); idx != -1 {
+			authorityStart = idx + len("://")
+		}
+	}
+	delim := firstDelimiterIndex(trimmed, authorityStart)
+	return delim != -1 && trimmed[delim] == '/'
+}
+
+func firstDelimiterIndex(value string, fromIndex int) int {
+	slash := strings.Index(value[fromIndex:], "/")
+	query := strings.Index(value[fromIndex:], "?")
+	hash := strings.Index(value[fromIndex:], "#")
+	min := -1
+	for _, idx := range []int{slash, query, hash} {
+		if idx == -1 {
+			continue
+		}
+		abs := fromIndex + idx
+		if min == -1 || abs < min {
+			min = abs
+		}
+	}
+	return min
+}
+
+func isLocalhostEndpoint(input string) bool {
+	authority := input
+	if idx := firstDelimiterIndex(input, 0); idx != -1 {
+		authority = input[:idx]
+	}
+	host := authority
+	if idx := strings.Index(host, "@"); idx != -1 {
+		host = host[idx+1:]
+	}
+	if idx := strings.Index(host, ":"); idx != -1 {
+		host = host[:idx]
 	}
 	return host == "localhost" || host == "127.0.0.1"
 }
 
-func makeBasinURLFunc(basinEndpoint string) func(basin string) string {
-	if basinEndpoint == "" {
-		return nil
-	}
-
-	if strings.Contains(basinEndpoint, "{basin}") {
-		// Template mode: substitute {basin} with actual basin name
-		return func(basin string) string {
-			return strings.ReplaceAll(basinEndpoint, "{basin}", basin) + "/v1"
+func normalizeForURLParsing(input string) string {
+	trimmed := strings.TrimSpace(input)
+	withScheme := trimmed
+	if !schemePattern.MatchString(trimmed) {
+		scheme := defaultScheme
+		if isLocalhostEndpoint(trimmed) {
+			scheme = schemeHTTP
 		}
+		withScheme = fmt.Sprintf("%s://%s", scheme, trimmed)
+	}
+	return strings.ReplaceAll(withScheme, basinPlaceholder, basinPlaceholderSentinel)
+}
+
+func newEndpointTemplate(endpoint string) (*endpointTemplate, error) {
+	raw := strings.TrimSpace(endpoint)
+	if raw == "" {
+		return nil, fmt.Errorf("endpoint cannot be empty")
 	}
 
-	// Fixed endpoint mode: use the same endpoint for all basins
-	return func(basin string) string {
-		return basinEndpoint + "/v1"
+	explicitPathProvided := hasExplicitPath(raw)
+	parsed, err := url.Parse(normalizeForURLParsing(raw))
+	if err != nil {
+		return nil, err
 	}
+
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != schemeHTTP && scheme != schemeHTTPS {
+		return nil, fmt.Errorf("unsupported scheme: %s", parsed.Scheme)
+	}
+
+	hostTemplate := strings.ReplaceAll(parsed.Hostname(), basinPlaceholderSentinel, basinPlaceholder)
+	port := parsed.Port()
+
+	parsedPath := strings.ReplaceAll(parsed.EscapedPath(), basinPlaceholderSentinel, basinPlaceholder)
+	parsedQuery := ""
+	if parsed.RawQuery != "" {
+		parsedQuery = "?" + strings.ReplaceAll(parsed.RawQuery, basinPlaceholderSentinel, basinPlaceholder)
+	}
+	parsedFragment := ""
+	if parsed.Fragment != "" {
+		parsedFragment = "#" + strings.ReplaceAll(parsed.Fragment, basinPlaceholderSentinel, basinPlaceholder)
+	}
+
+	pathTemplate := defaultAPIPath
+	if explicitPathProvided {
+		pathTemplate = parsedPath + parsedQuery + parsedFragment
+	}
+
+	return &endpointTemplate{
+		raw:                  raw,
+		scheme:               scheme,
+		hostTemplate:         hostTemplate,
+		port:                 port,
+		pathTemplate:         pathTemplate,
+		explicitPathProvided: explicitPathProvided,
+	}, nil
+}
+
+func (t *endpointTemplate) baseURL(basin string) string {
+	host := t.hostTemplate
+	path := t.pathTemplate
+	if basin != "" {
+		host = strings.ReplaceAll(host, basinPlaceholder, basin)
+		path = strings.ReplaceAll(path, basinPlaceholder, url.PathEscape(basin))
+	}
+
+	authority := host
+	if t.port != "" {
+		authority = host + ":" + t.port
+	}
+	return fmt.Sprintf("%s://%s%s", t.scheme, authority, path)
 }

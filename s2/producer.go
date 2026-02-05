@@ -13,14 +13,23 @@ import (
 //   - ticket.Ack() returns an IndexedAppendAck that resolves once the record is durable.
 type Producer struct {
 	batcher *Batcher
-	session *AppendSession
+	session appendSessionAPI
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 }
 
+type appendSessionAPI interface {
+	Submit(input *AppendInput) (*SubmitFuture, error)
+	Close() error
+}
+
 // Create a new [Producer].
 func NewProducer(ctx context.Context, batcher *Batcher, session *AppendSession) *Producer {
+	return newProducerWithSession(ctx, batcher, session)
+}
+
+func newProducerWithSession(ctx context.Context, batcher *Batcher, session appendSessionAPI) *Producer {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -44,19 +53,14 @@ func NewProducer(ctx context.Context, batcher *Batcher, session *AppendSession) 
 // accepted. Blocks if the underlying [AppendSession] is at capacity.
 func (p *Producer) Submit(record AppendRecord) (*RecordSubmitFuture, error) {
 	ticketCh := make(chan *RecordSubmitTicket, 1)
-	errCh := make(chan error, 1)
-
 	resultCh := make(chan *producerOutcome, 1)
 
-	go func() {
-		if err := p.batcher.Add(record, resultCh); err != nil {
-			errCh <- err
-			return
-		}
-		ticketCh <- &RecordSubmitTicket{ackCh: resultCh}
-	}()
+	if err := p.batcher.Add(record, resultCh); err != nil {
+		return nil, err
+	}
+	ticketCh <- &RecordSubmitTicket{ackCh: resultCh}
 
-	return &RecordSubmitFuture{ticketCh: ticketCh, errCh: errCh}, nil
+	return &RecordSubmitFuture{ticketCh: ticketCh}, nil
 }
 
 func (p *Producer) consumeBatches() {
@@ -130,7 +134,6 @@ func (p *Producer) Close() error {
 // Represents a pending single-record submission to a [Producer].
 type RecordSubmitFuture struct {
 	ticketCh <-chan *RecordSubmitTicket
-	errCh    <-chan error
 }
 
 // Blocks until the record is accepted and returns a [RecordSubmitTicket].
@@ -141,8 +144,6 @@ func (f *RecordSubmitFuture) Wait(ctx context.Context) (*RecordSubmitTicket, err
 	select {
 	case ticket := <-f.ticketCh:
 		return ticket, nil
-	case err := <-f.errCh:
-		return nil, err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

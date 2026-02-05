@@ -251,6 +251,47 @@ func TestListStreams_Iterator(t *testing.T) {
 	t.Logf("Iterated over %d streams", count)
 }
 
+func TestListStreams_IteratorIncludeDeleted(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Iterator includes deleting streams when requested")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("test-iter-del")
+
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	err = basin.Streams.Delete(ctx, streamName)
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	iter := basin.Streams.Iter(ctx, &s2.ListStreamsArgs{
+		Prefix:         string(streamName),
+		IncludeDeleted: true,
+	})
+
+	found := false
+	for iter.Next() {
+		stream := iter.Value()
+		if stream.Name == streamName {
+			found = true
+			if stream.DeletedAt == nil {
+				t.Errorf("Expected deleted_at to be set for deleting stream")
+			}
+		}
+	}
+	if err := iter.Err(); err != nil {
+		t.Fatalf("Iterator error: %v", err)
+	}
+	if !found {
+		t.Log("Stream already fully deleted (not returned by iterator)")
+	}
+}
+
 func TestListStreams_InvalidStartAfterLessThanPrefix(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -1550,7 +1591,6 @@ func TestRead_NonExistentStream(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-
 func TestRead_WithClampTrue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -2284,7 +2324,6 @@ func TestAppend_HeaderWithEmptyName_AdditionalHeaders(t *testing.T) {
 	}
 	t.Logf("Got expected 422 error: %v", err)
 }
-
 
 func TestRead_FromTail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
@@ -3101,7 +3140,7 @@ func TestClient_Initialization(t *testing.T) {
 func TestClient_InvalidToken(t *testing.T) {
 	t.Log("Testing: Client with invalid token")
 
-	client := s2.New("invalid-token", nil)
+	client := s2.New("invalid-token", s2.LoadConfigFromEnv())
 
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
@@ -3452,4 +3491,144 @@ func TestReadSession_Cancel(t *testing.T) {
 	}
 
 	t.Log("Read session cancelled successfully")
+}
+
+func TestProducer_BytesRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Producer bytes round-trip")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("prod-bytes")
+	defer deleteStream(ctx, basin, streamName)
+
+	if _, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName}); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	session, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		t.Fatalf("AppendSession failed: %v", err)
+	}
+	defer session.Close()
+
+	batcher := s2.NewBatcher(ctx, &s2.BatchingOptions{
+		MaxRecords:    1,
+		Linger:        5 * time.Millisecond,
+		ChannelBuffer: 10,
+	})
+	producer := s2.NewProducer(ctx, batcher, session)
+	defer producer.Close()
+
+	payload := []byte{0x00, 0x01, 0x02, 0xff}
+	future, err := producer.Submit(s2.AppendRecord{Body: payload})
+	if err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait failed: %v", err)
+	}
+	ack, err := ticket.Ack(ctx)
+	if err != nil {
+		t.Fatalf("ack failed: %v", err)
+	}
+	t.Logf("Appended seq_num=%d", ack.SeqNum())
+
+	batch, err := stream.Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Uint64(ack.SeqNum()),
+		Count:  s2.Uint64(1),
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if len(batch.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(batch.Records))
+	}
+	if !bytes.Equal(batch.Records[0].Body, payload) {
+		t.Fatalf("record body mismatch: got %v want %v", batch.Records[0].Body, payload)
+	}
+}
+
+func TestProducer_GaplessReadSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Producer + ReadSession gapless read")
+
+	basin := getSharedBasin(t)
+	streamName := uniqueStreamName("prod-gapless")
+	defer deleteStream(ctx, basin, streamName)
+
+	if _, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName}); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	stream := basin.Stream(streamName)
+	session, err := stream.AppendSession(ctx, nil)
+	if err != nil {
+		t.Fatalf("AppendSession failed: %v", err)
+	}
+	defer session.Close()
+
+	batcher := s2.NewBatcher(ctx, &s2.BatchingOptions{
+		MaxRecords:    4,
+		Linger:        5 * time.Millisecond,
+		ChannelBuffer: 100,
+	})
+	producer := s2.NewProducer(ctx, batcher, session)
+	defer producer.Close()
+
+	const total = 20
+	readSession, err := stream.ReadSession(ctx, &s2.ReadOptions{
+		SeqNum: s2.Uint64(0),
+		Count:  s2.Uint64(total),
+		Wait:   s2.Int32(5),
+	})
+	if err != nil {
+		t.Fatalf("ReadSession failed: %v", err)
+	}
+	defer readSession.Close()
+
+	appendErrCh := make(chan error, 1)
+	go func() {
+		for i := range total {
+			future, err := producer.Submit(s2.AppendRecord{Body: []byte(fmt.Sprintf("rec-%d", i))})
+			if err != nil {
+				appendErrCh <- err
+				return
+			}
+			ticket, err := future.Wait(ctx)
+			if err != nil {
+				appendErrCh <- err
+				return
+			}
+			if _, err := ticket.Ack(ctx); err != nil {
+				appendErrCh <- err
+				return
+			}
+		}
+		close(appendErrCh)
+	}()
+
+	seqs := make([]uint64, 0, total)
+	for len(seqs) < total && readSession.Next() {
+		rec := readSession.Record()
+		seqs = append(seqs, rec.SeqNum)
+	}
+	if err := readSession.Err(); err != nil {
+		t.Fatalf("ReadSession error: %v", err)
+	}
+	if len(seqs) != total {
+		t.Fatalf("expected %d records, got %d", total, len(seqs))
+	}
+	for i := range total {
+		if seqs[i] != uint64(i) {
+			t.Fatalf("expected seq %d at index %d, got %d", i, i, seqs[i])
+		}
+	}
+
+	if err, ok := <-appendErrCh; ok && err != nil {
+		t.Fatalf("producer error: %v", err)
+	}
 }

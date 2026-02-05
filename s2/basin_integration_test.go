@@ -382,6 +382,48 @@ func TestListBasins_Iterator(t *testing.T) {
 	t.Logf("Iterated over %d basins", count)
 }
 
+func TestListBasins_IteratorIncludeDeleted(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: Iterator includes deleting basins when requested")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-iter-del")
+
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: basinName})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	err = client.Basins.Delete(ctx, basinName)
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	iter := client.Basins.Iter(ctx, &s2.ListBasinsArgs{
+		Prefix:         string(basinName),
+		IncludeDeleted: true,
+	})
+
+	found := false
+	for iter.Next() {
+		basin := iter.Value()
+		if basin.Name == basinName {
+			found = true
+			if basin.State != s2.BasinStateDeleting {
+				t.Errorf("Expected state=deleting, got %s", basin.State)
+			}
+		}
+	}
+	if err := iter.Err(); err != nil {
+		t.Fatalf("Iterator error: %v", err)
+	}
+	if !found {
+		t.Log("Basin already fully deleted (not returned by iterator)")
+	}
+}
+
 // --- Create Basin Tests ---
 
 func TestCreateBasin_Minimal(t *testing.T) {
@@ -1388,6 +1430,101 @@ func TestCreateStreamOnRead_AutoCreate(t *testing.T) {
 		t.Fatalf("Expected stream to exist after read, got error: %v", err)
 	}
 	t.Log("Verified stream auto-created on read")
+}
+
+func TestCreateStreamOnRead_DefaultStreamConfigApplied(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: Auto-created stream on read inherits default stream config")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-csord")
+	defer deleteBasin(ctx, client, basinName)
+
+	retentionAge := int64(3600)
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
+		Basin: basinName,
+		Config: &s2.BasinConfig{
+			CreateStreamOnRead: s2.Ptr(true),
+			DefaultStreamConfig: &s2.StreamConfig{
+				RetentionPolicy: &s2.RetentionPolicy{Age: &retentionAge},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := s2.StreamName(fmt.Sprintf("auto-read-default-%d", time.Now().UnixNano()))
+	defer basin.Streams.Delete(ctx, streamName)
+
+	_, err = basin.Stream(streamName).Read(ctx, &s2.ReadOptions{
+		SeqNum: s2.Ptr[uint64](0),
+	})
+
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 416 {
+		t.Fatalf("Expected 416 error for empty stream auto-created on read, got: %v", err)
+	}
+
+	cfg, err := basin.Streams.GetConfig(ctx, streamName)
+	if err != nil {
+		t.Fatalf("GetConfig failed: %v", err)
+	}
+	if cfg.RetentionPolicy == nil || cfg.RetentionPolicy.Age == nil {
+		t.Fatalf("Expected retention_policy.age to be set on auto-created stream")
+	}
+	if *cfg.RetentionPolicy.Age != retentionAge {
+		t.Errorf("Expected retention_policy.age=%d, got %d", retentionAge, *cfg.RetentionPolicy.Age)
+	}
+	t.Log("Verified default stream config applied on auto-created stream (read)")
+}
+
+func TestCreateStream_InheritsBasinDefaultConfig(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: Stream created explicitly inherits basin default stream config")
+
+	client := testClient(t)
+	basinName := uniqueBasinName("test-csdflt")
+	defer deleteBasin(ctx, client, basinName)
+
+	retentionAge := int64(3600)
+	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
+		Basin: basinName,
+		Config: &s2.BasinConfig{
+			DefaultStreamConfig: &s2.StreamConfig{
+				RetentionPolicy: &s2.RetentionPolicy{Age: &retentionAge},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	waitForBasinActive(ctx, t, client, basinName)
+
+	basin := client.Basin(string(basinName))
+	streamName := s2.StreamName(fmt.Sprintf("explicit-default-%d", time.Now().UnixNano()))
+	defer basin.Streams.Delete(ctx, streamName)
+
+	_, err = basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: streamName})
+	if err != nil {
+		t.Fatalf("Create stream failed: %v", err)
+	}
+
+	cfg, err := basin.Streams.GetConfig(ctx, streamName)
+	if err != nil {
+		t.Fatalf("GetConfig failed: %v", err)
+	}
+	if cfg.RetentionPolicy == nil || cfg.RetentionPolicy.Age == nil {
+		t.Fatalf("Expected retention_policy.age to be set on explicitly created stream")
+	}
+	if *cfg.RetentionPolicy.Age != retentionAge {
+		t.Errorf("Expected retention_policy.age=%d, got %d", retentionAge, *cfg.RetentionPolicy.Age)
+	}
+	t.Log("Verified default stream config applied on explicitly created stream")
 }
 
 func TestCreateStreamOnAppend_DefaultStreamConfigApplied(t *testing.T) {
