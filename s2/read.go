@@ -129,11 +129,12 @@ type streamReader struct {
 
 	baseOpts *ReadOptions
 
-	stateMu    sync.RWMutex
-	lastTail   *StreamPosition
-	nextSeq    uint64
-	nextTS     uint64
-	hasNextSeq bool
+	stateMu        sync.RWMutex
+	lastTail       *StreamPosition
+	lastTailAt     time.Time
+	nextSeq        uint64
+	nextTS         uint64
+	hasNextSeq     bool
 
 	respBody       io.ReadCloser
 	bodyMu         sync.Mutex
@@ -319,17 +320,25 @@ func (r *streamReader) closeRespBody() {
 }
 
 func (r *streamReader) buildAttemptOptions(plannedDelay time.Duration) *ReadOptions {
+	r.stateMu.RLock()
+	hasNextSeq := r.hasNextSeq
+	nextSeq := r.nextSeq
+	recordsRead := r.recordsRead
+	bytesRead := r.bytesRead
+	lastTailAt := r.lastTailAt
+	r.stateMu.RUnlock()
+
 	var opts *ReadOptions
 	if r.baseOpts != nil {
 		opts = cloneReadSessionOptions(r.baseOpts)
-	} else if r.hasNextSeq {
+	} else if hasNextSeq {
 		opts = &ReadOptions{}
 	} else {
 		return nil
 	}
 
-	if r.hasNextSeq {
-		seq := r.nextSeq
+	if hasNextSeq {
+		seq := nextSeq
 		opts.SeqNum = &seq
 		opts.Timestamp = nil
 		opts.TailOffset = nil
@@ -339,34 +348,40 @@ func (r *streamReader) buildAttemptOptions(plannedDelay time.Duration) *ReadOpti
 		if r.baseOpts.Count != nil {
 			baseCount := *r.baseOpts.Count
 			var remaining uint64
-			if r.recordsRead >= baseCount {
+			if recordsRead >= baseCount {
 				remaining = 0
 			} else {
-				remaining = baseCount - r.recordsRead
+				remaining = baseCount - recordsRead
 			}
 			opts.Count = Uint64(remaining)
 		}
 		if r.baseOpts.Bytes != nil {
 			baseBytes := *r.baseOpts.Bytes
 			var remaining uint64
-			if r.bytesRead >= baseBytes {
+			if bytesRead >= baseBytes {
 				remaining = 0
 			} else {
-				remaining = baseBytes - r.bytesRead
+				remaining = baseBytes - bytesRead
 			}
 			opts.Bytes = Uint64(remaining)
 		}
+		// Remaining wait budget for retry:
+		// During catchup (tail not yet observed), the full wait is sent.
+		// Once tailing, the wait budget is depleted based on time since
+		// the last batch with tail info, which approximates how long the
+		// server has been in its long polling state.
 		if r.baseOpts.Wait != nil {
 			waitSecs := *r.baseOpts.Wait
-			elapsed := time.Since(r.lastRecordTime) + plannedDelay
-			elapsedSecs := int32(elapsed / time.Second)
-			var remaining int32
-			if elapsedSecs >= waitSecs {
-				remaining = 0
-			} else {
-				remaining = waitSecs - elapsedSecs
+			if !lastTailAt.IsZero() {
+				elapsed := time.Since(lastTailAt) + plannedDelay
+				elapsedSecs := int32(elapsed / time.Second)
+				if elapsedSecs >= waitSecs {
+					waitSecs = 0
+				} else {
+					waitSecs = waitSecs - elapsedSecs
+				}
 			}
-			opts.Wait = Int32(remaining)
+			opts.Wait = Int32(waitSecs)
 		}
 	}
 
@@ -491,6 +506,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		if batch.Tail != nil {
 			logInfo(r.logger, "s2 read session batch tail", "stream", string(r.streamClient.name), "seq_num", batch.Tail.SeqNum)
 			r.stateMu.Lock()
+			r.lastTailAt = time.Now()
 			r.lastTail = batch.Tail
 			r.stateMu.Unlock()
 		}
@@ -514,10 +530,10 @@ func (r *streamReader) handleRecord(ctx context.Context, record SequencedRecord)
 
 	logInfo(r.logger, "s2 read session record", "stream", string(r.streamClient.name), "seq_num", record.SeqNum)
 
+	r.stateMu.Lock()
 	r.recordsRead++
 	r.bytesRead += MeteredSequencedRecordBytes(record)
 	r.lastRecordTime = time.Now()
-	r.stateMu.Lock()
 	r.nextSeq = record.SeqNum + 1
 	r.hasNextSeq = true
 	r.nextTS = record.Timestamp

@@ -26,6 +26,8 @@ func TestReadSessionBuildAttemptOptions_AdjustsLimits(t *testing.T) {
 		recordsRead:    4,
 		bytesRead:      40,
 		lastRecordTime: now.Add(-2 * time.Second),
+		lastTail:       &StreamPosition{SeqNum: 100},
+		lastTailAt:     now.Add(-2 * time.Second),
 		hasNextSeq:     true,
 		nextSeq:        7,
 	}
