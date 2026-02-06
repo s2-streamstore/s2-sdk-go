@@ -129,11 +129,12 @@ type streamReader struct {
 
 	baseOpts *ReadOptions
 
-	stateMu    sync.RWMutex
-	lastTail   *StreamPosition
-	nextSeq    uint64
-	nextTS     uint64
-	hasNextSeq bool
+	stateMu        sync.RWMutex
+	lastTail       *StreamPosition
+	lastTailAt time.Time
+	nextSeq        uint64
+	nextTS         uint64
+	hasNextSeq     bool
 
 	respBody       io.ReadCloser
 	bodyMu         sync.Mutex
@@ -356,17 +357,27 @@ func (r *streamReader) buildAttemptOptions(plannedDelay time.Duration) *ReadOpti
 			}
 			opts.Bytes = Uint64(remaining)
 		}
+		// Remaining wait budget for retry:
+		// During catchup (tail not yet observed), the full wait is sent.
+		// Once tailing, the wait budget is depleted based on time since
+		// the last batch with tail info, which approximates how long the
+		// server has been in its long polling state.
 		if r.baseOpts.Wait != nil {
 			waitSecs := *r.baseOpts.Wait
-			elapsed := time.Since(r.lastRecordTime) + plannedDelay
-			elapsedSecs := int32(elapsed / time.Second)
-			var remaining int32
-			if elapsedSecs >= waitSecs {
-				remaining = 0
-			} else {
-				remaining = waitSecs - elapsedSecs
+			r.stateMu.RLock()
+			lastTailAt := r.lastTailAt
+			tailObserved := r.lastTail != nil
+			r.stateMu.RUnlock()
+			if tailObserved {
+				elapsed := time.Since(lastTailAt) + plannedDelay
+				elapsedSecs := int32(elapsed / time.Second)
+				if elapsedSecs >= waitSecs {
+					waitSecs = 0
+				} else {
+					waitSecs = waitSecs - elapsedSecs
+				}
 			}
-			opts.Wait = Int32(remaining)
+			opts.Wait = Int32(waitSecs)
 		}
 	}
 
@@ -491,6 +502,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		if batch.Tail != nil {
 			logInfo(r.logger, "s2 read session batch tail", "stream", string(r.streamClient.name), "seq_num", batch.Tail.SeqNum)
 			r.stateMu.Lock()
+			r.lastTailAt = time.Now()
 			r.lastTail = batch.Tail
 			r.stateMu.Unlock()
 		}
