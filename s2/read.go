@@ -464,7 +464,28 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		tailTimer.Reset(tailWatchdogTimeout)
 	}
 
+	type frameResult struct {
+		frame *internalframing.S2SFrame
+		err   error
+	}
+	frameCh := make(chan frameResult, 1)
+
+	go func() {
+		for {
+			frame, err := frameReader.ReadFrame()
+			select {
+			case frameCh <- frameResult{frame: frame, err: err}:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	for {
+		var fr frameResult
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -476,30 +497,29 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 				Status:  408,
 				Code:    "TIMEOUT",
 			}
-		default:
+		case fr = <-frameCh:
 		}
 
-		frame, err := frameReader.ReadFrame()
-		if err != nil {
-			if err == io.EOF || isExpectedFrameReadError(err) {
+		if fr.err != nil {
+			if fr.err == io.EOF || isExpectedFrameReadError(fr.err) {
 				return nil
 			}
-			logError(r.logger, "s2 read session frame error", "stream", string(r.streamClient.name), "error", err)
-			return fmt.Errorf("read frame error: %w", err)
+			logError(r.logger, "s2 read session frame error", "stream", string(r.streamClient.name), "error", fr.err)
+			return fmt.Errorf("read frame error: %w", fr.err)
 		}
 
-		body, err := frame.DecompressedBody()
+		body, err := fr.frame.DecompressedBody()
 		if err != nil {
 			logError(r.logger, "s2 read session frame decompress error", "stream", string(r.streamClient.name), "error", err)
 			return err
 		}
 
-		if frame.Terminal {
-			if frame.StatusCode != nil && *frame.StatusCode >= 400 {
-				logError(r.logger, "s2 read session terminal error", "stream", string(r.streamClient.name), "status", *frame.StatusCode)
-				return decodeAPIError(*frame.StatusCode, body)
+		if fr.frame.Terminal {
+			if fr.frame.StatusCode != nil && *fr.frame.StatusCode >= 400 {
+				logError(r.logger, "s2 read session terminal error", "stream", string(r.streamClient.name), "status", *fr.frame.StatusCode)
+				return decodeAPIError(*fr.frame.StatusCode, body)
 			}
-			logInfo(r.logger, "s2 read session terminal ok", "stream", string(r.streamClient.name), "status", frame.StatusCode)
+			logInfo(r.logger, "s2 read session terminal ok", "stream", string(r.streamClient.name), "status", fr.frame.StatusCode)
 			return nil
 		}
 
