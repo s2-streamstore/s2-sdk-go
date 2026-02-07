@@ -33,6 +33,14 @@ type ErrorInfo struct {
 	Message string `json:"message"`
 }
 
+func newValidationError(message string) *S2Error {
+	return &S2Error{
+		Message: message,
+		Code:    "VALIDATION",
+		Origin:  "sdk",
+	}
+}
+
 func (e *S2Error) Error() string {
 	if e.Code != "" {
 		return fmt.Sprintf("S2 API error %s: %s (HTTP %d)", e.Code, e.Message, e.Status)

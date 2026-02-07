@@ -2063,8 +2063,8 @@ func TestAppend_FencingTokenTooLong(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 422 error for fencing token too long, got: %v", err)
+	if !errors.As(err, &s2Err) || s2Err.Origin != "sdk" {
+		t.Fatalf("Expected SDK validation error for fencing token too long, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
 }
