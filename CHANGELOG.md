@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.13.0] - 2026-02-07
+
+### Features
+
+- Ignore command records arg ([#188](https://github.com/s2-streamstore/s2-sdk-go/issues/188))
+
+### Bug Fixes
+
+- Idle AppendSession closing with NoSideEffects policy ([#186](https://github.com/s2-streamstore/s2-sdk-go/issues/186))
+- Deplete read session wait budget on retry ([#187](https://github.com/s2-streamstore/s2-sdk-go/issues/187))
+- Make append session ack timeout retryable instead of fatal ([#189](https://github.com/s2-streamstore/s2-sdk-go/issues/189))
+- Graceful drain on append session close ([#190](https://github.com/s2-streamstore/s2-sdk-go/issues/190))
+- Validate fencing token length ([#191](https://github.com/s2-streamstore/s2-sdk-go/issues/191))
+- Include tail position in RangeNotSatisfiableError ([#192](https://github.com/s2-streamstore/s2-sdk-go/issues/192))
+- Make read session tail watchdog effective during blocking IO ([#193](https://github.com/s2-streamstore/s2-sdk-go/issues/193))
+
+### Miscellaneous Tasks
+
+- More tests and endpoint parsing updates ([#185](https://github.com/s2-streamstore/s2-sdk-go/issues/185))
+
 ## [v0.12.0] - 2026-02-04
 
 ### Features
@@ -19,6 +39,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Test updates ([#182](https://github.com/s2-streamstore/s2-sdk-go/issues/182))
+- *(release)* V0.12.0 ([#184](https://github.com/s2-streamstore/s2-sdk-go/issues/184))
 
 ## [v0.11.9] - 2026-01-31
 
