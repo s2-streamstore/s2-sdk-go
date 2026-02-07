@@ -616,13 +616,21 @@ func (r *AppendSession) checkTimeouts() {
 		r.stateMu.RLock()
 		attempt := r.currentAttempt
 		r.stateMu.RUnlock()
-		err := fmt.Errorf("append request timed out after %v (attempt %d): %w",
-			elapsed, attempt, ErrTimeout)
 		logError(r.streamClient.logger, "append request timeout",
 			"stream", string(r.streamClient.name),
 			"elapsed", elapsed,
 			"attempt", attempt)
-		r.failAllInflight(err)
+
+		r.sessionMu.RLock()
+		session := r.currentSession
+		r.sessionMu.RUnlock()
+
+		r.handleSessionError(session, &S2Error{
+			Message: fmt.Sprintf("append request timed out after %v (attempt %d)", elapsed, attempt),
+			Code:    "REQUEST_TIMEOUT",
+			Status:  408,
+			Origin:  "sdk",
+		})
 	}
 }
 
