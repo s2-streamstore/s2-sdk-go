@@ -33,6 +33,10 @@ type AppendSession struct {
 
 	readWG sync.WaitGroup
 
+	closing      atomic.Bool
+	closeDone    chan struct{}
+	closeDoneOnce sync.Once
+
 	closed    bool
 	closedMu  sync.RWMutex
 	closeOnce sync.Once
@@ -63,6 +67,7 @@ func (s *StreamClient) AppendSession(ctx context.Context, opts *AppendSessionOpt
 		pumpCtx:      pumpCtx,
 		pumpCancel:   pumpCancel,
 		pumpDone:     make(chan struct{}),
+		closeDone:    make(chan struct{}),
 		wakeup:       make(chan struct{}, 1),
 	}
 
@@ -76,6 +81,10 @@ func (s *StreamClient) AppendSession(ctx context.Context, opts *AppendSessionOpt
 // Call ticket.Wait() to get a [SubmitFuture] for the [AppendAck] once the batch is durable.
 // This method applies backpressure and will block if capacity limits are reached.
 func (r *AppendSession) Submit(input *AppendInput) (*SubmitFuture, error) {
+	if r.closing.Load() {
+		return nil, ErrSessionClosed
+	}
+
 	prepared, size, err := prepareAppendInput(input)
 	if err != nil {
 		return nil, err
@@ -101,22 +110,39 @@ func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *Subm
 	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}
 }
 
-// Closes the session.
+// Closes the session after all inflight batches have been acknowledged.
+// New submissions after Close is called will be rejected.
 func (r *AppendSession) Close() error {
 	var closeErr error
 
 	r.closeOnce.Do(func() {
+		r.closing.Store(true)
+		r.capacity.Close()
+
+		r.wakeupPump()
+		<-r.closeDone
+
 		r.closedMu.Lock()
-		if !r.closed {
-			r.closed = true
-			r.capacity.Close()
-		}
+		r.closed = true
 		r.closedMu.Unlock()
 
 		r.pumpCancel()
 		<-r.pumpDone
 
+		// Fail any entries that raced into the queue between drain completion
+		// and pump exit (Submit that passed the closing check just before Close).
 		r.inflightMu.Lock()
+		for _, entry := range r.inflightQueue {
+			if atomic.CompareAndSwapInt32(&entry.completed, 0, 1) {
+				select {
+				case entry.resultCh <- &inflightResult{err: ErrSessionClosed}:
+					close(entry.resultCh)
+				default:
+				}
+			}
+			r.capacity.release(entry.meteredBytes)
+		}
+		r.inflightQueue = nil
 		sessionsToClose := r.collectSessionRefsLocked()
 		r.inflightMu.Unlock()
 
@@ -178,12 +204,40 @@ func (r *AppendSession) runPump() {
 
 		case <-r.wakeup:
 			r.processInflightQueue()
+			if r.shouldStopPump() {
+				return
+			}
 
 		case <-ticker.C:
 			r.processInflightQueue()
 			r.checkTimeouts()
+			if r.shouldStopPump() {
+				return
+			}
 		}
 	}
+}
+
+func (r *AppendSession) shouldStopPump() bool {
+	if !r.closing.Load() {
+		return false
+	}
+
+	r.inflightMu.RLock()
+	empty := len(r.inflightQueue) == 0
+	r.inflightMu.RUnlock()
+	if !empty {
+		return false
+	}
+
+	r.signalCloseDone()
+	return true
+}
+
+func (r *AppendSession) signalCloseDone() {
+	r.closeDoneOnce.Do(func() {
+		close(r.closeDone)
+	})
 }
 
 func (r *AppendSession) wakeupPump() {
@@ -567,6 +621,8 @@ func (r *AppendSession) failAllInflightLocked(err error) []*transportAppendSessi
 		r.capacity.Close()
 	}
 	r.closedMu.Unlock()
+	r.closing.Store(true)
+	r.signalCloseDone()
 	r.pumpCancel()
 	return sessionsToClose
 }
