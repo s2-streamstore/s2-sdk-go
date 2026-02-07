@@ -93,6 +93,90 @@ func (r *staticStatusRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	}, nil
 }
 
+func TestIsCommandRecord(t *testing.T) {
+	// Fence command record: single header with empty name
+	fence := SequencedRecord{
+		SeqNum:  0,
+		Body:    []byte("token"),
+		Headers: []Header{{Name: nil, Value: []byte("fence")}},
+	}
+	if !fence.IsCommandRecord() {
+		t.Fatal("expected fence to be a command record")
+	}
+
+	// Trim command record: single header with empty name
+	trim := SequencedRecord{
+		SeqNum:  1,
+		Body:    []byte{0, 0, 0, 0, 0, 0, 0, 2},
+		Headers: []Header{{Name: nil, Value: []byte("trim")}},
+	}
+	if !trim.IsCommandRecord() {
+		t.Fatal("expected trim to be a command record")
+	}
+
+	// Normal record: not a command record
+	normal := SequencedRecord{
+		SeqNum:  2,
+		Body:    []byte("hello"),
+		Headers: []Header{{Name: []byte("key"), Value: []byte("val")}},
+	}
+	if normal.IsCommandRecord() {
+		t.Fatal("expected normal record not to be a command record")
+	}
+
+	// No headers: not a command record
+	noHeaders := SequencedRecord{SeqNum: 3, Body: []byte("hello")}
+	if noHeaders.IsCommandRecord() {
+		t.Fatal("expected record with no headers not to be a command record")
+	}
+
+	// Multiple headers: not a command record
+	multiHeaders := SequencedRecord{
+		SeqNum:  4,
+		Headers: []Header{{Name: nil, Value: []byte("fence")}, {Name: []byte("x"), Value: []byte("y")}},
+	}
+	if multiHeaders.IsCommandRecord() {
+		t.Fatal("expected record with multiple headers not to be a command record")
+	}
+}
+
+func TestFilterCommandRecords(t *testing.T) {
+	batch := &ReadBatch{
+		Records: []SequencedRecord{
+			{SeqNum: 0, Body: []byte("a")},
+			{SeqNum: 1, Body: []byte("token"), Headers: []Header{{Name: nil, Value: []byte("fence")}}},
+			{SeqNum: 2, Body: []byte("b")},
+		},
+	}
+
+	batch.filterCommandRecords()
+
+	if len(batch.Records) != 2 {
+		t.Fatalf("expected 2 records after filter, got %d", len(batch.Records))
+	}
+	if batch.Records[0].SeqNum != 0 {
+		t.Fatalf("expected first record seq_num 0, got %d", batch.Records[0].SeqNum)
+	}
+	if batch.Records[1].SeqNum != 2 {
+		t.Fatalf("expected second record seq_num 2, got %d", batch.Records[1].SeqNum)
+	}
+}
+
+func TestFilterCommandRecords_NoCommandRecords(t *testing.T) {
+	batch := &ReadBatch{
+		Records: []SequencedRecord{
+			{SeqNum: 0, Body: []byte("a")},
+			{SeqNum: 1, Body: []byte("b")},
+		},
+	}
+
+	batch.filterCommandRecords()
+
+	if len(batch.Records) != 2 {
+		t.Fatalf("expected 2 records unchanged, got %d", len(batch.Records))
+	}
+}
+
 func TestReadSessionMaxAttempts(t *testing.T) {
 	rt := &staticStatusRoundTripper{
 		status: http.StatusInternalServerError,

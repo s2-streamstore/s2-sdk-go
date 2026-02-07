@@ -379,6 +379,12 @@ type SequencedRecord struct {
 	Timestamp uint64
 }
 
+// Reports whether this record is a command record (fence or trim).
+// Command records have exactly one header with an empty name.
+func (r SequencedRecord) IsCommandRecord() bool {
+	return len(r.Headers) == 1 && len(r.Headers[0].Name) == 0
+}
+
 type ReadBatch struct {
 	// Records that are durably sequenced on the stream, retrieved based on the requested criteria.
 	// This can only be empty in response to a unary read (i.e. not SSE),
@@ -387,6 +393,17 @@ type ReadBatch struct {
 	// Sequence number that will be assigned to the next record on the stream, and timestamp of the last record.
 	// This will only be present when reading recent records.
 	Tail *StreamPosition `json:"tail,omitempty"`
+}
+
+// Removes command records from the batch in place.
+func (b *ReadBatch) filterCommandRecords() {
+	filtered := b.Records[:0]
+	for _, r := range b.Records {
+		if !r.IsCommandRecord() {
+			filtered = append(filtered, r)
+		}
+	}
+	b.Records = filtered
 }
 
 // Record to be appended to a stream.

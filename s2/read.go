@@ -46,6 +46,10 @@ type ReadOptions struct {
 	// Start reading from the tail if the requested position is beyond it.
 	// Otherwise, a `416 Range Not Satisfiable` response is returned.
 	Clamp *bool `json:"clamp,omitempty"`
+	// Whether to filter out command records (fence, trim) from read results.
+	// Filtering is performed client-side.
+	// Defaults to false.
+	IgnoreCommandRecords bool `json:"-"`
 }
 
 func buildReadQueryParams(opts *ReadOptions) string {
@@ -111,6 +115,10 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 
 	if err != nil {
 		return nil, fmt.Errorf("unary read failed: %w", err)
+	}
+
+	if opts != nil && opts.IgnoreCommandRecords {
+		batch.filterCommandRecords()
 	}
 
 	return batch, nil
@@ -511,7 +519,11 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.stateMu.Unlock()
 		}
 
+		ignoreCommands := r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords
 		for _, record := range batch.Records {
+			if ignoreCommands && record.IsCommandRecord() {
+				continue
+			}
 			if err := r.handleRecord(ctx, record); err != nil {
 				return err
 			}

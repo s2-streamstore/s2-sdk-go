@@ -122,8 +122,9 @@ and error mapping).
   - Expected: retry uses remaining count/bytes (no duplicate records)
 
 - **Read session retry adjusts wait/seq_num (if SDK auto-retries streaming reads)**
-  - Setup: streaming read returns some records then transient error
-  - Expected: retry decrements remaining wait time and resumes from next seq_num
+  - Setup: streaming read returns some records (with tail in batch) then transient error
+  - Expected: retry decrements remaining wait based on time since last tail observation and resumes from next seq_num
+  - Note: wait is only depleted once tail has been observed (tailing mode). During catchup (no tail seen), full wait is sent.
 
 - **Read session retry keeps absolute until unchanged**
   - Setup: streaming read with `until` set; transient error after some records
@@ -141,6 +142,10 @@ and error mapping).
   - Setup: multiple retries after partial reads
   - Expected: remaining count reflects total records read across attempts (no over-subtraction)
 
+- **Read session wait not depleted during catchup**
+  - Setup: streaming read with wait set; records returned without tail; transient error
+  - Expected: retry sends full wait (tail not yet observed, still in catchup)
+
 - **Append session retry behavior (if SDK exposes)**
   - Setup: send-phase transient error then success
   - Expected: session recovers and acks resolve
@@ -151,7 +156,41 @@ and error mapping).
 
 ---
 
-## 4. Batching Helpers (if SDK exposes Batcher/BatchTransform)
+## 4. Command Record Filtering (if SDK exposes IgnoreCommandRecords)
+
+### Test Cases
+
+- **IsCommandRecord detection**
+  - Input: fence command record (single header with empty name, value "fence")
+  - Expected: detected as command record
+  - Input: trim command record (single header with empty name, value "trim")
+  - Expected: detected as command record
+  - Input: normal record with non-empty header name
+  - Expected: not a command record
+  - Input: record with no headers
+  - Expected: not a command record
+  - Input: record with multiple headers (one empty name)
+  - Expected: not a command record (must be exactly one header)
+
+- **Filter command records from batch**
+  - Setup: batch with [data, fence, data] records
+  - Expected: after filtering, only the 2 data records remain with correct seq_nums
+
+- **Filter is a no-op when no command records present**
+  - Setup: batch with only data records
+  - Expected: all records preserved
+
+- **Read session filters command records when enabled**
+  - Setup: stream returns [data, fence, data]; ignore_command_records=true
+  - Expected: consumer sees only the 2 data records
+
+- **Read session does not filter when disabled**
+  - Setup: stream returns [data, fence, data]; ignore_command_records=false or unset
+  - Expected: consumer sees all 3 records
+
+---
+
+## 5. Batching Helpers (if SDK exposes Batcher/BatchTransform)
 
 ### Test Cases
 
@@ -195,7 +234,7 @@ and error mapping).
 
 ---
 
-## 5. Producer (if SDK exposes a Producer abstraction)
+## 6. Producer (if SDK exposes a Producer abstraction)
 
 ### Test Cases
 
