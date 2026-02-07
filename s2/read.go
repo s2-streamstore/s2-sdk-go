@@ -46,7 +46,7 @@ type ReadOptions struct {
 	// Start reading from the tail if the requested position is beyond it.
 	// Otherwise, a `416 Range Not Satisfiable` response is returned.
 	Clamp *bool `json:"clamp,omitempty"`
-	// Whether to filter out command records (fence, trim) from read results.
+	// Whether to filter out command records from read results.
 	// Filtering is performed client-side.
 	// Defaults to false.
 	IgnoreCommandRecords bool `json:"-"`
@@ -519,9 +519,9 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.stateMu.Unlock()
 		}
 
-		ignoreCommands := r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords
+		ignoreCommandRecords := r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords
 		for _, record := range batch.Records {
-			if ignoreCommands && record.IsCommandRecord() {
+			if ignoreCommandRecords && record.IsCommandRecord() {
 				continue
 			}
 			if err := r.handleRecord(ctx, record); err != nil {

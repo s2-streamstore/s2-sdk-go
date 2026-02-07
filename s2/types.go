@@ -379,7 +379,7 @@ type SequencedRecord struct {
 	Timestamp uint64
 }
 
-// Reports whether this record is a command record (fence or trim).
+// Reports whether this record is a command record.
 // Command records have exactly one header with an empty name.
 func (r SequencedRecord) IsCommandRecord() bool {
 	return len(r.Headers) == 1 && len(r.Headers[0].Name) == 0
