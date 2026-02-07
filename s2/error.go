@@ -126,17 +126,28 @@ func (e *FencingTokenMismatchError) Unwrap() error {
 
 type RangeNotSatisfiableError struct {
 	*S2Error
+	// The current tail position of the stream, if available.
+	Tail *StreamPosition
 }
 
-func newRangeNotSatisfiableError(status int, message string) *RangeNotSatisfiableError {
-	return &RangeNotSatisfiableError{
+func newRangeNotSatisfiableError(status int, body []byte) *RangeNotSatisfiableError {
+	err := &RangeNotSatisfiableError{
 		S2Error: &S2Error{
-			Message: message,
+			Message: http.StatusText(status),
 			Status:  status,
 			Code:    "RANGE_NOT_SATISFIABLE",
 			Origin:  "server",
 		},
 	}
+	if len(body) > 0 {
+		var tailResp TailResponse
+		if json.Unmarshal(body, &tailResp) == nil {
+			err.Tail = &tailResp.Tail
+		} else {
+			err.Message = string(body)
+		}
+	}
+	return err
 }
 
 func (e *RangeNotSatisfiableError) Unwrap() error {
@@ -164,11 +175,7 @@ func decodeAPIError(status int, body []byte) error {
 	}
 
 	if status == http.StatusRequestedRangeNotSatisfiable {
-		message := http.StatusText(status)
-		if len(trimmed) > 0 {
-			message = string(trimmed)
-		}
-		return newRangeNotSatisfiableError(status, message)
+		return newRangeNotSatisfiableError(status, trimmed)
 	}
 
 	if len(trimmed) > 0 {
