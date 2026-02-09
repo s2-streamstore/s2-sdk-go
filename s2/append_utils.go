@@ -6,7 +6,10 @@ import (
 	"fmt"
 )
 
-const defaultMaxInflightBytes = 10 * 1024 * 1024 // 10 MiB
+const (
+	defaultMaxInflightBytes = 10 * 1024 * 1024 // 10 MiB
+	minInflightBytes        = 1 * 1024 * 1024  // 1 MiB
+)
 
 // Represents a pending batch submission to an [AppendSession].
 // Call [SubmitFuture.Wait] to block until the batch is accepted.
@@ -113,13 +116,15 @@ func MeteredBatchBytes(records []AppendRecord) int64 {
 	return int64(total)
 }
 
-func applyAppendSessionDefaults(opts *AppendSessionOptions, baseRetry *RetryConfig) *AppendSessionOptions {
+func applyAppendSessionDefaults(opts *AppendSessionOptions, baseRetry *RetryConfig) (*AppendSessionOptions, error) {
 	if opts == nil {
 		opts = &AppendSessionOptions{}
 	}
 
 	if opts.MaxInflightBytes == 0 {
 		opts.MaxInflightBytes = defaultMaxInflightBytes
+	} else if opts.MaxInflightBytes < minInflightBytes {
+		return nil, newValidationError(fmt.Sprintf("maxInflightBytes must be at least %d", minInflightBytes))
 	}
 
 	var effective RetryConfig
@@ -163,5 +168,5 @@ func applyAppendSessionDefaults(opts *AppendSessionOptions, baseRetry *RetryConf
 	cfgCopy := effective
 	opts.RetryConfig = &cfgCopy
 
-	return opts
+	return opts, nil
 }

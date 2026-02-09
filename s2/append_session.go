@@ -56,7 +56,10 @@ func (s *StreamClient) AppendSession(ctx context.Context, opts *AppendSessionOpt
 		ctx = context.Background()
 	}
 
-	opts = applyAppendSessionDefaults(opts, s.basinClient.retryConfig)
+	opts, err := applyAppendSessionDefaults(opts, s.basinClient.retryConfig)
+	if err != nil {
+		return nil, err
+	}
 	pumpCtx, pumpCancel := context.WithCancel(ctx)
 
 	session := &AppendSession{
