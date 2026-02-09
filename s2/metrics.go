@@ -71,8 +71,8 @@ func (m *MetricsClient) Basin(ctx context.Context, args *BasinMetricsArgs) (*Met
 	if args == nil {
 		return nil, fmt.Errorf("basin metrics args cannot be nil")
 	}
-	if args.Basin == "" {
-		return nil, fmt.Errorf("basin name cannot be empty")
+	if err := validateBasinName(BasinName(args.Basin)); err != nil {
+		return nil, err
 	}
 	endpoint := fmt.Sprintf("%s/metrics/%s", m.client.baseURL, url.PathEscape(args.Basin))
 	return m.fetchMetrics(ctx, endpoint, string(args.Set), args.Start, args.End, args.Interval)
@@ -85,8 +85,11 @@ func (m *MetricsClient) Stream(ctx context.Context, args *StreamMetricsArgs) (*M
 	if args == nil {
 		return nil, fmt.Errorf("stream metrics args cannot be nil")
 	}
-	if args.Basin == "" || args.Stream == "" {
-		return nil, fmt.Errorf("basin and stream names cannot be empty")
+	if err := validateBasinName(BasinName(args.Basin)); err != nil {
+		return nil, err
+	}
+	if err := validateStreamName(StreamName(args.Stream)); err != nil {
+		return nil, err
 	}
 	endpoint := fmt.Sprintf("%s/metrics/%s/%s",
 		m.client.baseURL,
