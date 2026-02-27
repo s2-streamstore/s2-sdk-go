@@ -70,6 +70,7 @@ type transportAppendSession struct {
 	errorsCh      chan error
 	closed        chan struct{}
 	closeOnce     sync.Once
+	mu            sync.Mutex
 	conn          *http.Response
 	requestWriter io.WriteCloser
 }
@@ -120,34 +121,64 @@ func (p *transportAppendSession) start(ctx context.Context) error {
 		req.Header.Set("s2-basin", basinName)
 	}
 
+	p.mu.Lock()
+	p.requestWriter = pipeWriter
+	p.mu.Unlock()
+
+	go p.connectAndRead(req, pipeWriter)
+
+	return nil
+}
+
+func (p *transportAppendSession) connectAndRead(req *http.Request, pipeWriter *io.PipeWriter) {
 	resp, err := p.streamClient.getHTTPClient().Do(req)
 	if err != nil {
-		pipeWriter.Close()
+		pipeWriter.CloseWithError(err)
 
 		if isStreamResetError(err) {
-			return makeStreamResetError(err, "pipelined session")
+			p.reportError(makeStreamResetError(err, "pipelined session"))
+			return
 		}
 
 		logError(p.streamClient.logger, "pipelined append session connect error",
 			"stream", string(p.streamClient.name),
 			"error", err)
-
-		return fmt.Errorf("failed to connect: %w", err)
+		p.reportError(fmt.Errorf("failed to connect: %w", err))
+		return
 	}
 
 	if resp.StatusCode >= 400 {
-		pipeWriter.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		resp.Body.Close()
-		return decodeAPIError(resp.StatusCode, body)
+		apiErr := decodeAPIError(resp.StatusCode, body)
+		pipeWriter.CloseWithError(apiErr)
+		p.reportError(apiErr)
+		return
 	}
 
+	p.mu.Lock()
+	select {
+	case <-p.closed:
+		p.mu.Unlock()
+		resp.Body.Close()
+		return
+	default:
+	}
 	p.conn = resp
-	p.requestWriter = pipeWriter
+	p.mu.Unlock()
 
-	go p.readAcksLoop()
+	go p.readAcksLoop(resp)
+}
 
-	return nil
+func (p *transportAppendSession) reportError(err error) {
+	if err == nil {
+		return
+	}
+	select {
+	case <-p.closed:
+	case p.errorsCh <- err:
+	default:
+	}
 }
 
 func (p *transportAppendSession) appendInput(input *AppendInput) error {
@@ -166,7 +197,14 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 
 	frame := framing.CreateFrame(data, false, p.streamClient.basinClient.compression)
 
-	if _, err := p.requestWriter.Write(frame); err != nil {
+	p.mu.Lock()
+	writer := p.requestWriter
+	p.mu.Unlock()
+	if writer == nil {
+		return ErrSessionClosed
+	}
+
+	if _, err := writer.Write(frame); err != nil {
 		return fmt.Errorf("failed to write frame: %w", err)
 	}
 
@@ -177,22 +215,30 @@ func (p *transportAppendSession) Close() error {
 	p.closeOnce.Do(func() {
 		close(p.closed)
 
-		if p.requestWriter != nil {
-			p.requestWriter.Close()
+		p.mu.Lock()
+		requestWriter := p.requestWriter
+		p.requestWriter = nil
+		conn := p.conn
+		p.conn = nil
+		p.mu.Unlock()
+
+		if requestWriter != nil {
+			requestWriter.Close()
 		}
-		if p.conn != nil {
-			p.conn.Body.Close()
+		if conn != nil {
+			conn.Body.Close()
 		}
 	})
 	return nil
 }
 
-func (p *transportAppendSession) readAcksLoop() {
+func (p *transportAppendSession) readAcksLoop(conn *http.Response) {
+	defer conn.Body.Close()
 	defer p.Close()
 	defer close(p.acksCh)
 	defer close(p.errorsCh)
 
-	frameReader := framing.NewFrameReader(p.conn.Body)
+	frameReader := framing.NewFrameReader(conn.Body)
 
 	for {
 		frame, err := frameReader.ReadFrame()
