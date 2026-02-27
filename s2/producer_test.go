@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -337,6 +338,52 @@ func (s *delayedAckSession) Close() error {
 	return nil
 }
 
+type delayedAcceptanceSession struct {
+	release chan struct{}
+	started chan struct{}
+	submits atomic.Int32
+	seqMu   sync.Mutex
+	nextSeq uint64
+}
+
+func (s *delayedAcceptanceSession) Submit(input *AppendInput) (*SubmitFuture, error) {
+	s.submits.Add(1)
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+
+	ticketCh := make(chan *BatchSubmitTicket, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		<-s.release
+
+		s.seqMu.Lock()
+		start := s.nextSeq
+		s.nextSeq += uint64(len(input.Records))
+		end := s.nextSeq
+		s.seqMu.Unlock()
+
+		ackCh := make(chan *inflightResult, 1)
+		ticketCh <- &BatchSubmitTicket{ackCh: ackCh}
+		ackCh <- &inflightResult{
+			ack: &AppendAck{
+				Start: StreamPosition{SeqNum: start},
+				End:   StreamPosition{SeqNum: end},
+				Tail:  StreamPosition{SeqNum: end},
+			},
+		}
+		close(ackCh)
+	}()
+
+	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}, nil
+}
+
+func (s *delayedAcceptanceSession) Close() error {
+	return nil
+}
+
 func TestProducer_CloseDrains(t *testing.T) {
 	ctx := context.Background()
 	batcher := NewBatcher(ctx, &BatchingOptions{
@@ -378,6 +425,60 @@ func TestProducer_CloseDrains(t *testing.T) {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatalf("close did not drain in time")
+	}
+}
+
+func TestProducer_SubmitWaitsForAcceptanceBeforeNextBatch(t *testing.T) {
+	ctx := context.Background()
+	batcher := NewBatcher(ctx, &BatchingOptions{
+		MaxRecords:    1,
+		Linger:        time.Hour,
+		ChannelBuffer: 1,
+	})
+	session := &delayedAcceptanceSession{
+		release: make(chan struct{}),
+		started: make(chan struct{}, 10),
+	}
+	producer := newProducerWithSession(ctx, batcher, session)
+
+	submitDone := make(chan struct{})
+	go func() {
+		defer close(submitDone)
+		for range 5 {
+			if _, err := producer.Submit(AppendRecord{Body: []byte("x")}); err != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-session.started:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("timed out waiting for first session submit")
+	}
+
+	select {
+	case <-session.started:
+		t.Fatalf("expected producer to block on first batch acceptance before submitting next batch")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	select {
+	case <-submitDone:
+		t.Fatalf("expected submit loop to block before acceptance is released")
+	default:
+	}
+
+	close(session.release)
+
+	select {
+	case <-submitDone:
+	case <-time.After(time.Second):
+		t.Fatalf("submit loop did not complete after acceptance release")
+	}
+
+	if err := producer.Close(); err != nil {
+		t.Fatalf("producer close failed: %v", err)
 	}
 }
 
