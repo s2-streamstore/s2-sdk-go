@@ -156,14 +156,14 @@ func (p *transportAppendSession) connectAndRead(req *http.Request, pipeWriter *i
 		return
 	}
 
+	p.mu.Lock()
 	select {
 	case <-p.closed:
+		p.mu.Unlock()
 		resp.Body.Close()
 		return
 	default:
 	}
-
-	p.mu.Lock()
 	p.conn = resp
 	p.mu.Unlock()
 
@@ -233,6 +233,7 @@ func (p *transportAppendSession) Close() error {
 }
 
 func (p *transportAppendSession) readAcksLoop(conn *http.Response) {
+	defer conn.Body.Close()
 	defer p.Close()
 	defer close(p.acksCh)
 	defer close(p.errorsCh)
