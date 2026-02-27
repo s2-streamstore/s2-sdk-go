@@ -146,6 +146,63 @@ func TestWithAppendRetries_NoSideEffectsNetworkError(t *testing.T) {
 	}
 }
 
+func TestWithRetries_ContextCancellationStopsRetryLoop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	cfg := &RetryConfig{MaxAttempts: 5, MinBaseDelay: 200 * time.Millisecond, MaxBaseDelay: 200 * time.Millisecond}
+
+	attempts := 0
+	start := time.Now()
+	_, err := withRetries(ctx, cfg, nil, func() (int, error) {
+		attempts++
+		return 0, &S2Error{Status: 503, Message: "Service Unavailable"}
+	})
+	duration := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation error, got %v", err)
+	}
+	if duration > 350*time.Millisecond {
+		t.Fatalf("expected retry loop to stop quickly after cancellation, took %v", duration)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt before cancellation, got %d", attempts)
+	}
+}
+
+func TestWithAppendRetries_ContextCancellationStopsRetryLoop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	cfg := &RetryConfig{
+		MaxAttempts:       5,
+		MinBaseDelay:      200 * time.Millisecond,
+		MaxBaseDelay:      200 * time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}
+
+	attempts := 0
+	start := time.Now()
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{MatchSeqNum: Uint64(0)}, func() (*AppendAck, error) {
+		attempts++
+		return nil, &S2Error{Status: 503, Message: "Service Unavailable"}
+	})
+	duration := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation error, got %v", err)
+	}
+	if duration > 350*time.Millisecond {
+		t.Fatalf("expected append retry loop to stop quickly after cancellation, took %v", duration)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 append attempt before cancellation, got %d", attempts)
+	}
+}
+
 func TestWithRetries_NonS2ErrorPropagates(t *testing.T) {
 	ctx := context.Background()
 	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}

@@ -53,9 +53,17 @@ func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.L
 	var lastError error
 
 	for attemptNo := 1; attemptNo <= maxAttempts; attemptNo++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return zero, ctxErr
+		}
+
 		result, err := operation()
 		if err == nil {
 			return result, nil
+		}
+
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return zero, ctxErr
 		}
 
 		lastError = err
@@ -68,7 +76,9 @@ func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.L
 					"max_attempts", maxAttempts,
 					"delay", delay,
 					"error", err)
-				time.Sleep(delay)
+				if err := waitForRetryBackoff(ctx, delay); err != nil {
+					return zero, err
+				}
 
 				continue
 			}
@@ -99,10 +109,28 @@ func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.L
 			"status", s2Err.Status,
 			"code", s2Err.Code,
 			"error", s2Err.Message)
-		time.Sleep(delay)
+		if err := waitForRetryBackoff(ctx, delay); err != nil {
+			return zero, err
+		}
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return zero, ctxErr
 	}
 
 	return zero, lastError
+}
+
+func waitForRetryBackoff(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func calculateRetryBackoff(config *RetryConfig, attempt int) time.Duration {
@@ -173,9 +201,17 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 	var lastError error
 
 	for attemptNo := 1; attemptNo <= maxAttempts; attemptNo++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+
 		result, err := operation()
 		if err == nil {
 			return result, nil
+		}
+
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
 
 		lastError = err
@@ -194,7 +230,9 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 				"max_attempts", maxAttempts,
 				"delay", delay,
 				"error", err)
-			time.Sleep(delay)
+			if err := waitForRetryBackoff(ctx, delay); err != nil {
+				return nil, err
+			}
 
 			continue
 		}
@@ -209,7 +247,13 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 			"max_attempts", maxAttempts,
 			"delay", delay,
 			"error", err)
-		time.Sleep(delay)
+		if err := waitForRetryBackoff(ctx, delay); err != nil {
+			return nil, err
+		}
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
 	}
 
 	return nil, lastError
