@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	defaultMaxInflightBytes = 10 * 1024 * 1024 // 10 MiB
-	minInflightBytes        = 1 * 1024 * 1024  // 1 MiB
+	defaultMaxInflightBytes = 5 * 1024 * 1024 // 5 MiB
+	minInflightBytes        = 1 * 1024 * 1024 // 1 MiB
 )
 
 // Represents a pending batch submission to an [AppendSession].
