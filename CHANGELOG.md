@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.13.1] - 2026-02-28
+
+### Bug Fixes
+
+- Enforce 1 MiB minimum for MaxInflightBytes ([#195](https://github.com/s2-streamstore/s2-sdk-go/issues/195))
+- Honor context cancellation in retry backoff ([#207](https://github.com/s2-streamstore/s2-sdk-go/issues/207))
+- Enforce producer backpressure at append acceptance ([#208](https://github.com/s2-streamstore/s2-sdk-go/issues/208))
+- Avoid append session startup deadlock in transport handshake ([#209](https://github.com/s2-streamstore/s2-sdk-go/issues/209))
+- Set default max inflight to 5 MiB ([#210](https://github.com/s2-streamstore/s2-sdk-go/issues/210))
+
 ## [v0.13.0] - 2026-02-07
 
 ### Features
@@ -21,6 +31,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - More tests and endpoint parsing updates ([#185](https://github.com/s2-streamstore/s2-sdk-go/issues/185))
+- *(release)* V0.13.0 ([#194](https://github.com/s2-streamstore/s2-sdk-go/issues/194))
 
 ## [v0.12.0] - 2026-02-04
 
