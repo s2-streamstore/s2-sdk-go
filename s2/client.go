@@ -29,8 +29,7 @@ const (
 )
 
 type ClientOptions struct {
-	// Endpoint or base URL used for account-scoped requests.
-	// If no path is present, "/v1" is inferred.
+	// Endpoint to connect to S2.
 	// Defaults to "https://aws.s2.dev/v1".
 	BaseURL string
 	// HTTP client used for requests.
