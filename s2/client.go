@@ -29,13 +29,15 @@ const (
 )
 
 type ClientOptions struct {
-	// URL to connect to S2.
+	// Endpoint or base URL used for account-scoped requests.
+	// If no path is present, "/v1" is inferred.
 	// Defaults to "https://aws.s2.dev/v1".
 	BaseURL string
 	// HTTP client used for requests.
 	HTTPClient *http.Client
 	// Allows customizing how basin endpoints are constructed.
-	// If provided, this function is used to derive the base URL for a given basin.
+	// If provided, this function is used to derive the endpoint or base URL for a given basin.
+	// Returned values are normalized the same way as BaseURL, inferring "/v1" when no path is present.
 	// When provided, the "s2-basin" HTTP header is automatically included in basin-scoped requests.
 	MakeBasinBaseURL func(basin string) string
 	// Retry configuration.
@@ -83,12 +85,9 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		opts = &ClientOptions{}
 	}
 
-	baseURL := opts.BaseURL
-	if opts.BaseURL != "" && strings.TrimSpace(opts.BaseURL) == "" {
-		panic("base URL cannot be empty")
-	}
-	if baseURL == "" {
-		baseURL = DefaultBaseURL
+	baseURL := DefaultBaseURL
+	if opts.BaseURL != "" {
+		baseURL = normalizeBaseURL(opts.BaseURL)
 	}
 
 	httpClient := opts.HTTPClient
@@ -124,6 +123,10 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	if makeBasinBaseURL == nil {
 		makeBasinBaseURL = func(basin string) string {
 			return fmt.Sprintf("https://%s.b.aws.s2.dev/v1", basin)
+		}
+	} else {
+		makeBasinBaseURL = func(basin string) string {
+			return normalizeBaseURL(opts.MakeBasinBaseURL(basin))
 		}
 	}
 

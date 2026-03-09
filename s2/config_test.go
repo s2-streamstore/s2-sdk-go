@@ -14,13 +14,13 @@ func TestEndpointTemplate_DefaultsToV1(t *testing.T) {
 	}
 }
 
-func TestEndpointTemplate_DefaultsToHTTPForLocalhost(t *testing.T) {
+func TestEndpointTemplate_DefaultsToHTTPSForLocalhost(t *testing.T) {
 	template, err := newEndpointTemplate("localhost:8443")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := template.baseURL("")
-	want := "http://localhost:8443/v1"
+	want := "https://localhost:8443/v1"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
@@ -77,5 +77,29 @@ func TestEndpointTemplate_BasinPlaceholderPathEncoding(t *testing.T) {
 func TestEndpointTemplate_RejectsEmpty(t *testing.T) {
 	if _, err := newEndpointTemplate("   "); err == nil {
 		t.Fatal("expected error for empty endpoint")
+	}
+}
+
+func TestLoadConfigFromEnv_RejectsWhitespaceEndpoints(t *testing.T) {
+	testCases := []struct {
+		name    string
+		envName string
+	}{
+		{name: "account endpoint", envName: envAccountEndpoint},
+		{name: "basin endpoint", envName: envBasinEndpoint},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.envName, "   ")
+
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected panic for empty endpoint")
+				}
+			}()
+
+			loadConfigFromEnv()
+		})
 	}
 }

@@ -45,7 +45,7 @@ func loadConfigFromEnv() *Config {
 		AccessToken: os.Getenv(envAccessToken),
 	}
 
-	if endpoint, ok := lookupEnvNonEmpty(envAccountEndpoint); ok {
+	if endpoint, ok := os.LookupEnv(envAccountEndpoint); ok {
 		template, err := newEndpointTemplate(endpoint)
 		if err != nil {
 			panic(err)
@@ -53,7 +53,7 @@ func loadConfigFromEnv() *Config {
 		cfg.AccountTemplate = template
 	}
 
-	if endpoint, ok := lookupEnvNonEmpty(envBasinEndpoint); ok {
+	if endpoint, ok := os.LookupEnv(envBasinEndpoint); ok {
 		template, err := newEndpointTemplate(endpoint)
 		if err != nil {
 			panic(err)
@@ -73,17 +73,6 @@ type endpointTemplate struct {
 	port                 string
 	pathTemplate         string
 	explicitPathProvided bool
-}
-
-func lookupEnvNonEmpty(name string) (string, bool) {
-	value, ok := os.LookupEnv(name)
-	if !ok {
-		return "", false
-	}
-	if strings.TrimSpace(value) == "" {
-		return "", false
-	}
-	return value, true
 }
 
 func hasExplicitPath(input string) bool {
@@ -115,30 +104,11 @@ func firstDelimiterIndex(value string, fromIndex int) int {
 	return min
 }
 
-func isLocalhostEndpoint(input string) bool {
-	authority := input
-	if idx := firstDelimiterIndex(input, 0); idx != -1 {
-		authority = input[:idx]
-	}
-	host := authority
-	if idx := strings.Index(host, "@"); idx != -1 {
-		host = host[idx+1:]
-	}
-	if idx := strings.Index(host, ":"); idx != -1 {
-		host = host[:idx]
-	}
-	return host == "localhost" || host == "127.0.0.1"
-}
-
 func normalizeForURLParsing(input string) string {
 	trimmed := strings.TrimSpace(input)
 	withScheme := trimmed
 	if !schemePattern.MatchString(trimmed) {
-		scheme := defaultScheme
-		if isLocalhostEndpoint(trimmed) {
-			scheme = schemeHTTP
-		}
-		withScheme = fmt.Sprintf("%s://%s", scheme, trimmed)
+		withScheme = fmt.Sprintf("%s://%s", defaultScheme, trimmed)
 	}
 	return strings.ReplaceAll(withScheme, basinPlaceholder, basinPlaceholderSentinel)
 }
@@ -201,4 +171,12 @@ func (t *endpointTemplate) baseURL(basin string) string {
 		authority = host + ":" + t.port
 	}
 	return fmt.Sprintf("%s://%s%s", t.scheme, authority, path)
+}
+
+func normalizeBaseURL(endpoint string) string {
+	template, err := newEndpointTemplate(endpoint)
+	if err != nil {
+		panic(err)
+	}
+	return template.baseURL("")
 }
