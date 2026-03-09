@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -182,10 +183,8 @@ func (p *transportAppendSession) reportError(err error) {
 }
 
 func (p *transportAppendSession) appendInput(input *AppendInput) error {
-	select {
-	case <-p.closed:
+	if p.isClosed() {
 		return ErrSessionClosed
-	default:
 	}
 
 	pbInput := convertAppendInputToProto(input)
@@ -205,6 +204,9 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 	}
 
 	if _, err := writer.Write(frame); err != nil {
+		if p.isClosed() || errors.Is(err, io.ErrClosedPipe) {
+			return ErrSessionClosed
+		}
 		return fmt.Errorf("failed to write frame: %w", err)
 	}
 
@@ -230,6 +232,15 @@ func (p *transportAppendSession) Close() error {
 		}
 	})
 	return nil
+}
+
+func (p *transportAppendSession) isClosed() bool {
+	select {
+	case <-p.closed:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *transportAppendSession) readAcksLoop(conn *http.Response) {
