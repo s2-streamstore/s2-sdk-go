@@ -36,8 +36,7 @@ type ClientOptions struct {
 	// HTTP client used for requests.
 	HTTPClient *http.Client
 	// Allows customizing how basin endpoints are constructed.
-	// If provided, this function is used to derive the endpoint or base URL for a given basin.
-	// Returned values are normalized the same way as BaseURL, inferring "/v1" when no path is present.
+	// If provided, this function is used to derive the endpoint for a given basin.
 	// When provided, the "s2-basin" HTTP header is automatically included in basin-scoped requests.
 	MakeBasinBaseURL func(basin string) string
 	// Retry configuration.
