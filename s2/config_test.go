@@ -103,3 +103,16 @@ func TestLoadConfigFromEnv_RejectsWhitespaceEndpoints(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfigFromEnv_IgnoresEmptyEndpoints(t *testing.T) {
+	t.Setenv(envAccountEndpoint, "")
+	t.Setenv(envBasinEndpoint, "")
+
+	cfg := loadConfigFromEnv()
+	if cfg.AccountTemplate != nil {
+		t.Fatal("expected empty account endpoint env var to be ignored")
+	}
+	if cfg.BasinTemplate != nil {
+		t.Fatal("expected empty basin endpoint env var to be ignored")
+	}
+}

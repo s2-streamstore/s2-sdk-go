@@ -45,7 +45,7 @@ func loadConfigFromEnv() *Config {
 		AccessToken: os.Getenv(envAccessToken),
 	}
 
-	if endpoint, ok := os.LookupEnv(envAccountEndpoint); ok {
+	if endpoint, ok := lookupOptionalEndpointEnv(envAccountEndpoint); ok {
 		template, err := newEndpointTemplate(endpoint)
 		if err != nil {
 			panic(err)
@@ -53,7 +53,7 @@ func loadConfigFromEnv() *Config {
 		cfg.AccountTemplate = template
 	}
 
-	if endpoint, ok := os.LookupEnv(envBasinEndpoint); ok {
+	if endpoint, ok := lookupOptionalEndpointEnv(envBasinEndpoint); ok {
 		template, err := newEndpointTemplate(endpoint)
 		if err != nil {
 			panic(err)
@@ -73,6 +73,14 @@ type endpointTemplate struct {
 	port                 string
 	pathTemplate         string
 	explicitPathProvided bool
+}
+
+func lookupOptionalEndpointEnv(name string) (string, bool) {
+	value, ok := os.LookupEnv(name)
+	if !ok || value == "" {
+		return "", false
+	}
+	return value, true
 }
 
 func hasExplicitPath(input string) bool {
