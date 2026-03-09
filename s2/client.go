@@ -246,6 +246,7 @@ func NewFromEnvironment(opts *ClientOptions) *Client {
 		Logger:            opts.Logger,
 		RequestTimeout:    opts.RequestTimeout,
 		ConnectionTimeout: opts.ConnectionTimeout,
+		Compression:       opts.Compression,
 	}
 
 	if opts.BaseURL != "" {
