@@ -86,6 +86,57 @@ func TestBatcher_LingerFlush(t *testing.T) {
 	batcher.Close()
 }
 
+func TestBatcher_StaleTimerCallbackDoesNotFlushNewBatch(t *testing.T) {
+	ctx := context.Background()
+	batcher := NewBatcher(ctx, &BatchingOptions{
+		Linger:        time.Hour,
+		MaxRecords:    100,
+		ChannelBuffer: 10,
+	})
+	defer batcher.Close()
+
+	if err := batcher.Add(AppendRecord{Body: []byte("a")}, nil); err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	staleTimerSeq := batcher.timerSeq
+
+	batcher.Flush()
+	first := <-batcher.Batches()
+	if len(first.Input.Records) != 1 || string(first.Input.Records[0].Body) != "a" {
+		t.Fatalf("expected first batch to contain record a, got %+v", first.Input.Records)
+	}
+
+	if err := batcher.Add(AppendRecord{Body: []byte("b")}, nil); err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	currentTimer := batcher.timer
+	currentTimerSeq := batcher.timerSeq
+	if currentTimer == nil {
+		t.Fatal("expected current timer to be set")
+	}
+	if currentTimerSeq == staleTimerSeq {
+		t.Fatalf("expected new timer sequence after refilling batch, got %d", currentTimerSeq)
+	}
+
+	batcher.flushFromTimer(staleTimerSeq)
+
+	if batcher.timer != currentTimer {
+		t.Fatal("expected stale timer callback to leave current timer intact")
+	}
+
+	select {
+	case batch := <-batcher.Batches():
+		t.Fatalf("expected stale timer callback not to flush new batch, got %+v", batch.Input.Records)
+	default:
+	}
+
+	batcher.Flush()
+	second := <-batcher.Batches()
+	if len(second.Input.Records) != 1 || string(second.Input.Records[0].Body) != "b" {
+		t.Fatalf("expected second batch to contain record b, got %+v", second.Input.Records)
+	}
+}
+
 func TestBatcher_CloseFlushesRemaining(t *testing.T) {
 	ctx := context.Background()
 	batcher := NewBatcher(ctx, &BatchingOptions{
