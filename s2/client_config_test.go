@@ -56,6 +56,11 @@ func TestClient_NormalizesBaseURL(t *testing.T) {
 			baseURL: "https://example.com/",
 			want:    "https://example.com/",
 		},
+		{
+			name:    "defaults localhost to http",
+			baseURL: "localhost:8080",
+			want:    "http://localhost:8080/v1",
+		},
 	}
 
 	for _, tc := range testCases {

@@ -104,11 +104,30 @@ func firstDelimiterIndex(value string, fromIndex int) int {
 	return min
 }
 
+func isLocalhostEndpoint(input string) bool {
+	authority := input
+	if idx := firstDelimiterIndex(input, 0); idx != -1 {
+		authority = input[:idx]
+	}
+	host := authority
+	if idx := strings.Index(host, "@"); idx != -1 {
+		host = host[idx+1:]
+	}
+	if idx := strings.Index(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	return host == "localhost" || host == "127.0.0.1"
+}
+
 func normalizeForURLParsing(input string) string {
 	trimmed := strings.TrimSpace(input)
 	withScheme := trimmed
 	if !schemePattern.MatchString(trimmed) {
-		withScheme = fmt.Sprintf("%s://%s", defaultScheme, trimmed)
+		scheme := defaultScheme
+		if isLocalhostEndpoint(trimmed) {
+			scheme = schemeHTTP
+		}
+		withScheme = fmt.Sprintf("%s://%s", scheme, trimmed)
 	}
 	return strings.ReplaceAll(withScheme, basinPlaceholder, basinPlaceholderSentinel)
 }

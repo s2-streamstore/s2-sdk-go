@@ -14,13 +14,13 @@ func TestEndpointTemplate_DefaultsToV1(t *testing.T) {
 	}
 }
 
-func TestEndpointTemplate_DefaultsToHTTPSForLocalhost(t *testing.T) {
+func TestEndpointTemplate_DefaultsToHTTPForLocalhost(t *testing.T) {
 	template, err := newEndpointTemplate("localhost:8443")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := template.baseURL("")
-	want := "https://localhost:8443/v1"
+	want := "http://localhost:8443/v1"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
