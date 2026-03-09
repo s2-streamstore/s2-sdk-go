@@ -360,6 +360,93 @@ func TestAppendSession_CloseRejectsNewSubmits(t *testing.T) {
 	}
 }
 
+func TestAppendSession_CloseRejectsLateReservedEnqueue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       2,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}
+
+	stream := newTestStreamClientForAppend(retryCfg)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		return newTransportSession(stream, &signalWriteCloser{}), nil
+	}
+
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("append session failed: %v", err)
+	}
+
+	prepared, size, err := prepareAppendInput(&AppendInput{
+		Records: []AppendRecord{{Body: []byte("x")}},
+	})
+	if err != nil {
+		t.Fatalf("prepare append input failed: %v", err)
+	}
+
+	if err := session.capacity.reserve(ctx, size); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+	defer session.capacity.release(size)
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	entry, err := session.enqueueReservedEntry(prepared, size)
+	if !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("expected ErrSessionClosed, got %v", err)
+	}
+	if entry != nil {
+		t.Fatal("expected no entry to be returned after close")
+	}
+
+	session.inflightMu.RLock()
+	queueLen := len(session.inflightQueue)
+	session.inflightMu.RUnlock()
+	if queueLen != 0 {
+		t.Fatalf("expected empty inflight queue after rejected enqueue, got %d entries", queueLen)
+	}
+}
+
+func TestAppendSession_CreateSubmitFutureReleasesCapacityWhenEnqueueRejected(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	prepared, size, err := prepareAppendInput(&AppendInput{
+		Records: []AppendRecord{{Body: []byte("x")}},
+	})
+	if err != nil {
+		t.Fatalf("prepare append input failed: %v", err)
+	}
+
+	session := &AppendSession{
+		streamClient: newTestStreamClientForAppend(DefaultRetryConfig),
+		capacity:     newCapacityTracker(1024, 1),
+		wakeup:       make(chan struct{}, 1),
+	}
+	session.closing.Store(true)
+
+	future := session.createSubmitFuture(prepared, size)
+
+	_, err = future.Wait(ctx)
+	if !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("expected ErrSessionClosed, got %v", err)
+	}
+
+	session.capacity.mu.Lock()
+	curBytes := session.capacity.curBytes
+	curItems := session.capacity.curItems
+	session.capacity.mu.Unlock()
+	if curBytes != 0 || curItems != 0 {
+		t.Fatalf("expected reserved capacity to be released, got bytes=%d items=%d", curBytes, curItems)
+	}
+}
+
 func TestAppendSession_CloseWithEmptyQueue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

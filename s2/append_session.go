@@ -33,8 +33,8 @@ type AppendSession struct {
 
 	readWG sync.WaitGroup
 
-	closing      atomic.Bool
-	closeDone    chan struct{}
+	closing       atomic.Bool
+	closeDone     chan struct{}
 	closeDoneOnce sync.Once
 
 	closed    bool
@@ -106,7 +106,12 @@ func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *Subm
 			return
 		}
 
-		entry := r.enqueueEntry(input, size)
+		entry, err := r.enqueueReservedEntry(input, size)
+		if err != nil {
+			r.capacity.release(size)
+			errCh <- err
+			return
+		}
 		ticketCh <- &BatchSubmitTicket{ackCh: entry.resultCh}
 	}()
 
@@ -173,8 +178,10 @@ func (r *AppendSession) LastAckedPosition() *AppendAck {
 	return r.lastAckedPosition
 }
 
-// adds the entry to the inflight queue
-func (r *AppendSession) enqueueEntry(input *AppendInput, size int64) *inflightEntry {
+// Adds a capacity-reserved entry to the inflight queue unless shutdown has already started.
+// Serializing this with inflightMu prevents late enqueues from racing with the pump's empty-queue
+// shutdown check and final Close cleanup.
+func (r *AppendSession) enqueueReservedEntry(input *AppendInput, size int64) (*inflightEntry, error) {
 	entry := &inflightEntry{
 		input:          input,
 		expectedCount:  len(input.Records),
@@ -184,12 +191,16 @@ func (r *AppendSession) enqueueEntry(input *AppendInput, size int64) *inflightEn
 	}
 
 	r.inflightMu.Lock()
+	if r.closing.Load() {
+		r.inflightMu.Unlock()
+		return nil, ErrSessionClosed
+	}
 	r.inflightQueue = append(r.inflightQueue, entry)
 	r.inflightMu.Unlock()
 
 	r.wakeupPump()
 
-	return entry
+	return entry, nil
 }
 
 // the main session loop that processes the inflight queue
