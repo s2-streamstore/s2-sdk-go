@@ -30,6 +30,32 @@ func (w *signalWriteCloser) Close() error {
 	return nil
 }
 
+type blockingClosedPipeWriter struct {
+	started chan struct{}
+	closed  chan struct{}
+}
+
+func (w *blockingClosedPipeWriter) Write(p []byte) (int, error) {
+	if w.started != nil {
+		select {
+		case <-w.started:
+		default:
+			close(w.started)
+		}
+	}
+	<-w.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (w *blockingClosedPipeWriter) Close() error {
+	select {
+	case <-w.closed:
+	default:
+		close(w.closed)
+	}
+	return nil
+}
+
 func newTestStreamClientForAppend(retryCfg *RetryConfig) *StreamClient {
 	basin := &BasinClient{
 		baseURL:     "http://example.com/v1",
@@ -49,6 +75,60 @@ func newTransportSession(stream *StreamClient, writer io.WriteCloser) *transport
 		errorsCh:      make(chan error, 1),
 		closed:        make(chan struct{}),
 		requestWriter: writer,
+	}
+}
+
+func TestTransportAppendSession_AppendInputReturnsErrSessionClosedOnConcurrentClose(t *testing.T) {
+	stream := newTestStreamClientForAppend(DefaultRetryConfig)
+	writer := &blockingClosedPipeWriter{
+		started: make(chan struct{}),
+		closed:  make(chan struct{}),
+	}
+	session := newTransportSession(stream, writer)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- session.appendInput(&AppendInput{
+			Records: []AppendRecord{{Body: []byte("x")}},
+		})
+	}()
+
+	select {
+	case <-writer.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for append write to start")
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrSessionClosed) {
+			t.Fatalf("expected ErrSessionClosed, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for append to exit after close")
+	}
+}
+
+func TestTransportAppendSession_AppendInputPreservesWriteErrorsWhenOpen(t *testing.T) {
+	stream := newTestStreamClientForAppend(DefaultRetryConfig)
+	writeErr := errors.New("boom")
+	session := newTransportSession(stream, &signalWriteCloser{err: writeErr})
+
+	err := session.appendInput(&AppendInput{
+		Records: []AppendRecord{{Body: []byte("x")}},
+	})
+	if err == nil {
+		t.Fatal("expected append error")
+	}
+	if errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("expected non-close error, got %v", err)
+	}
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("expected wrapped write error %v, got %v", writeErr, err)
 	}
 }
 
