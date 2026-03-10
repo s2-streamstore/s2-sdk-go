@@ -83,10 +83,6 @@ func (e *S2Error) HasNoSideEffects() bool {
 			(e.Status == 502 && e.Code == "hot_server")
 	}
 
-	if e.Origin == "sdk" {
-		return e.Code == "ECONNREFUSED"
-	}
-
 	return false
 }
 

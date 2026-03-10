@@ -203,17 +203,14 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 		return ErrSessionClosed
 	}
 
-	written, err := writer.Write(frame)
+	p.markWriteSignalled()
+	_, err = writer.Write(frame)
 	if err != nil {
-		if written > 0 {
-			p.markWriteSignalled()
-		}
 		if p.isClosed() {
 			return ErrSessionClosed
 		}
 		return fmt.Errorf("failed to write frame: %w", err)
 	}
-	p.markWriteSignalled()
 
 	return nil
 }

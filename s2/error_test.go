@@ -105,11 +105,6 @@ func TestS2Error_HasNoSideEffects(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "sdk ECONNREFUSED",
-			err:  &S2Error{Code: "ECONNREFUSED", Origin: "sdk"},
-			want: true,
-		},
-		{
 			name: "generic retryable server error",
 			err:  &S2Error{Status: 503, Origin: "server"},
 			want: false,

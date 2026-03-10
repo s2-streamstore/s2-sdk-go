@@ -260,9 +260,5 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 }
 
 func shouldRetryNetworkError(config *RetryConfig) bool {
-	if config.AppendRetryPolicy != AppendRetryPolicyNoSideEffects {
-		return true
-	}
-
-	return false
+	return config.AppendRetryPolicy != AppendRetryPolicyNoSideEffects
 }

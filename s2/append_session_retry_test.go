@@ -742,7 +742,7 @@ func TestAppendSession_NoSideEffectsNoRetryWithNonIdempotentSentPipeline(t *test
 		t.Fatalf("wait tail failed: %v", err)
 	}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		select {
 		case <-writeSignal:
 		case <-time.After(time.Second):
