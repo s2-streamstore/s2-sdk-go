@@ -636,7 +636,8 @@ func TestAppendSession_NoSideEffectsRetriesWhenEffectNotSignalled(t *testing.T) 
 	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
 		factoryCalls++
 		if factoryCalls == 1 {
-			return newTransportSession(stream, &signalWriteCloser{err: errors.New("boom")}), nil
+			// Fail before any session/write exists: no effect signalled, retry is safe.
+			return nil, &S2Error{Message: "connect failed", Status: 503, Origin: "server"}
 		}
 		transport := newTransportSession(stream, &signalWriteCloser{signal: writeSignal})
 		secondSession = transport
