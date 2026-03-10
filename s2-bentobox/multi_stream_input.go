@@ -184,15 +184,20 @@ func streamSource(
 	var backoff <-chan time.Time
 
 	for {
+		if backoff != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-backoff:
+			}
+			backoff = nil
+		}
+
 		select {
 		case <-ctx.Done():
 			return
-		case <-backoff:
 		default:
 		}
-
-		// Reset backoff
-		backoff = nil
 
 		input, err := connectStreamInput(ctx, basin, cache, logger, stream, maxInflight, inputStartSeqNum)
 		if err != nil {
