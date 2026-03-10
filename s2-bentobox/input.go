@@ -9,7 +9,10 @@ import (
 	s2 "github.com/s2-streamstore/s2-sdk-go/s2"
 )
 
-var ErrInputClosed = errors.New("input closed")
+var (
+	ErrInputClosed  = errors.New("input closed")
+	ErrNoCacheEntry = errors.New("no cache entry")
+)
 
 type (
 	Stream  = string
@@ -41,7 +44,7 @@ func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 	}
 
 	if s.inner == nil {
-		return 0, nil
+		return 0, ErrNoCacheEntry
 	}
 
 	cached, err := s.inner.Get(ctx, stream)
