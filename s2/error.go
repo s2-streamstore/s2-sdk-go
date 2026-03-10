@@ -72,6 +72,20 @@ func (e *S2Error) IsRetryable() bool {
 	}
 }
 
+// HasNoSideEffects reports whether this error guarantees no mutation occurred.
+func (e *S2Error) HasNoSideEffects() bool {
+	if e == nil {
+		return false
+	}
+
+	if e.Origin == "server" {
+		return (e.Status == 429 && e.Code == "rate_limited") ||
+			(e.Status == 502 && e.Code == "hot_server")
+	}
+
+	return false
+}
+
 func (e *S2Error) IsNetworkError() bool {
 	return e != nil && e.Origin == "network"
 }

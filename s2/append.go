@@ -73,6 +73,7 @@ type transportAppendSession struct {
 	mu            sync.Mutex
 	conn          *http.Response
 	requestWriter io.WriteCloser
+	pendingWrites int
 }
 
 func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppendSession, error) {
@@ -202,7 +203,9 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 		return ErrSessionClosed
 	}
 
-	if _, err := writer.Write(frame); err != nil {
+	p.markWriteSignalled()
+	_, err = writer.Write(frame)
+	if err != nil {
 		if p.isClosed() {
 			return ErrSessionClosed
 		}
@@ -210,6 +213,26 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 	}
 
 	return nil
+}
+
+func (p *transportAppendSession) markWriteSignalled() {
+	p.mu.Lock()
+	p.pendingWrites++
+	p.mu.Unlock()
+}
+
+func (p *transportAppendSession) markAckReceived() {
+	p.mu.Lock()
+	if p.pendingWrites > 0 {
+		p.pendingWrites--
+	}
+	p.mu.Unlock()
+}
+
+func (p *transportAppendSession) effectSignalled() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pendingWrites > 0
 }
 
 func (p *transportAppendSession) Close() error {

@@ -555,8 +555,8 @@ func TestAppendSession_CloseDuringRetry(t *testing.T) {
 	}
 }
 
-func TestAppendSession_NoSideEffectsNonIdempotentFails(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+func TestAppendSession_NoSideEffectsWithMatchSeqNumDoesNotRetryWhenEffectSignalled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	retryCfg := &RetryConfig{
@@ -568,9 +568,15 @@ func TestAppendSession_NoSideEffectsNonIdempotentFails(t *testing.T) {
 
 	stream := newTestStreamClientForAppend(retryCfg)
 	factoryCalls := 0
+	writeSignal := make(chan struct{}, 1)
+	var firstSession *transportAppendSession
 	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
 		factoryCalls++
-		return newTransportSession(stream, &signalWriteCloser{err: errors.New("boom")}), nil
+		transport := newTransportSession(stream, &signalWriteCloser{signal: writeSignal})
+		if factoryCalls == 1 {
+			firstSession = transport
+		}
+		return transport, nil
 	}
 
 	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
@@ -579,7 +585,10 @@ func TestAppendSession_NoSideEffectsNonIdempotentFails(t *testing.T) {
 	}
 	defer session.Close()
 
-	future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+	future, err := session.Submit(&AppendInput{
+		Records:     []AppendRecord{{Body: []byte("x")}},
+		MatchSeqNum: Uint64(0),
+	})
 	if err != nil {
 		t.Fatalf("submit failed: %v", err)
 	}
@@ -587,8 +596,173 @@ func TestAppendSession_NoSideEffectsNonIdempotentFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wait failed: %v", err)
 	}
+
+	select {
+	case <-writeSignal:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first write")
+	}
+
+	firstSession.errorsCh <- &S2Error{
+		Message: "unavailable",
+		Status:  503,
+		Origin:  "server",
+	}
+
 	if _, err := ticket.Ack(ctx); err == nil {
 		t.Fatalf("expected ack error")
+	}
+	if factoryCalls != 1 {
+		t.Fatalf("expected 1 session attempt, got %d", factoryCalls)
+	}
+}
+
+func TestAppendSession_NoSideEffectsRetriesWhenEffectNotSignalled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       3,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyNoSideEffects,
+	}
+
+	stream := newTestStreamClientForAppend(retryCfg)
+	factoryCalls := 0
+	writeSignal := make(chan struct{}, 1)
+	var secondSession *transportAppendSession
+
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		factoryCalls++
+		if factoryCalls == 1 {
+			// Fail before any session/write exists: no effect signalled, retry is safe.
+			return nil, &S2Error{Message: "connect failed", Status: 503, Origin: "server"}
+		}
+		transport := newTransportSession(stream, &signalWriteCloser{signal: writeSignal})
+		secondSession = transport
+		return transport, nil
+	}
+
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("append session failed: %v", err)
+	}
+	defer session.Close()
+
+	future, err := session.Submit(&AppendInput{
+		Records:     []AppendRecord{{Body: []byte("x")}},
+		MatchSeqNum: Uint64(0),
+	})
+	if err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait failed: %v", err)
+	}
+
+	select {
+	case <-writeSignal:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for retry write")
+	}
+	if secondSession == nil {
+		t.Fatalf("expected second session to be created")
+	}
+
+	secondSession.acksCh <- &AppendAck{
+		Start: StreamPosition{SeqNum: 0},
+		End:   StreamPosition{SeqNum: 1},
+		Tail:  StreamPosition{SeqNum: 1},
+	}
+
+	ack, err := ticket.Ack(ctx)
+	if err != nil {
+		t.Fatalf("ack failed: %v", err)
+	}
+	if ack.End.SeqNum-ack.Start.SeqNum != 1 {
+		t.Fatalf("expected 1 record acked, got %d", ack.End.SeqNum-ack.Start.SeqNum)
+	}
+	if factoryCalls != 2 {
+		t.Fatalf("expected 2 session attempts, got %d", factoryCalls)
+	}
+}
+
+func TestAppendSession_NoSideEffectsNoRetryWithNonIdempotentSentPipeline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       3,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyNoSideEffects,
+	}
+
+	stream := newTestStreamClientForAppend(retryCfg)
+	factoryCalls := 0
+	writeSignal := make(chan struct{}, 4)
+	var firstSession *transportAppendSession
+
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		factoryCalls++
+		transport := newTransportSession(stream, &signalWriteCloser{signal: writeSignal})
+		if factoryCalls == 1 {
+			firstSession = transport
+		}
+		return transport, nil
+	}
+
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("append session failed: %v", err)
+	}
+	defer session.Close()
+
+	future1, err := session.Submit(&AppendInput{
+		Records:     []AppendRecord{{Body: []byte("head")}},
+		MatchSeqNum: Uint64(0),
+	})
+	if err != nil {
+		t.Fatalf("submit head failed: %v", err)
+	}
+	ticket1, err := future1.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait head failed: %v", err)
+	}
+
+	future2, err := session.Submit(&AppendInput{
+		Records: []AppendRecord{{Body: []byte("tail")}},
+	})
+	if err != nil {
+		t.Fatalf("submit tail failed: %v", err)
+	}
+	ticket2, err := future2.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait tail failed: %v", err)
+	}
+
+	for i := range 2 {
+		select {
+		case <-writeSignal:
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for write %d", i+1)
+		}
+	}
+
+	firstSession.errorsCh <- &S2Error{
+		Message: "rate limited",
+		Status:  429,
+		Code:    "rate_limited",
+		Origin:  "server",
+	}
+
+	if _, err := ticket1.Ack(ctx); err == nil {
+		t.Fatalf("expected head ack error")
+	}
+	if _, err := ticket2.Ack(ctx); err == nil {
+		t.Fatalf("expected tail ack error")
 	}
 	if factoryCalls != 1 {
 		t.Fatalf("expected 1 session attempt, got %d", factoryCalls)
