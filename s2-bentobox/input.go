@@ -19,6 +19,14 @@ type (
 	AckFunc = func(ctx context.Context, err error) error
 )
 
+// SeqNumCache is used to persist read progress across restarts.
+//
+// Get must return (0, nil) when no entry exists for the given stream (cache
+// miss). Returning a non-nil error for a miss (e.g. redis.Nil, sql.ErrNoRows)
+// is treated as a cache failure: the error is logged as a warning and the
+// consumer falls back to the configured InputStartSeqNum default.
+//
+// Set must durably store the next sequence number to consume for the stream.
 type SeqNumCache interface {
 	Get(ctx context.Context, stream string) (uint64, error)
 	Set(ctx context.Context, stream string, seqNum uint64) error
