@@ -9,29 +9,42 @@ import (
 	s2 "github.com/s2-streamstore/s2-sdk-go/s2"
 )
 
-var ErrInputClosed = errors.New("input closed")
+var (
+	ErrInputClosed  = errors.New("input closed")
+	ErrNoCacheEntry = errors.New("no cache entry")
+)
 
 type (
 	Stream  = string
 	AckFunc = func(ctx context.Context, err error) error
 )
 
+// SeqNumCache is used to persist read progress across restarts.
+//
+// Get must return (0, nil) when no entry exists for the given stream (cache
+// miss). Returning a non-nil error for a miss (e.g. redis.Nil, sql.ErrNoRows)
+// is treated as a cache failure: the error is logged as a warning and the
+// consumer falls back to the configured InputStartSeqNum default.
+//
+// Set must durably store the next sequence number to consume for the stream.
 type SeqNumCache interface {
 	Get(ctx context.Context, stream string) (uint64, error)
 	Set(ctx context.Context, stream string, seqNum uint64) error
 }
 
 type seqNumCache struct {
-	inner SeqNumCache
+	inner  SeqNumCache
+	logger Logger
 	// We don't trust the user to provide a valid cache so we have our own layer
 	// on top of the one provided by the user.
 	mem cmap.ConcurrentMap[string, uint64]
 }
 
-func newSeqNumCache(inner SeqNumCache) *seqNumCache {
+func newSeqNumCache(inner SeqNumCache, logger Logger) *seqNumCache {
 	return &seqNumCache{
-		inner: inner,
-		mem:   cmap.New[uint64](),
+		inner:  inner,
+		logger: logger,
+		mem:    cmap.New[uint64](),
 	}
 }
 
@@ -41,12 +54,17 @@ func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 	}
 
 	if s.inner == nil {
-		return 0, nil
+		return 0, ErrNoCacheEntry
 	}
 
 	cached, err := s.inner.Get(ctx, stream)
 	if err != nil {
-		return 0, err
+		// The SeqNumCache interface cannot distinguish between a cache miss and
+		// a transient error. Log the error so it is visible, then treat it as
+		// no entry so the caller falls back to the configured default start
+		// position rather than blocking indefinitely.
+		s.logger.With("stream", stream, "error", err).Warn("Cache lookup failed, starting from default position")
+		return 0, ErrNoCacheEntry
 	}
 
 	s.mem.Set(stream, cached)
