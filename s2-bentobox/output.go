@@ -48,6 +48,11 @@ func ConnectOutput(ctx context.Context, config *OutputConfig) (*Output, error) {
 }
 
 func (o *Output) WriteBatch(ctx context.Context, records []s2.AppendRecord) error {
+	input := &s2.AppendInput{
+		Records:      records,
+		FencingToken: o.fencingToken,
+	}
+
 	o.mu.Lock()
 	if o.closed {
 		o.mu.Unlock()
@@ -55,12 +60,8 @@ func (o *Output) WriteBatch(ctx context.Context, records []s2.AppendRecord) erro
 	}
 	o.mu.Unlock()
 
-	input := &s2.AppendInput{
-		Records:      records,
-		FencingToken: o.fencingToken,
-	}
-
 	future, err := o.session.Submit(input)
+
 	if err != nil {
 		return err
 	}
