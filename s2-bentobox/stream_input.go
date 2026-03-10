@@ -148,7 +148,11 @@ func connectStreamInput(
 		opts.SeqNum = s2.Uint64(startSeqNum)
 	}
 
-	logger.With("stream", stream, "start_seq_num", startSeqNum).Debug("Starting to read")
+	startPos := "latest"
+	if opts.SeqNum != nil {
+		startPos = fmt.Sprintf("%d", *opts.SeqNum)
+	}
+	logger.With("stream", stream, "start_pos", startPos).Debug("Starting to read")
 
 	streamCtx, closeSession := context.WithCancel(ctx)
 
