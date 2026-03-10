@@ -58,8 +58,9 @@ func (o *Output) WriteBatch(ctx context.Context, records []s2.AppendRecord) erro
 		o.mu.Unlock()
 		return ErrOutputClosed
 	}
-	future, err := o.session.Submit(input)
 	o.mu.Unlock()
+
+	future, err := o.session.Submit(input)
 
 	if err != nil {
 		return err
