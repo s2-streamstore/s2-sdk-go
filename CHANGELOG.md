@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.13.2] - 2026-03-10
+
+### Bug Fixes
+
+- Validate StreamName length by bytes (1-512) instead of runes ([#218](https://github.com/s2-streamstore/s2-sdk-go/issues/218))
+- Preserve ClientOptions.Compression in NewFromEnvironment ([#219](https://github.com/s2-streamstore/s2-sdk-go/issues/219))
+- Preserve custom endpoint paths and infer /v1 for host-only URLs ([#220](https://github.com/s2-streamstore/s2-sdk-go/issues/220))
+- Stale batcher timer callback race ([#221](https://github.com/s2-streamstore/s2-sdk-go/issues/221))
+- Map append session close races to ErrSessionClosed ([#222](https://github.com/s2-streamstore/s2-sdk-go/issues/222))
+- Prevent append session submit-close race ([#223](https://github.com/s2-streamstore/s2-sdk-go/issues/223))
+- *(bento)* Move AppendInput creation before mutex lock in WriteBatch ([#224](https://github.com/s2-streamstore/s2-sdk-go/issues/224))
+- Wait for worker shutdown before removing from map ([#225](https://github.com/s2-streamstore/s2-sdk-go/issues/225))
+- *(bento)* Propagate cache errors instead of silently reprocessing ([#226](https://github.com/s2-streamstore/s2-sdk-go/issues/226))
+- *(bento)* Return on session error in streamSourceRecvLoop ([#227](https://github.com/s2-streamstore/s2-sdk-go/issues/227))
+
 ## [v0.13.1] - 2026-02-28
 
 ### Bug Fixes
@@ -11,6 +26,10 @@ All notable changes to this project will be documented in this file.
 - Enforce producer backpressure at append acceptance ([#208](https://github.com/s2-streamstore/s2-sdk-go/issues/208))
 - Avoid append session startup deadlock in transport handshake ([#209](https://github.com/s2-streamstore/s2-sdk-go/issues/209))
 - Set default max inflight to 5 MiB ([#210](https://github.com/s2-streamstore/s2-sdk-go/issues/210))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.13.1 ([#217](https://github.com/s2-streamstore/s2-sdk-go/issues/217))
 
 ## [v0.13.0] - 2026-02-07
 
