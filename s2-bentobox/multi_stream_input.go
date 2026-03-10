@@ -243,7 +243,7 @@ func streamSourceRecvLoop(
 				return
 			}
 
-			continue
+			return
 		}
 
 		select {
