@@ -135,11 +135,11 @@ func connectStreamInput(
 	// Try getting the sequence number from cache
 	startSeqNum, err := cache.Get(ctx, stream)
 	if err != nil {
-		if inputStartSeqNum == InputStartSeqNumLatest {
-			opts.TailOffset = s2.Int64(0)
-		} else {
-			opts.SeqNum = s2.Uint64(0)
-		}
+		return nil, fmt.Errorf("failed to get start sequence number from cache: %w", err)
+	}
+
+	if startSeqNum == 0 && inputStartSeqNum == InputStartSeqNumLatest {
+		opts.TailOffset = s2.Int64(0)
 	} else {
 		opts.SeqNum = s2.Uint64(startSeqNum)
 	}
