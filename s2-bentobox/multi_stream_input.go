@@ -82,7 +82,7 @@ func streamsManager(
 
 	existingWorkers := make(map[string]streamWorker)
 
-	cache := newSeqNumCache(config.Cache)
+	cache := newSeqNumCache(config.Cache, config.Logger)
 
 	spawnWorker := func(stream string) {
 		workerCtx, cancelWorker := context.WithCancel(ctx)

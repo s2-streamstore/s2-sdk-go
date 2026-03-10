@@ -25,16 +25,18 @@ type SeqNumCache interface {
 }
 
 type seqNumCache struct {
-	inner SeqNumCache
+	inner  SeqNumCache
+	logger Logger
 	// We don't trust the user to provide a valid cache so we have our own layer
 	// on top of the one provided by the user.
 	mem cmap.ConcurrentMap[string, uint64]
 }
 
-func newSeqNumCache(inner SeqNumCache) *seqNumCache {
+func newSeqNumCache(inner SeqNumCache, logger Logger) *seqNumCache {
 	return &seqNumCache{
-		inner: inner,
-		mem:   cmap.New[uint64](),
+		inner:  inner,
+		logger: logger,
+		mem:    cmap.New[uint64](),
 	}
 }
 
@@ -49,7 +51,12 @@ func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 
 	cached, err := s.inner.Get(ctx, stream)
 	if err != nil {
-		return 0, err
+		// The SeqNumCache interface cannot distinguish between a cache miss and
+		// a transient error. Log the error so it is visible, then treat it as
+		// no entry so the caller falls back to the configured default start
+		// position rather than blocking indefinitely.
+		s.logger.With("stream", stream, "error", err).Warn("Cache lookup failed, starting from default position")
+		return 0, ErrNoCacheEntry
 	}
 
 	s.mem.Set(stream, cached)
