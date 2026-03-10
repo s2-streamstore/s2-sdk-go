@@ -152,6 +152,7 @@ managerLoop:
 			if _, found := newStreamsSet[stream]; !found {
 				config.Logger.With("stream", stream).Warn("Not reading from S2 source anymore")
 				worker.Close()
+				worker.Wait()
 				delete(existingWorkers, stream)
 			}
 		}
