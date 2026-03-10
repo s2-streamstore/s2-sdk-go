@@ -87,3 +87,45 @@ func TestDecodeAPIError_RangeNotSatisfiable_EmptyBody(t *testing.T) {
 		t.Fatal("expected Tail to be nil for empty body")
 	}
 }
+
+func TestS2Error_HasNoSideEffects(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *S2Error
+		want bool
+	}{
+		{
+			name: "server rate_limited",
+			err:  &S2Error{Status: 429, Code: "rate_limited", Origin: "server"},
+			want: true,
+		},
+		{
+			name: "server hot_server",
+			err:  &S2Error{Status: 502, Code: "hot_server", Origin: "server"},
+			want: true,
+		},
+		{
+			name: "sdk ECONNREFUSED",
+			err:  &S2Error{Code: "ECONNREFUSED", Origin: "sdk"},
+			want: true,
+		},
+		{
+			name: "generic retryable server error",
+			err:  &S2Error{Status: 503, Origin: "server"},
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.HasNoSideEffects(); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
