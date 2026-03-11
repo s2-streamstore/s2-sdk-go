@@ -61,6 +61,9 @@ func (m *MetricsClient) Account(ctx context.Context, args *AccountMetricsArgs) (
 	if args == nil {
 		return nil, fmt.Errorf("account metrics args cannot be nil")
 	}
+	if err := validateMetricsInterval(args.Interval); err != nil {
+		return nil, err
+	}
 	return m.fetchMetrics(ctx, fmt.Sprintf("%s/metrics", m.client.baseURL), string(args.Set), args.Start, args.End, args.Interval)
 }
 
@@ -71,8 +74,14 @@ func (m *MetricsClient) Basin(ctx context.Context, args *BasinMetricsArgs) (*Met
 	if args == nil {
 		return nil, fmt.Errorf("basin metrics args cannot be nil")
 	}
-	if args.Basin == "" {
-		return nil, fmt.Errorf("basin name cannot be empty")
+	if err := validateBasinName(BasinName(args.Basin)); err != nil {
+		return nil, err
+	}
+	if err := validateMetricsInterval(args.Interval); err != nil {
+		return nil, err
+	}
+	if args.Set == BasinMetricSetStorage && args.Interval != nil && *args.Interval != "" && *args.Interval != TimeseriesIntervalHour {
+		return nil, fmt.Errorf("basin storage metrics only support hour interval")
 	}
 	endpoint := fmt.Sprintf("%s/metrics/%s", m.client.baseURL, url.PathEscape(args.Basin))
 	return m.fetchMetrics(ctx, endpoint, string(args.Set), args.Start, args.End, args.Interval)
@@ -85,8 +94,17 @@ func (m *MetricsClient) Stream(ctx context.Context, args *StreamMetricsArgs) (*M
 	if args == nil {
 		return nil, fmt.Errorf("stream metrics args cannot be nil")
 	}
-	if args.Basin == "" || args.Stream == "" {
-		return nil, fmt.Errorf("basin and stream names cannot be empty")
+	if err := validateBasinName(BasinName(args.Basin)); err != nil {
+		return nil, err
+	}
+	if err := validateStreamName(StreamName(args.Stream)); err != nil {
+		return nil, err
+	}
+	if err := validateMetricsInterval(args.Interval); err != nil {
+		return nil, err
+	}
+	if args.Set == StreamMetricSetStorage && args.Interval != nil && *args.Interval != "" && *args.Interval != TimeseriesIntervalMinute {
+		return nil, fmt.Errorf("stream storage metrics only support minute interval")
 	}
 	endpoint := fmt.Sprintf("%s/metrics/%s/%s",
 		m.client.baseURL,
@@ -145,4 +163,16 @@ func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set s
 
 		return &result, nil
 	})
+}
+
+func validateMetricsInterval(interval *TimeseriesInterval) error {
+	if interval == nil || *interval == "" {
+		return nil
+	}
+	switch *interval {
+	case TimeseriesIntervalMinute, TimeseriesIntervalHour, TimeseriesIntervalDay:
+		return nil
+	default:
+		return fmt.Errorf("invalid metrics interval: %q", *interval)
+	}
 }
