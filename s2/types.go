@@ -169,8 +169,10 @@ type BasinInfo struct {
 
 type BasinConfig struct {
 	// Create stream on append if it doesn't exist, using the default stream configuration.
+	// Defaults to false.
 	CreateStreamOnAppend *bool `json:"create_stream_on_append,omitempty"`
 	// Create stream on read if it doesn't exist, using the default stream configuration.
+	// Defaults to false.
 	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
 	// Default stream configuration.
 	DefaultStreamConfig *StreamConfig `json:"default_stream_config,omitempty"`
@@ -216,8 +218,8 @@ type InfiniteRetention struct{}
 type TimestampingConfig struct {
 	// Timestamping mode for appends that influences how timestamps are handled.
 	Mode *TimestampingMode `json:"mode,omitempty"`
-	// "Allow client-specified timestamps to exceed the arrival time.
-	// If this is `false` or not set, client timestamps will be capped at the arrival time.
+	// Allow client-specified timestamps to exceed the arrival time.
+	// If this is false or not set, client timestamps will be capped at the arrival time.
 	Uncapped *bool `json:"uncapped,omitempty"`
 }
 
@@ -265,7 +267,7 @@ type DeleteOnEmptyReconfiguration struct {
 type TimestampingReconfiguration struct {
 	// Timestamping mode for appends that influences how timestamps are handled.
 	Mode *TimestampingMode `json:"mode,omitempty"`
-	// "Allow client-specified timestamps to exceed the arrival time.
+	// Allow client-specified timestamps to exceed the arrival time.
 	Uncapped *bool `json:"uncapped,omitempty"`
 }
 
@@ -521,7 +523,7 @@ type CreateBasinArgs struct {
 type ReconfigureBasinArgs struct {
 	// Basin name.
 	Basin BasinName
-	// Basin configuration.
+	// Basin reconfiguration.
 	Config BasinReconfiguration
 }
 
@@ -548,6 +550,6 @@ type CreateStreamArgs struct {
 type ReconfigureStreamArgs struct {
 	// Stream name.
 	Stream StreamName
-	// Stream configuration.
+	// Stream reconfiguration.
 	Config StreamReconfiguration
 }
