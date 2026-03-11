@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"unicode/utf8"
 )
 
 type StreamsClient struct {
@@ -241,9 +240,9 @@ func (s *StreamsClient) Reconfigure(ctx context.Context, args ReconfigureStreamA
 }
 
 func validateStreamName(name StreamName) error {
-	length := utf8.RuneCountInString(string(name))
+	length := len(name)
 	if length < 1 || length > 512 {
-		return fmt.Errorf("stream name must be between 1 and 512 characters")
+		return fmt.Errorf("stream name must be between 1 and 512 bytes")
 	}
 	return nil
 }

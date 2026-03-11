@@ -78,15 +78,15 @@ func (p *Producer) processBatch(batch *BatchOutput) {
 		return
 	}
 
+	ticket, err := future.Wait(p.ctx)
+	if err != nil {
+		p.resolveBatchError(batch.recordMeta, err)
+		return
+	}
+
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
-
-		ticket, err := future.Wait(p.ctx)
-		if err != nil {
-			p.resolveBatchError(batch.recordMeta, err)
-			return
-		}
 
 		ack, err := ticket.Ack(p.ctx)
 		if err != nil {

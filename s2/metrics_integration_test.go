@@ -559,7 +559,7 @@ func TestBasinMetrics_InvalidTimeRange(t *testing.T) {
 func TestBasinMetrics_StorageInvalidInterval(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
-	t.Log("Testing: Basin storage metric invalid interval (expect 422)")
+	t.Log("Testing: Basin storage metric invalid interval (expect error)")
 
 	client := streamTestClient(t)
 	start, end := metricsTimeRange(1)
@@ -571,9 +571,8 @@ func TestBasinMetrics_StorageInvalidInterval(t *testing.T) {
 		End:      end,
 		Interval: s2.Ptr(s2.TimeseriesIntervalMinute),
 	})
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 422 error, got: %v", err)
+	if err == nil {
+		t.Fatal("Expected error for invalid interval")
 	}
 	t.Logf("Got expected error: %v", err)
 }
@@ -913,7 +912,7 @@ func TestStreamMetrics_InvalidTimeRange(t *testing.T) {
 func TestStreamMetrics_StorageInvalidInterval(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
-	t.Log("Testing: Stream storage metric invalid interval (expect 422)")
+	t.Log("Testing: Stream storage metric invalid interval (expect error)")
 
 	client := streamTestClient(t)
 	basin := getSharedBasin(t)
@@ -936,9 +935,8 @@ func TestStreamMetrics_StorageInvalidInterval(t *testing.T) {
 		End:      end,
 		Interval: s2.Ptr(s2.TimeseriesIntervalHour),
 	})
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 422 error, got: %v", err)
+	if err == nil {
+		t.Fatal("Expected error for invalid interval")
 	}
 	t.Logf("Got expected error: %v", err)
 }

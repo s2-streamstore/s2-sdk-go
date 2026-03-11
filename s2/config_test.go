@@ -79,3 +79,40 @@ func TestEndpointTemplate_RejectsEmpty(t *testing.T) {
 		t.Fatal("expected error for empty endpoint")
 	}
 }
+
+func TestLoadConfigFromEnv_RejectsWhitespaceEndpoints(t *testing.T) {
+	testCases := []struct {
+		name    string
+		envName string
+	}{
+		{name: "account endpoint", envName: envAccountEndpoint},
+		{name: "basin endpoint", envName: envBasinEndpoint},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.envName, "   ")
+
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected panic for empty endpoint")
+				}
+			}()
+
+			loadConfigFromEnv()
+		})
+	}
+}
+
+func TestLoadConfigFromEnv_IgnoresEmptyEndpoints(t *testing.T) {
+	t.Setenv(envAccountEndpoint, "")
+	t.Setenv(envBasinEndpoint, "")
+
+	cfg := loadConfigFromEnv()
+	if cfg.AccountTemplate != nil {
+		t.Fatal("expected empty account endpoint env var to be ignored")
+	}
+	if cfg.BasinTemplate != nil {
+		t.Fatal("expected empty basin endpoint env var to be ignored")
+	}
+}

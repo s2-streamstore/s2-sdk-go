@@ -112,10 +112,10 @@ and error mapping).
 
 - **Append retry policy (noSideEffects)**
   - Setup: appendRetryPolicy=noSideEffects
-  - Input: append with match_seq_num explicitly set (including 0)
-  - Expected: retries on retryable errors
-  - Input: append without match_seq_num
+  - Input: append fails with generic retryable error (e.g., HTTP 503), with or without `match_seq_num`
   - Expected: no retry
+  - Input: append fails with explicit no-side-effect server error (e.g., `429 rate_limited`)
+  - Expected: retry
 
 - **Read session retry adjusts limits (if SDK auto-retries streaming reads)**
   - Setup: streaming read returns some records then transient error
