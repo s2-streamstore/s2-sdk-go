@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.13.3] - 2026-03-11
+
+### Bug Fixes
+
+- New decision tree for append retry safety ([#229](https://github.com/s2-streamstore/s2-sdk-go/issues/229))
+- Validate basin/stream names in metrics ([#196](https://github.com/s2-streamstore/s2-sdk-go/issues/196))
+- Support IPv6 addresses in endpoint URLs ([#231](https://github.com/s2-streamstore/s2-sdk-go/issues/231))
+
+### Miscellaneous Tasks
+
+- Update `LICENSE` ([#230](https://github.com/s2-streamstore/s2-sdk-go/issues/230))
+- Update s2-specs to 2ed6abf ([#206](https://github.com/s2-streamstore/s2-sdk-go/issues/206))
+
 ## [v0.13.2] - 2026-03-10
 
 ### Bug Fixes
@@ -16,6 +29,10 @@ All notable changes to this project will be documented in this file.
 - Wait for worker shutdown before removing from map ([#225](https://github.com/s2-streamstore/s2-sdk-go/issues/225))
 - *(bento)* Propagate cache errors instead of silently reprocessing ([#226](https://github.com/s2-streamstore/s2-sdk-go/issues/226))
 - *(bento)* Return on session error in streamSourceRecvLoop ([#227](https://github.com/s2-streamstore/s2-sdk-go/issues/227))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.13.2 ([#228](https://github.com/s2-streamstore/s2-sdk-go/issues/228))
 
 ## [v0.13.1] - 2026-02-28
 
