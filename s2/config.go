@@ -121,10 +121,15 @@ func isLocalhostEndpoint(input string) bool {
 	if idx := strings.Index(host, "@"); idx != -1 {
 		host = host[idx+1:]
 	}
-	if idx := strings.Index(host, ":"); idx != -1 {
+	// Handle IPv6 bracket notation: [::1] or [::1]:port
+	if strings.HasPrefix(host, "[") {
+		if end := strings.Index(host, "]"); end != -1 {
+			host = host[1:end]
+		}
+	} else if idx := strings.Index(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
-	return host == "localhost" || host == "127.0.0.1"
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func normalizeForURLParsing(input string) string {
