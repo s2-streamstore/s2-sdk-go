@@ -3,12 +3,12 @@ package s2
 import "testing"
 
 func TestEndpointTemplate_DefaultsToV1(t *testing.T) {
-	template, err := newEndpointTemplate("example.com:8443")
+	template, err := newEndpointTemplate("aws.s2.dev:8443")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := template.baseURL("")
-	want := "https://example.com:8443/v1"
+	want := "https://aws.s2.dev:8443/v1"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
@@ -27,48 +27,84 @@ func TestEndpointTemplate_DefaultsToHTTPForLocalhost(t *testing.T) {
 }
 
 func TestEndpointTemplate_ExplicitPath(t *testing.T) {
-	template, err := newEndpointTemplate("https://example.com/test/here")
+	template, err := newEndpointTemplate("https://aws.s2.dev/test/here")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := template.baseURL("")
-	want := "https://example.com/test/here"
+	want := "https://aws.s2.dev/test/here"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 
 func TestEndpointTemplate_TrailingSlashExplicitPath(t *testing.T) {
-	template, err := newEndpointTemplate("https://example.com/")
+	template, err := newEndpointTemplate("https://aws.s2.dev/")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := template.baseURL("")
-	want := "https://example.com/"
+	want := "https://aws.s2.dev/"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 
 func TestEndpointTemplate_BasinPlaceholderHost(t *testing.T) {
-	template, err := newEndpointTemplate("https://{basin}.cell.example.com:8443")
+	template, err := newEndpointTemplate("https://{basin}.cell.aws.s2.dev:8443")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := template.baseURL("demo-basin")
-	want := "https://demo-basin.cell.example.com:8443/v1"
+	want := "https://demo-basin.cell.aws.s2.dev:8443/v1"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 
 func TestEndpointTemplate_BasinPlaceholderPathEncoding(t *testing.T) {
-	template, err := newEndpointTemplate("https://cell.example.com/api/{basin}/v2")
+	template, err := newEndpointTemplate("https://cell.aws.s2.dev/api/{basin}/v2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := template.baseURL("a/b")
-	want := "https://cell.example.com/api/a%2Fb/v2"
+	want := "https://cell.aws.s2.dev/api/a%2Fb/v2"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestEndpointTemplate_IPv6WithPort(t *testing.T) {
+	template, err := newEndpointTemplate("[::1]:8080")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := template.baseURL("")
+	want := "http://[::1]:8080/v1"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestEndpointTemplate_IPv6WithoutPort(t *testing.T) {
+	template, err := newEndpointTemplate("https://[::1]")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := template.baseURL("")
+	want := "https://[::1]/v1"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestEndpointTemplate_QueryParamsPreserved(t *testing.T) {
+	template, err := newEndpointTemplate("https://aws.s2.dev?foo=bar")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := template.baseURL("")
+	want := "https://aws.s2.dev?foo=bar"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}

@@ -2,6 +2,7 @@ package s2
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -91,8 +92,7 @@ func hasExplicitPath(input string) bool {
 			authorityStart = idx + len("://")
 		}
 	}
-	delim := firstDelimiterIndex(trimmed, authorityStart)
-	return delim != -1 && trimmed[delim] == '/'
+	return firstDelimiterIndex(trimmed, authorityStart) != -1
 }
 
 func firstDelimiterIndex(value string, fromIndex int) int {
@@ -121,10 +121,15 @@ func isLocalhostEndpoint(input string) bool {
 	if idx := strings.Index(host, "@"); idx != -1 {
 		host = host[idx+1:]
 	}
-	if idx := strings.Index(host, ":"); idx != -1 {
+	// Handle IPv6 bracket notation: [::1] or [::1]:port
+	if strings.HasPrefix(host, "[") {
+		if end := strings.Index(host, "]"); end != -1 {
+			host = host[1:end]
+		}
+	} else if idx := strings.Index(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
-	return host == "localhost" || host == "127.0.0.1"
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func normalizeForURLParsing(input string) string {
@@ -193,9 +198,14 @@ func (t *endpointTemplate) baseURL(basin string) string {
 		path = strings.ReplaceAll(path, basinPlaceholder, url.PathEscape(basin))
 	}
 
-	authority := host
+	var authority string
 	if t.port != "" {
-		authority = host + ":" + t.port
+		authority = net.JoinHostPort(host, t.port)
+	} else if strings.Contains(host, ":") {
+		// IPv6 literal without port needs brackets per RFC 3986.
+		authority = "[" + host + "]"
+	} else {
+		authority = host
 	}
 	return fmt.Sprintf("%s://%s%s", t.scheme, authority, path)
 }
