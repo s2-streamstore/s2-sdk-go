@@ -367,7 +367,7 @@ func isStreamResetError(err error) bool {
 	return errors.As(err, &se)
 }
 
-func shouldRetryError(err error, config *RetryConfig, input *AppendInput) bool {
+func shouldRetryError(err error, config *RetryConfig) bool {
 	s2Err, ok := err.(*S2Error)
 	if !ok {
 		return false
@@ -378,9 +378,7 @@ func shouldRetryError(err error, config *RetryConfig, input *AppendInput) bool {
 	}
 
 	if config.AppendRetryPolicy == AppendRetryPolicyNoSideEffects {
-		if input != nil && input.MatchSeqNum == nil {
-			return false
-		}
+		return s2Err.HasNoSideEffects()
 	}
 
 	return true

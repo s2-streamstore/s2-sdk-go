@@ -109,15 +109,32 @@ func TestWithAppendRetries_NoSideEffectsWithoutMatchSeqNum(t *testing.T) {
 	}
 }
 
-func TestWithAppendRetries_NoSideEffectsWithMatchSeqNum(t *testing.T) {
+func TestWithAppendRetries_NoSideEffectsWithMatchSeqNumDoesNotRetry(t *testing.T) {
 	ctx := context.Background()
 	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
 
 	attempts := 0
 	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{MatchSeqNum: Uint64(0)}, func() (*AppendAck, error) {
 		attempts++
+		return nil, &S2Error{Status: 503, Origin: "server"}
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts)
+	}
+}
+
+func TestWithAppendRetries_NoSideEffectsRetriesNoSideEffectServerError(t *testing.T) {
+	ctx := context.Background()
+	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
+
+	attempts := 0
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		attempts++
 		if attempts < 2 {
-			return nil, &S2Error{Status: 503}
+			return nil, &S2Error{Status: 429, Code: "rate_limited", Origin: "server"}
 		}
 		return &AppendAck{}, nil
 	})
@@ -143,6 +160,63 @@ func TestWithAppendRetries_NoSideEffectsNetworkError(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Fatalf("expected 1 attempt, got %d", attempts)
+	}
+}
+
+func TestWithRetries_ContextCancellationStopsRetryLoop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	cfg := &RetryConfig{MaxAttempts: 5, MinBaseDelay: 200 * time.Millisecond, MaxBaseDelay: 200 * time.Millisecond}
+
+	attempts := 0
+	start := time.Now()
+	_, err := withRetries(ctx, cfg, nil, func() (int, error) {
+		attempts++
+		return 0, &S2Error{Status: 503, Message: "Service Unavailable"}
+	})
+	duration := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation error, got %v", err)
+	}
+	if duration > 350*time.Millisecond {
+		t.Fatalf("expected retry loop to stop quickly after cancellation, took %v", duration)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt before cancellation, got %d", attempts)
+	}
+}
+
+func TestWithAppendRetries_ContextCancellationStopsRetryLoop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	cfg := &RetryConfig{
+		MaxAttempts:       5,
+		MinBaseDelay:      200 * time.Millisecond,
+		MaxBaseDelay:      200 * time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}
+
+	attempts := 0
+	start := time.Now()
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{MatchSeqNum: Uint64(0)}, func() (*AppendAck, error) {
+		attempts++
+		return nil, &S2Error{Status: 503, Message: "Service Unavailable"}
+	})
+	duration := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation error, got %v", err)
+	}
+	if duration > 350*time.Millisecond {
+		t.Fatalf("expected append retry loop to stop quickly after cancellation, took %v", duration)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 append attempt before cancellation, got %d", attempts)
 	}
 }
 

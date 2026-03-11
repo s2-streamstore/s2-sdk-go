@@ -30,6 +30,32 @@ func (w *signalWriteCloser) Close() error {
 	return nil
 }
 
+type blockingClosedPipeWriter struct {
+	started chan struct{}
+	closed  chan struct{}
+}
+
+func (w *blockingClosedPipeWriter) Write(p []byte) (int, error) {
+	if w.started != nil {
+		select {
+		case <-w.started:
+		default:
+			close(w.started)
+		}
+	}
+	<-w.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (w *blockingClosedPipeWriter) Close() error {
+	select {
+	case <-w.closed:
+	default:
+		close(w.closed)
+	}
+	return nil
+}
+
 func newTestStreamClientForAppend(retryCfg *RetryConfig) *StreamClient {
 	basin := &BasinClient{
 		baseURL:     "http://example.com/v1",
@@ -49,6 +75,60 @@ func newTransportSession(stream *StreamClient, writer io.WriteCloser) *transport
 		errorsCh:      make(chan error, 1),
 		closed:        make(chan struct{}),
 		requestWriter: writer,
+	}
+}
+
+func TestTransportAppendSession_AppendInputReturnsErrSessionClosedOnConcurrentClose(t *testing.T) {
+	stream := newTestStreamClientForAppend(DefaultRetryConfig)
+	writer := &blockingClosedPipeWriter{
+		started: make(chan struct{}),
+		closed:  make(chan struct{}),
+	}
+	session := newTransportSession(stream, writer)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- session.appendInput(&AppendInput{
+			Records: []AppendRecord{{Body: []byte("x")}},
+		})
+	}()
+
+	select {
+	case <-writer.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for append write to start")
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrSessionClosed) {
+			t.Fatalf("expected ErrSessionClosed, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for append to exit after close")
+	}
+}
+
+func TestTransportAppendSession_AppendInputPreservesWriteErrorsWhenOpen(t *testing.T) {
+	stream := newTestStreamClientForAppend(DefaultRetryConfig)
+	writeErr := errors.New("boom")
+	session := newTransportSession(stream, &signalWriteCloser{err: writeErr})
+
+	err := session.appendInput(&AppendInput{
+		Records: []AppendRecord{{Body: []byte("x")}},
+	})
+	if err == nil {
+		t.Fatal("expected append error")
+	}
+	if errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("expected non-close error, got %v", err)
+	}
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("expected wrapped write error %v, got %v", writeErr, err)
 	}
 }
 
@@ -280,6 +360,93 @@ func TestAppendSession_CloseRejectsNewSubmits(t *testing.T) {
 	}
 }
 
+func TestAppendSession_CloseRejectsLateReservedEnqueue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       2,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}
+
+	stream := newTestStreamClientForAppend(retryCfg)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		return newTransportSession(stream, &signalWriteCloser{}), nil
+	}
+
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("append session failed: %v", err)
+	}
+
+	prepared, size, err := prepareAppendInput(&AppendInput{
+		Records: []AppendRecord{{Body: []byte("x")}},
+	})
+	if err != nil {
+		t.Fatalf("prepare append input failed: %v", err)
+	}
+
+	if err := session.capacity.reserve(ctx, size); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+	defer session.capacity.release(size)
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	entry, err := session.enqueueReservedEntry(prepared, size)
+	if !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("expected ErrSessionClosed, got %v", err)
+	}
+	if entry != nil {
+		t.Fatal("expected no entry to be returned after close")
+	}
+
+	session.inflightMu.RLock()
+	queueLen := len(session.inflightQueue)
+	session.inflightMu.RUnlock()
+	if queueLen != 0 {
+		t.Fatalf("expected empty inflight queue after rejected enqueue, got %d entries", queueLen)
+	}
+}
+
+func TestAppendSession_CreateSubmitFutureReleasesCapacityWhenEnqueueRejected(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	prepared, size, err := prepareAppendInput(&AppendInput{
+		Records: []AppendRecord{{Body: []byte("x")}},
+	})
+	if err != nil {
+		t.Fatalf("prepare append input failed: %v", err)
+	}
+
+	session := &AppendSession{
+		streamClient: newTestStreamClientForAppend(DefaultRetryConfig),
+		capacity:     newCapacityTracker(1024, 1),
+		wakeup:       make(chan struct{}, 1),
+	}
+	session.closing.Store(true)
+
+	future := session.createSubmitFuture(prepared, size)
+
+	_, err = future.Wait(ctx)
+	if !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("expected ErrSessionClosed, got %v", err)
+	}
+
+	session.capacity.mu.Lock()
+	curBytes := session.capacity.curBytes
+	curItems := session.capacity.curItems
+	session.capacity.mu.Unlock()
+	if curBytes != 0 || curItems != 0 {
+		t.Fatalf("expected reserved capacity to be released, got bytes=%d items=%d", curBytes, curItems)
+	}
+}
+
 func TestAppendSession_CloseWithEmptyQueue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -388,8 +555,8 @@ func TestAppendSession_CloseDuringRetry(t *testing.T) {
 	}
 }
 
-func TestAppendSession_NoSideEffectsNonIdempotentFails(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+func TestAppendSession_NoSideEffectsWithMatchSeqNumDoesNotRetryWhenEffectSignalled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	retryCfg := &RetryConfig{
@@ -401,9 +568,15 @@ func TestAppendSession_NoSideEffectsNonIdempotentFails(t *testing.T) {
 
 	stream := newTestStreamClientForAppend(retryCfg)
 	factoryCalls := 0
+	writeSignal := make(chan struct{}, 1)
+	var firstSession *transportAppendSession
 	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
 		factoryCalls++
-		return newTransportSession(stream, &signalWriteCloser{err: errors.New("boom")}), nil
+		transport := newTransportSession(stream, &signalWriteCloser{signal: writeSignal})
+		if factoryCalls == 1 {
+			firstSession = transport
+		}
+		return transport, nil
 	}
 
 	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
@@ -412,7 +585,10 @@ func TestAppendSession_NoSideEffectsNonIdempotentFails(t *testing.T) {
 	}
 	defer session.Close()
 
-	future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+	future, err := session.Submit(&AppendInput{
+		Records:     []AppendRecord{{Body: []byte("x")}},
+		MatchSeqNum: Uint64(0),
+	})
 	if err != nil {
 		t.Fatalf("submit failed: %v", err)
 	}
@@ -420,8 +596,173 @@ func TestAppendSession_NoSideEffectsNonIdempotentFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wait failed: %v", err)
 	}
+
+	select {
+	case <-writeSignal:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first write")
+	}
+
+	firstSession.errorsCh <- &S2Error{
+		Message: "unavailable",
+		Status:  503,
+		Origin:  "server",
+	}
+
 	if _, err := ticket.Ack(ctx); err == nil {
 		t.Fatalf("expected ack error")
+	}
+	if factoryCalls != 1 {
+		t.Fatalf("expected 1 session attempt, got %d", factoryCalls)
+	}
+}
+
+func TestAppendSession_NoSideEffectsRetriesWhenEffectNotSignalled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       3,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyNoSideEffects,
+	}
+
+	stream := newTestStreamClientForAppend(retryCfg)
+	factoryCalls := 0
+	writeSignal := make(chan struct{}, 1)
+	var secondSession *transportAppendSession
+
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		factoryCalls++
+		if factoryCalls == 1 {
+			// Fail before any session/write exists: no effect signalled, retry is safe.
+			return nil, &S2Error{Message: "connect failed", Status: 503, Origin: "server"}
+		}
+		transport := newTransportSession(stream, &signalWriteCloser{signal: writeSignal})
+		secondSession = transport
+		return transport, nil
+	}
+
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("append session failed: %v", err)
+	}
+	defer session.Close()
+
+	future, err := session.Submit(&AppendInput{
+		Records:     []AppendRecord{{Body: []byte("x")}},
+		MatchSeqNum: Uint64(0),
+	})
+	if err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait failed: %v", err)
+	}
+
+	select {
+	case <-writeSignal:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for retry write")
+	}
+	if secondSession == nil {
+		t.Fatalf("expected second session to be created")
+	}
+
+	secondSession.acksCh <- &AppendAck{
+		Start: StreamPosition{SeqNum: 0},
+		End:   StreamPosition{SeqNum: 1},
+		Tail:  StreamPosition{SeqNum: 1},
+	}
+
+	ack, err := ticket.Ack(ctx)
+	if err != nil {
+		t.Fatalf("ack failed: %v", err)
+	}
+	if ack.End.SeqNum-ack.Start.SeqNum != 1 {
+		t.Fatalf("expected 1 record acked, got %d", ack.End.SeqNum-ack.Start.SeqNum)
+	}
+	if factoryCalls != 2 {
+		t.Fatalf("expected 2 session attempts, got %d", factoryCalls)
+	}
+}
+
+func TestAppendSession_NoSideEffectsNoRetryWithNonIdempotentSentPipeline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       3,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyNoSideEffects,
+	}
+
+	stream := newTestStreamClientForAppend(retryCfg)
+	factoryCalls := 0
+	writeSignal := make(chan struct{}, 4)
+	var firstSession *transportAppendSession
+
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		factoryCalls++
+		transport := newTransportSession(stream, &signalWriteCloser{signal: writeSignal})
+		if factoryCalls == 1 {
+			firstSession = transport
+		}
+		return transport, nil
+	}
+
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("append session failed: %v", err)
+	}
+	defer session.Close()
+
+	future1, err := session.Submit(&AppendInput{
+		Records:     []AppendRecord{{Body: []byte("head")}},
+		MatchSeqNum: Uint64(0),
+	})
+	if err != nil {
+		t.Fatalf("submit head failed: %v", err)
+	}
+	ticket1, err := future1.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait head failed: %v", err)
+	}
+
+	future2, err := session.Submit(&AppendInput{
+		Records: []AppendRecord{{Body: []byte("tail")}},
+	})
+	if err != nil {
+		t.Fatalf("submit tail failed: %v", err)
+	}
+	ticket2, err := future2.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait tail failed: %v", err)
+	}
+
+	for i := range 2 {
+		select {
+		case <-writeSignal:
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for write %d", i+1)
+		}
+	}
+
+	firstSession.errorsCh <- &S2Error{
+		Message: "rate limited",
+		Status:  429,
+		Code:    "rate_limited",
+		Origin:  "server",
+	}
+
+	if _, err := ticket1.Ack(ctx); err == nil {
+		t.Fatalf("expected head ack error")
+	}
+	if _, err := ticket2.Ack(ctx); err == nil {
+		t.Fatalf("expected tail ack error")
 	}
 	if factoryCalls != 1 {
 		t.Fatalf("expected 1 session attempt, got %d", factoryCalls)

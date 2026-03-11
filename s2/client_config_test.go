@@ -11,12 +11,14 @@ import (
 
 type basinHeaderRoundTripper struct {
 	header   string
+	url      string
 	requests int
 }
 
 func (r *basinHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.requests++
 	r.header = req.Header.Get("s2-basin")
+	r.url = req.URL.String()
 	body := io.NopCloser(strings.NewReader(`{"streams":[],"has_more":false}`))
 	return &http.Response{
 		StatusCode: http.StatusOK,
@@ -33,15 +35,85 @@ func TestClient_DefaultBaseURL(t *testing.T) {
 	}
 }
 
+func TestClient_NormalizesBaseURL(t *testing.T) {
+	testCases := []struct {
+		name    string
+		baseURL string
+		want    string
+	}{
+		{
+			name:    "infers /v1 when path missing",
+			baseURL: "example.com:8443",
+			want:    "https://example.com:8443/v1",
+		},
+		{
+			name:    "preserves explicit path",
+			baseURL: "https://example.com/test/here",
+			want:    "https://example.com/test/here",
+		},
+		{
+			name:    "preserves trailing slash",
+			baseURL: "https://example.com/",
+			want:    "https://example.com/",
+		},
+		{
+			name:    "defaults localhost to http",
+			baseURL: "localhost:8080",
+			want:    "http://localhost:8080/v1",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := New("token", &ClientOptions{BaseURL: tc.baseURL})
+			if client.baseURL != tc.want {
+				t.Fatalf("expected base URL %q, got %q", tc.want, client.baseURL)
+			}
+		})
+	}
+}
+
+func TestClient_NormalizesMakeBasinBaseURL(t *testing.T) {
+	testCases := []struct {
+		name             string
+		makeBasinBaseURL func(string) string
+		want             string
+	}{
+		{
+			name: "infers /v1 when path missing",
+			makeBasinBaseURL: func(string) string {
+				return "https://shared.test"
+			},
+			want: "https://shared.test/v1",
+		},
+		{
+			name: "preserves explicit path",
+			makeBasinBaseURL: func(string) string {
+				return "https://shared.test/api"
+			},
+			want: "https://shared.test/api",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := New("token", &ClientOptions{MakeBasinBaseURL: tc.makeBasinBaseURL})
+			if client.Basin("demo").baseURL != tc.want {
+				t.Fatalf("expected basin base URL %q, got %q", tc.want, client.Basin("demo").baseURL)
+			}
+		})
+	}
+}
+
 func TestSharedBasinEndpoint_UsesBasinHeader(t *testing.T) {
 	rt := &basinHeaderRoundTripper{}
 	httpClient := &http.Client{Transport: rt, Timeout: 1 * time.Second}
 
 	client := New("token", &ClientOptions{
-		BaseURL:    "http://account.test/v1",
+		BaseURL:    "http://account.test",
 		HTTPClient: httpClient,
 		MakeBasinBaseURL: func(_ string) string {
-			return "http://shared.test/v1"
+			return "http://shared.test"
 		},
 	})
 
@@ -57,5 +129,8 @@ func TestSharedBasinEndpoint_UsesBasinHeader(t *testing.T) {
 	}
 	if rt.header != "demo" {
 		t.Fatalf("expected basin header %q, got %q", "demo", rt.header)
+	}
+	if rt.url != "http://shared.test/v1/streams" {
+		t.Fatalf("expected request URL %q, got %q", "http://shared.test/v1/streams", rt.url)
 	}
 }

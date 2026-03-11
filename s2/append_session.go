@@ -33,8 +33,8 @@ type AppendSession struct {
 
 	readWG sync.WaitGroup
 
-	closing      atomic.Bool
-	closeDone    chan struct{}
+	closing       atomic.Bool
+	closeDone     chan struct{}
 	closeDoneOnce sync.Once
 
 	closed    bool
@@ -106,7 +106,12 @@ func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *Subm
 			return
 		}
 
-		entry := r.enqueueEntry(input, size)
+		entry, err := r.enqueueReservedEntry(input, size)
+		if err != nil {
+			r.capacity.release(size)
+			errCh <- err
+			return
+		}
 		ticketCh <- &BatchSubmitTicket{ackCh: entry.resultCh}
 	}()
 
@@ -173,8 +178,10 @@ func (r *AppendSession) LastAckedPosition() *AppendAck {
 	return r.lastAckedPosition
 }
 
-// adds the entry to the inflight queue
-func (r *AppendSession) enqueueEntry(input *AppendInput, size int64) *inflightEntry {
+// Adds a capacity-reserved entry to the inflight queue unless shutdown has already started.
+// Serializing this with inflightMu prevents late enqueues from racing with the pump's empty-queue
+// shutdown check and final Close cleanup.
+func (r *AppendSession) enqueueReservedEntry(input *AppendInput, size int64) (*inflightEntry, error) {
 	entry := &inflightEntry{
 		input:          input,
 		expectedCount:  len(input.Records),
@@ -184,12 +191,16 @@ func (r *AppendSession) enqueueEntry(input *AppendInput, size int64) *inflightEn
 	}
 
 	r.inflightMu.Lock()
+	if r.closing.Load() {
+		r.inflightMu.Unlock()
+		return nil, ErrSessionClosed
+	}
 	r.inflightQueue = append(r.inflightQueue, entry)
 	r.inflightMu.Unlock()
 
 	r.wakeupPump()
 
-	return entry
+	return entry, nil
 }
 
 // the main session loop that processes the inflight queue
@@ -285,7 +296,7 @@ func (r *AppendSession) processInflightQueue() {
 			logError(r.streamClient.logger, "append pump transport start failed, will retry",
 				"stream", string(r.streamClient.name),
 				"error", err)
-			r.handleSessionError(nil, err)
+			r.handleSessionStartError(err)
 		} else {
 			logError(r.streamClient.logger, "append pump transport start failed fatally",
 				"stream", string(r.streamClient.name),
@@ -296,6 +307,32 @@ func (r *AppendSession) processInflightQueue() {
 	}
 
 	r.submitInflightBatches()
+}
+
+func (r *AppendSession) handleSessionStartError(err error) {
+	maxAttempts := r.options.RetryConfig.MaxAttempts
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	r.stateMu.RLock()
+	currentAttempt := r.currentAttempt
+	r.stateMu.RUnlock()
+
+	if currentAttempt >= maxAttempts-1 {
+		logError(r.streamClient.logger, "append session max attempts exhausted after transport start failure",
+			"stream", string(r.streamClient.name),
+			"attempts", maxAttempts)
+		r.failAllInflight(fmt.Errorf("max attempts (%d) exhausted, last error: %v: %w",
+			maxAttempts, err, ErrMaxAttemptsExhausted))
+		return
+	}
+
+	r.stateMu.Lock()
+	r.currentAttempt++
+	r.stateMu.Unlock()
+
+	r.scheduleRetry()
 }
 
 func (r *AppendSession) getSession() error {
@@ -434,6 +471,8 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 		return
 	}
 
+	session.markAckReceived()
+
 	r.inflightQueue = r.inflightQueue[1:]
 	sessionsToClose := r.releaseEntrySessionsLocked(entry)
 
@@ -509,16 +548,16 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		"stream", string(r.streamClient.name),
 		"error", err)
 
-	if r.requiresIdempotentRetries() {
-		r.inflightMu.RLock()
-		var head *inflightEntry
-		if len(r.inflightQueue) > 0 {
-			head = r.inflightQueue[0]
+	if r.requiresNoSideEffectsRetries() {
+		if !r.canRetryUnderNoSideEffects(failedSession, err) {
+			logError(r.streamClient.logger, "append session cannot retry under noSideEffects policy",
+				"stream", string(r.streamClient.name),
+				"error", err)
+			r.failAllInflight(err)
+			return
 		}
-		r.inflightMu.RUnlock()
-
-		if head != nil && !isIdempotentEntry(head) {
-			logError(r.streamClient.logger, "append session cannot retry (non-idempotent head entry)",
+		if r.hasNonIdempotentSentPipelinedEntries() {
+			logError(r.streamClient.logger, "append session cannot retry due to non-idempotent sent pipelined entries under noSideEffects policy",
 				"stream", string(r.streamClient.name))
 			r.failAllInflight(err)
 			return
@@ -693,7 +732,7 @@ func (r *AppendSession) checkTimeouts() {
 	}
 }
 
-func (r *AppendSession) requiresIdempotentRetries() bool {
+func (r *AppendSession) requiresNoSideEffectsRetries() bool {
 	return r.options.RetryConfig != nil && r.options.RetryConfig.AppendRetryPolicy == AppendRetryPolicyNoSideEffects
 }
 
@@ -711,6 +750,42 @@ type inflightEntry struct {
 type inflightResult struct {
 	ack *AppendAck
 	err error
+}
+
+func isNoSideEffectsError(err error) bool {
+	var s2Err *S2Error
+	if !errors.As(err, &s2Err) {
+		return false
+	}
+
+	return s2Err.HasNoSideEffects()
+}
+
+func (r *AppendSession) canRetryUnderNoSideEffects(failedSession *transportAppendSession, err error) bool {
+	if isNoSideEffectsError(err) {
+		return true
+	}
+	if failedSession == nil {
+		return false
+	}
+	return !failedSession.effectSignalled()
+}
+
+func (r *AppendSession) hasNonIdempotentSentPipelinedEntries() bool {
+	r.inflightMu.RLock()
+	defer r.inflightMu.RUnlock()
+
+	for i := 1; i < len(r.inflightQueue); i++ {
+		entry := r.inflightQueue[i]
+		if entry == nil || isIdempotentEntry(entry) {
+			continue
+		}
+		if len(entry.sentOnSessions) > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isIdempotentEntry(entry *inflightEntry) bool {

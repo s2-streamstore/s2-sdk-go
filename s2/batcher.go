@@ -16,6 +16,7 @@ type Batcher struct {
 	bufferBytes     uint64
 	recordMeta      []recordMeta
 	timer           *time.Timer
+	timerSeq        uint64
 	closed          bool
 	nextMatchSeqNum *uint64
 
@@ -112,7 +113,11 @@ func (b *Batcher) Add(record AppendRecord, resultCh chan *producerOutcome) error
 	if len(b.buffer) >= b.opts.MaxRecords || b.bufferBytes >= b.opts.MaxMeteredBytes {
 		b.flushLocked()
 	} else if b.opts.Linger > 0 && b.timer == nil {
-		b.timer = time.AfterFunc(b.opts.Linger, b.flushFromTimer)
+		b.timerSeq++
+		timerSeq := b.timerSeq
+		b.timer = time.AfterFunc(b.opts.Linger, func() {
+			b.flushFromTimer(timerSeq)
+		})
 	}
 
 	return nil
@@ -155,8 +160,12 @@ func (b *Batcher) flushLocked() {
 	}
 }
 
-func (b *Batcher) flushFromTimer() {
+func (b *Batcher) flushFromTimer(timerSeq uint64) {
 	b.mu.Lock()
+	if b.timer == nil || b.timerSeq != timerSeq {
+		b.mu.Unlock()
+		return
+	}
 	b.timer = nil
 	if !b.closed {
 		b.flushLocked()

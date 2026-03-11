@@ -45,7 +45,7 @@ func loadConfigFromEnv() *Config {
 		AccessToken: os.Getenv(envAccessToken),
 	}
 
-	if endpoint, ok := lookupEnvNonEmpty(envAccountEndpoint); ok {
+	if endpoint, ok := lookupOptionalEndpointEnv(envAccountEndpoint); ok {
 		template, err := newEndpointTemplate(endpoint)
 		if err != nil {
 			panic(err)
@@ -53,7 +53,7 @@ func loadConfigFromEnv() *Config {
 		cfg.AccountTemplate = template
 	}
 
-	if endpoint, ok := lookupEnvNonEmpty(envBasinEndpoint); ok {
+	if endpoint, ok := lookupOptionalEndpointEnv(envBasinEndpoint); ok {
 		template, err := newEndpointTemplate(endpoint)
 		if err != nil {
 			panic(err)
@@ -75,12 +75,9 @@ type endpointTemplate struct {
 	explicitPathProvided bool
 }
 
-func lookupEnvNonEmpty(name string) (string, bool) {
+func lookupOptionalEndpointEnv(name string) (string, bool) {
 	value, ok := os.LookupEnv(name)
-	if !ok {
-		return "", false
-	}
-	if strings.TrimSpace(value) == "" {
+	if !ok || value == "" {
 		return "", false
 	}
 	return value, true
@@ -201,4 +198,12 @@ func (t *endpointTemplate) baseURL(basin string) string {
 		authority = host + ":" + t.port
 	}
 	return fmt.Sprintf("%s://%s%s", t.scheme, authority, path)
+}
+
+func normalizeBaseURL(endpoint string) string {
+	template, err := newEndpointTemplate(endpoint)
+	if err != nil {
+		panic(err)
+	}
+	return template.baseURL("")
 }

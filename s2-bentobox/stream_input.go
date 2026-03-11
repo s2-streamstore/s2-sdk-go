@@ -132,9 +132,12 @@ func connectStreamInput(
 
 	var opts s2.ReadOptions
 
-	// Try getting the sequence number from cache
+	// Try getting the sequence number from cache. seqNumCache.Get only returns
+	// ErrNoCacheEntry (no entry, or inner error logged as warning); it never
+	// surfaces raw user cache errors here.
 	startSeqNum, err := cache.Get(ctx, stream)
-	if err != nil {
+	if errors.Is(err, ErrNoCacheEntry) {
+		// No cache entry: use the configured default start position.
 		if inputStartSeqNum == InputStartSeqNumLatest {
 			opts.TailOffset = s2.Int64(0)
 		} else {
@@ -144,7 +147,11 @@ func connectStreamInput(
 		opts.SeqNum = s2.Uint64(startSeqNum)
 	}
 
-	logger.With("stream", stream, "start_seq_num", startSeqNum).Debug("Starting to read")
+	startPos := "latest"
+	if opts.SeqNum != nil {
+		startPos = fmt.Sprintf("%d", *opts.SeqNum)
+	}
+	logger.With("stream", stream, "start_pos", startPos).Debug("Starting to read")
 
 	streamCtx, closeSession := context.WithCancel(ctx)
 

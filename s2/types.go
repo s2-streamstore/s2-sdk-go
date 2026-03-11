@@ -458,7 +458,7 @@ type BatchingOptions struct {
 }
 
 type AppendSessionOptions struct {
-	// Aggregate size of records, to allow in-flight before applying backpressure (default: 10 MiB).
+	// Aggregate size of records, to allow in-flight before applying backpressure (default: 5 MiB).
 	MaxInflightBytes uint64
 	// Maximum number of batches allowed in-flight before applying backpressure.
 	MaxInflightBatches uint32

@@ -82,7 +82,7 @@ func streamsManager(
 
 	existingWorkers := make(map[string]streamWorker)
 
-	cache := newSeqNumCache(config.Cache)
+	cache := newSeqNumCache(config.Cache, config.Logger)
 
 	spawnWorker := func(stream string) {
 		workerCtx, cancelWorker := context.WithCancel(ctx)
@@ -152,6 +152,7 @@ managerLoop:
 			if _, found := newStreamsSet[stream]; !found {
 				config.Logger.With("stream", stream).Warn("Not reading from S2 source anymore")
 				worker.Close()
+				worker.Wait()
 				delete(existingWorkers, stream)
 			}
 		}
@@ -183,15 +184,20 @@ func streamSource(
 	var backoff <-chan time.Time
 
 	for {
+		if backoff != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-backoff:
+			}
+			backoff = nil
+		}
+
 		select {
 		case <-ctx.Done():
 			return
-		case <-backoff:
 		default:
 		}
-
-		// Reset backoff
-		backoff = nil
 
 		input, err := connectStreamInput(ctx, basin, cache, logger, stream, maxInflight, inputStartSeqNum)
 		if err != nil {
@@ -237,7 +243,7 @@ func streamSourceRecvLoop(
 				return
 			}
 
-			continue
+			return
 		}
 
 		select {
