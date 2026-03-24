@@ -76,7 +76,7 @@ func (b *BasinsClient) Iter(ctx context.Context, args *ListBasinsArgs) *BasinsIt
 		if !includeDeleted {
 			basins = make([]BasinInfo, 0, len(resp.Basins))
 			for _, basin := range resp.Basins {
-				if basin.State != BasinStateDeleting {
+				if basin.DeletedAt == nil {
 					basins = append(basins, basin)
 				}
 			}

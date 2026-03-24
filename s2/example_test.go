@@ -174,7 +174,7 @@ func ExampleBasinsClient_Create() {
 		log.Fatalf("create basin: %v", err)
 	}
 
-	fmt.Printf("created basin: %s (state=%s)\n", info.Name, info.State)
+	fmt.Printf("created basin: %s (created_at=%s)\n", info.Name, info.CreatedAt)
 }
 
 func ExampleBasinsClient_List() {
@@ -190,7 +190,7 @@ func ExampleBasinsClient_List() {
 	}
 
 	for _, basin := range resp.Basins {
-		fmt.Printf("basin: %s (scope=%s, state=%s)\n", basin.Name, basin.Scope, basin.State)
+		fmt.Printf("basin: %s (scope=%s, created_at=%s)\n", basin.Name, basin.Scope, basin.CreatedAt)
 	}
 	fmt.Printf("has more: %v\n", resp.HasMore)
 }
@@ -204,7 +204,7 @@ func ExampleBasinsClient_Iter() {
 	})
 	for iter.Next() {
 		basin := iter.Value()
-		fmt.Printf("basin: %s (scope=%s, state=%s)\n", basin.Name, basin.Scope, basin.State)
+		fmt.Printf("basin: %s (scope=%s, created_at=%s)\n", basin.Name, basin.Scope, basin.CreatedAt)
 	}
 	if err := iter.Err(); err != nil {
 		log.Fatalf("list basins: %v", err)

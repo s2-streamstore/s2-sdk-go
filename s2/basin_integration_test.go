@@ -345,10 +345,10 @@ func TestListBasins_IncludesDeletingBasins(t *testing.T) {
 
 	for _, b := range resp.Basins {
 		if b.Name == basinName {
-			if b.State != s2.BasinStateDeleting {
-				t.Errorf("Expected state=deleting, got %s", b.State)
+			if b.DeletedAt == nil {
+				t.Error("Expected DeletedAt to be set for deleting basin")
 			} else {
-				t.Log("Verified deleting basin appears in list with state=deleting")
+				t.Logf("Verified deleting basin appears in list with deleted_at=%s", b.DeletedAt)
 			}
 			return
 		}
@@ -411,8 +411,8 @@ func TestListBasins_IteratorIncludeDeleted(t *testing.T) {
 		basin := iter.Value()
 		if basin.Name == basinName {
 			found = true
-			if basin.State != s2.BasinStateDeleting {
-				t.Errorf("Expected state=deleting, got %s", basin.State)
+			if basin.DeletedAt == nil {
+				t.Error("Expected DeletedAt to be set for deleting basin")
 			}
 		}
 	}
@@ -445,10 +445,13 @@ func TestCreateBasin_Minimal(t *testing.T) {
 	if info.Name != basinName {
 		t.Errorf("Expected name %s, got %s", basinName, info.Name)
 	}
-	if info.State != s2.BasinStateActive && info.State != s2.BasinStateCreating {
-		t.Errorf("Unexpected state: %s", info.State)
+	if info.CreatedAt.IsZero() {
+		t.Error("Expected non-zero CreatedAt")
 	}
-	t.Logf("Created basin: %s, state: %s", info.Name, info.State)
+	if info.DeletedAt != nil {
+		t.Errorf("Expected DeletedAt to be nil, got %s", info.DeletedAt)
+	}
+	t.Logf("Created basin: %s, created_at: %s", info.Name, info.CreatedAt)
 }
 
 func TestCreateBasin_WithScope(t *testing.T) {
@@ -1233,10 +1236,10 @@ func TestDeleteBasin_VerifyStateAfterDelete(t *testing.T) {
 
 	for _, b := range resp.Basins {
 		if b.Name == basinName {
-			if b.State != s2.BasinStateDeleting {
-				t.Errorf("Expected state=deleting, got %s", b.State)
+			if b.DeletedAt == nil {
+				t.Error("Expected DeletedAt to be set for deleting basin")
 			} else {
-				t.Log("Verified state=deleting")
+				t.Logf("Verified basin is deleting with deleted_at=%s", b.DeletedAt)
 			}
 			return
 		}

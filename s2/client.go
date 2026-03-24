@@ -120,7 +120,7 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	makeBasinBaseURL := opts.MakeBasinBaseURL
 	if makeBasinBaseURL == nil {
 		makeBasinBaseURL = func(basin string) string {
-			return fmt.Sprintf("https://%s.b.aws.s2.dev/v1", basin)
+			return fmt.Sprintf("https://%s.b.s2.dev/v1", basin)
 		}
 	} else {
 		makeBasinBaseURL = func(basin string) string {
