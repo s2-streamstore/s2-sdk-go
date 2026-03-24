@@ -19,7 +19,6 @@ type StreamName string
 // Basin scope.
 type BasinScope string
 
-type BasinState string
 type MetricUnit string
 type TimeseriesInterval string
 type AccountMetricSet string
@@ -31,12 +30,6 @@ type TimestampingMode string
 
 const (
 	BasinScopeAwsUsEast1 BasinScope = "aws:us-east-1"
-)
-
-const (
-	BasinStateActive   BasinState = "active"
-	BasinStateCreating BasinState = "creating"
-	BasinStateDeleting BasinState = "deleting"
 )
 
 const (
@@ -163,8 +156,10 @@ type BasinInfo struct {
 	Name BasinName `json:"name"`
 	// Basin scope.
 	Scope BasinScope `json:"scope"`
-	// Basin state.
-	State BasinState `json:"state"`
+	// Creation time.
+	CreatedAt time.Time `json:"created_at"`
+	// Deletion time, if the basin is being deleted.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 type BasinConfig struct {
