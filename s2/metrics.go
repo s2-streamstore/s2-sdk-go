@@ -120,7 +120,7 @@ func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set s
 	}
 
 	return withRetries(ctx, m.client.retryConfig, m.client.logger, func() (*MetricSetResponse, error) {
-		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
 			return nil, fmt.Errorf("creating request: %w", err)
 		}
