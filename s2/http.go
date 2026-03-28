@@ -153,9 +153,11 @@ func (h *httpClient) requestProto(ctx context.Context, method, path string, body
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
 			respCompression := internalframing.ParseContentEncoding(encoding)
-			if decompressed, err := internalframing.Decompress(body, respCompression); err == nil {
-				body = decompressed
+			decompressed, err := internalframing.Decompress(body, respCompression)
+			if err != nil {
+				return fmt.Errorf("decompress error response body: %w", err)
 			}
+			body = decompressed
 		}
 		apiErr := decodeAPIError(resp.StatusCode, body)
 		logError(h.logger, "s2 http proto error response", "method", method, "path", path, "status", resp.StatusCode, "message", apiErr.Error())
