@@ -298,6 +298,12 @@ func (rt userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 	return rt.base.RoundTrip(reqCtx)
 }
 
+func (rt userAgentRoundTripper) CloseIdleConnections() {
+	if closer, ok := rt.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 func defaultUserAgent() string {
 	ver := strings.TrimSpace(moduleVersion)
 	if ver == "" {
