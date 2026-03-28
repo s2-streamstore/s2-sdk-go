@@ -40,7 +40,7 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 	pbInput := convertAppendInputToProto(prepared)
 
 	httpClient := &httpClient{
-		client:      s.getHTTPClient(),
+		client:      s.basinClient.httpClient,
 		baseURL:     s.basinClient.baseURL,
 		accessToken: s.basinClient.accessToken,
 		logger:      s.logger,

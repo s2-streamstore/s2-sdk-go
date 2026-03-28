@@ -97,7 +97,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 
 	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
 		httpClient := &httpClient{
-			client:      s.getHTTPClient(),
+			client:      s.basinClient.httpClient,
 			baseURL:     s.basinClient.baseURL,
 			accessToken: s.basinClient.accessToken,
 			logger:      s.logger,
