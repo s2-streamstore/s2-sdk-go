@@ -232,6 +232,13 @@ func (si *streamInput) handleBatch(_ context.Context, records []s2.SequencedReco
 func (si *streamInput) nack(ctx context.Context, records []s2.SequencedRecord) error {
 	si.Logger.With("stream", si.Stream).Debug("Nacking batch")
 
+	// Non-blocking send: enqueue if capacity exists, even if ctx is cancelled.
+	select {
+	case si.nacks <- records:
+		return nil
+	default:
+	}
+
 	select {
 	case si.nacks <- records:
 		return nil
