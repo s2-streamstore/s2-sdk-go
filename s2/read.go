@@ -542,6 +542,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		ignoreCommandRecords := r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords
 		for _, record := range batch.Records {
 			if ignoreCommandRecords && record.IsCommandRecord() {
+				r.advanceState(record)
 				continue
 			}
 			if err := r.handleRecord(ctx, record); err != nil {
@@ -549,6 +550,17 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			}
 		}
 	}
+}
+
+func (r *streamReader) advanceState(record SequencedRecord) {
+	r.stateMu.Lock()
+	r.recordsRead++
+	r.bytesRead += MeteredSequencedRecordBytes(record)
+	r.lastRecordTime = time.Now()
+	r.nextSeq = record.SeqNum + 1
+	r.hasNextSeq = true
+	r.nextTS = record.Timestamp
+	r.stateMu.Unlock()
 }
 
 func (r *streamReader) handleRecord(ctx context.Context, record SequencedRecord) error {
@@ -562,14 +574,7 @@ func (r *streamReader) handleRecord(ctx context.Context, record SequencedRecord)
 
 	logInfo(r.logger, "s2 read session record", "stream", string(r.streamClient.name), "seq_num", record.SeqNum)
 
-	r.stateMu.Lock()
-	r.recordsRead++
-	r.bytesRead += MeteredSequencedRecordBytes(record)
-	r.lastRecordTime = time.Now()
-	r.nextSeq = record.SeqNum + 1
-	r.hasNextSeq = true
-	r.nextTS = record.Timestamp
-	r.stateMu.Unlock()
+	r.advanceState(record)
 
 	return nil
 }
