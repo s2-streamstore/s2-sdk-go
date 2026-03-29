@@ -223,13 +223,13 @@ func (si *streamInput) handleBatch(_ context.Context, records []s2.SequencedReco
 		if e == nil {
 			return si.ack(c, records)
 		}
-		return si.nack(records)
+		return si.nack(c, records)
 	}
 
 	return records, ackFunc, nil
 }
 
-func (si *streamInput) nack(records []s2.SequencedRecord) error {
+func (si *streamInput) nack(ctx context.Context, records []s2.SequencedRecord) error {
 	si.Logger.With("stream", si.Stream).Debug("Nacking batch")
 
 	select {
@@ -237,6 +237,8 @@ func (si *streamInput) nack(records []s2.SequencedRecord) error {
 		return nil
 	case <-si.closedCh:
 		return ErrInputClosed
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
