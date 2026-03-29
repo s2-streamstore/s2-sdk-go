@@ -423,6 +423,11 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 
 		case err, ok := <-session.errorsCh:
 			if !ok {
+				// errorsCh closes before acksCh (defer order), so
+				// drain any buffered ACKs before returning.
+				for ack := range session.acksCh {
+					r.handleAck(session, ack)
+				}
 				return
 			}
 			r.handleSessionError(session, err)
