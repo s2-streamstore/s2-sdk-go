@@ -201,6 +201,14 @@ func streamSource(
 
 		input, err := connectStreamInput(ctx, basin, cache, logger, stream, maxInflight, inputStartSeqNum)
 		if err != nil {
+			var rangeErr *s2.RangeNotSatisfiableError
+			if errors.As(err, &rangeErr) && rangeErr.Tail != nil {
+				logger.With("stream", stream, "tail_seq_num", rangeErr.Tail.SeqNum).
+					Warn("Cached position beyond stream tail, resetting to tail")
+				_ = cache.Set(ctx, stream, rangeErr.Tail.SeqNum)
+				continue
+			}
+
 			logger.With("error", err, "stream", stream).Error("Failed to connect, retrying.")
 
 			jitter := time.Duration(rand.Int63n(int64(10 * time.Millisecond)))
