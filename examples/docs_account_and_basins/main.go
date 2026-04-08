@@ -15,8 +15,8 @@ import (
 
 func main() {
 	ctx := context.Background()
-	token := os.Getenv("S2_ACCESS_TOKEN")
-	if token == "" {
+	accessToken := os.Getenv("S2_ACCESS_TOKEN")
+	if accessToken == "" {
 		log.Fatal("S2_ACCESS_TOKEN is required")
 	}
 	basinName := os.Getenv("S2_BASIN")
@@ -24,7 +24,7 @@ func main() {
 		log.Fatal("S2_BASIN is required")
 	}
 
-	client := s2.New(token, nil)
+	client := s2.New(accessToken, nil)
 
 	{
 		// ANCHOR: basin-operations
@@ -101,7 +101,7 @@ func main() {
 	})
 	// ANCHOR_END: access-token-restricted
 
-	// Pagination example - not executed by default
+	// Pagination examples - not executed by default
 	if false {
 		// ANCHOR: pagination
 		// Iterate through all streams with automatic pagination
@@ -114,5 +114,28 @@ func main() {
 			log.Fatal(err)
 		}
 		// ANCHOR_END: pagination
+
+		// ANCHOR: pagination-filtering
+		// List streams with a prefix filter
+		iter = basin.Streams.Iter(ctx, &s2.ListStreamsArgs{Prefix: "events/"})
+		for iter.Next() {
+			fmt.Println(iter.Value().Name)
+		}
+		if err := iter.Err(); err != nil {
+			log.Fatal(err)
+		}
+		// ANCHOR_END: pagination-filtering
+
+		// ANCHOR: pagination-deleted
+		// Include streams that are being deleted
+		iter = basin.Streams.Iter(ctx, &s2.ListStreamsArgs{IncludeDeleted: true})
+		for iter.Next() {
+			stream := iter.Value()
+			fmt.Println(stream.Name, stream.DeletedAt)
+		}
+		if err := iter.Err(); err != nil {
+			log.Fatal(err)
+		}
+		// ANCHOR_END: pagination-deleted
 	}
 }

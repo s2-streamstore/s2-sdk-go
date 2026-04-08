@@ -27,12 +27,12 @@ func main() {
 
 	// Example: Custom retry configuration
 	{
-		token := os.Getenv("S2_ACCESS_TOKEN")
-		if token == "" {
-			token = "demo"
+		accessToken := os.Getenv("S2_ACCESS_TOKEN")
+		if accessToken == "" {
+			accessToken = "demo"
 		}
 		// ANCHOR: retry-config
-		client := s2.New(token, &s2.ClientOptions{
+		client := s2.New(accessToken, &s2.ClientOptions{
 			RetryConfig: &s2.RetryConfig{
 				MaxAttempts:  5,
 				MinBaseDelay: 100 * time.Millisecond,
@@ -45,14 +45,14 @@ func main() {
 
 	// Example: Custom timeout configuration
 	{
-		token := os.Getenv("S2_ACCESS_TOKEN")
-		if token == "" {
-			token = "demo"
+		accessToken := os.Getenv("S2_ACCESS_TOKEN")
+		if accessToken == "" {
+			accessToken = "demo"
 		}
 		// ANCHOR: timeout-config
-		client := s2.New(token, &s2.ClientOptions{
+		client := s2.New(accessToken, &s2.ClientOptions{
 			ConnectionTimeout: 5 * time.Second,
-			RequestTimeout:    30 * time.Second,
+			RequestTimeout:    10 * time.Second,
 		})
 		// ANCHOR_END: timeout-config
 		fmt.Printf("Created client with timeout config: %+v\n", client)
