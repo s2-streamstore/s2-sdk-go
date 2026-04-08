@@ -5,17 +5,15 @@
 package main
 
 import (
-	"fmt"
+	"os"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
 )
 
 func main() {
-	client := s2.NewFromEnvironment(nil)
+	client := s2.New(os.Getenv("S2_ACCESS_TOKEN"), nil)
 
 	basin := client.Basin("my-basin")
-	stream := basin.Stream("my-stream")
-
-	fmt.Printf("Created client for stream: %+v\n", stream)
+	_ = basin.Stream("my-stream")
 }
 // ANCHOR_END: create-client

@@ -15,8 +15,8 @@ import (
 
 func main() {
 	ctx := context.Background()
-	token := os.Getenv("S2_ACCESS_TOKEN")
-	if token == "" {
+	accessToken := os.Getenv("S2_ACCESS_TOKEN")
+	if accessToken == "" {
 		log.Fatal("S2_ACCESS_TOKEN is required")
 	}
 	basinName := os.Getenv("S2_BASIN")
@@ -24,7 +24,7 @@ func main() {
 		log.Fatal("S2_BASIN is required")
 	}
 
-	client := s2.New(token, nil)
+	client := s2.New(accessToken, nil)
 	basin := client.Basin(basinName)
 
 	// Create a temporary stream for examples
