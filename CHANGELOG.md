@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.14.0] - 2026-04-11
+
+### Features
+
+- *(types)* Align BasinInfo with StreamInfo ([#244](https://github.com/s2-streamstore/s2-sdk-go/issues/244))
+
+### Bug Fixes
+
+- Use errors.As in shouldRetryError for wrapped S2 errors ([#253](https://github.com/s2-streamstore/s2-sdk-go/issues/253))
+- Propagate context to HTTP requests in metrics client ([#254](https://github.com/s2-streamstore/s2-sdk-go/issues/254))
+- Use timeout-bounded HTTP client for unary Read and Append ([#255](https://github.com/s2-streamstore/s2-sdk-go/issues/255))
+- Delegate CloseIdleConnections through userAgentRoundTripper ([#256](https://github.com/s2-streamstore/s2-sdk-go/issues/256))
+- Surface decompression errors for proto error responses ([#257](https://github.com/s2-streamstore/s2-sdk-go/issues/257))
+- Drain buffered ACKs when errorsCh closes before acksCh ([#258](https://github.com/s2-streamstore/s2-sdk-go/issues/258))
+- Advance read session state for ignored command records ([#259](https://github.com/s2-streamstore/s2-sdk-go/issues/259))
+- Make nack context-aware to prevent indefinite blocking ([#260](https://github.com/s2-streamstore/s2-sdk-go/issues/260))
+- Handle 416 RangeNotSatisfiable by resetting cache to stream tail ([#261](https://github.com/s2-streamstore/s2-sdk-go/issues/261))
+
+### Documentation
+
+- Update examples for centralized SDK docs ([#262](https://github.com/s2-streamstore/s2-sdk-go/issues/262))
+
+### Miscellaneous Tasks
+
+- Update s2-specs to 7d9167d ([#242](https://github.com/s2-streamstore/s2-sdk-go/issues/242))
+- Upgrade and SHA-pin GitHub Actions dependencies ([#263](https://github.com/s2-streamstore/s2-sdk-go/issues/263))
+
 ## [v0.13.3] - 2026-03-11
 
 ### Bug Fixes
@@ -14,6 +41,7 @@ All notable changes to this project will be documented in this file.
 
 - Update `LICENSE` ([#230](https://github.com/s2-streamstore/s2-sdk-go/issues/230))
 - Update s2-specs to 2ed6abf ([#206](https://github.com/s2-streamstore/s2-sdk-go/issues/206))
+- *(release)* V0.13.3 ([#232](https://github.com/s2-streamstore/s2-sdk-go/issues/232))
 
 ## [v0.13.2] - 2026-03-10
 
