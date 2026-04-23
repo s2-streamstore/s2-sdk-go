@@ -20,6 +20,7 @@ type StreamName string
 // Basin scope.
 type BasinScope string
 
+// Encryption algorithm.
 type EncryptionAlgorithm string
 type MetricUnit string
 type TimeseriesInterval string
@@ -35,7 +36,9 @@ const (
 )
 
 const (
-	EncryptionAlgorithmAegis256  EncryptionAlgorithm = "aegis-256"
+	// AEGIS-256
+	EncryptionAlgorithmAegis256 EncryptionAlgorithm = "aegis-256"
+	// AES-256-GCM
 	EncryptionAlgorithmAes256Gcm EncryptionAlgorithm = "aes-256-gcm"
 )
 
@@ -176,7 +179,7 @@ type BasinConfig struct {
 	// Create stream on read if it doesn't exist, using the default stream configuration.
 	// Defaults to false.
 	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
-	// Default encryption algorithm for newly created streams.
+	// Encryption algorithm to apply to newly created streams in the basin.
 	// Appends and reads to encrypted streams require a client-supplied encryption key.
 	StreamCipher *EncryptionAlgorithm `json:"stream_cipher,omitempty"`
 	// Default stream configuration.
@@ -249,8 +252,7 @@ type BasinReconfiguration struct {
 	CreateStreamOnAppend *bool `json:"create_stream_on_append,omitempty"`
 	// Create a stream on read.
 	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
-	// Default encryption algorithm for newly created streams.
-	// Appends and reads to encrypted streams require a client-supplied encryption key.
+	// Override for the existing stream cipher.
 	StreamCipher *EncryptionAlgorithm `json:"stream_cipher,omitempty"`
 	// Set to true to clear the stream cipher, removing encryption for newly created streams.
 	// Takes precedence over StreamCipher.

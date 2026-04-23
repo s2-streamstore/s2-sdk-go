@@ -71,20 +71,6 @@ The clients can be accessed like so:
 	basin := client.Basin("my-basin")        // basin level
 	stream := basin.Stream("my-stream")      // stream level
 
-# Client-Supplied Encryption Keys
-
-Use [NewEncryptionKey] or [NewEncryptionKeyFromBytes] to configure a stream handle for encrypted
-append and read operations:
-
-	key, err := s2.NewEncryptionKeyFromBytes(rawKey)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	stream := basin.StreamWithOptions("my-stream", &s2.StreamOptions{
-		EncryptionKey: &key,
-	})
-
 # Reading Records
 
 Read session
