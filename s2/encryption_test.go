@@ -120,6 +120,87 @@ func TestBasinReconfigurationStreamCipherJSON(t *testing.T) {
 	}
 }
 
+func TestBasinReconfigurationStreamCipherClearJSON(t *testing.T) {
+	payload, err := json.Marshal(BasinReconfiguration{ClearStreamCipher: true})
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	if !bytes.Contains(payload, []byte(`"stream_cipher":null`)) {
+		t.Fatalf("expected stream_cipher null in payload, got %s", payload)
+	}
+}
+
+func TestBasinReconfigurationStreamCipherAbsentJSON(t *testing.T) {
+	payload, err := json.Marshal(BasinReconfiguration{})
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	if bytes.Contains(payload, []byte(`"stream_cipher"`)) {
+		t.Fatalf("expected stream_cipher absent from payload, got %s", payload)
+	}
+}
+
+func TestStreamReconfigurationClearFieldsJSON(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   StreamReconfiguration
+		wantKey string
+	}{
+		{"clear storage_class", StreamReconfiguration{ClearStorageClass: true}, `"storage_class":null`},
+		{"clear retention_policy", StreamReconfiguration{ClearRetentionPolicy: true}, `"retention_policy":null`},
+		{"clear timestamping", StreamReconfiguration{ClearTimestamping: true}, `"timestamping":null`},
+		{"clear delete_on_empty", StreamReconfiguration{ClearDeleteOnEmpty: true}, `"delete_on_empty":null`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := json.Marshal(tc.input)
+			if err != nil {
+				t.Fatalf("marshal failed: %v", err)
+			}
+			if !bytes.Contains(payload, []byte(tc.wantKey)) {
+				t.Fatalf("expected %s in payload, got %s", tc.wantKey, payload)
+			}
+		})
+	}
+}
+
+func TestStreamReconfigurationAbsentFieldsJSON(t *testing.T) {
+	payload, err := json.Marshal(StreamReconfiguration{})
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	for _, key := range []string{"storage_class", "retention_policy", "timestamping", "delete_on_empty"} {
+		if bytes.Contains(payload, []byte(`"`+key+`"`)) {
+			t.Fatalf("expected %s absent from payload, got %s", key, payload)
+		}
+	}
+}
+
+func TestTimestampingReconfigurationClearFieldsJSON(t *testing.T) {
+	payload, err := json.Marshal(TimestampingReconfiguration{ClearMode: true, ClearUncapped: true})
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	for _, want := range []string{`"mode":null`, `"uncapped":null`} {
+		if !bytes.Contains(payload, []byte(want)) {
+			t.Fatalf("expected %s in payload, got %s", want, payload)
+		}
+	}
+}
+
+func TestDeleteOnEmptyReconfigurationClearJSON(t *testing.T) {
+	payload, err := json.Marshal(DeleteOnEmptyReconfiguration{ClearMinAgeSecs: true})
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	if !bytes.Contains(payload, []byte(`"min_age_secs":null`)) {
+		t.Fatalf("expected min_age_secs null in payload, got %s", payload)
+	}
+}
+
 func TestStreamWithOptionsAppendSetsEncryptionHeader(t *testing.T) {
 	rt := &encryptionHeaderRoundTripper{response: &pb.AppendAck{}}
 	stream, key := newTestEncryptedStreamClient(t, rt)
