@@ -50,7 +50,14 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 
 	ack, err := withAppendRetries(ctx, s.basinClient.retryConfig, s.logger, prepared, func() (*AppendAck, error) {
 		var pbAck pb.AppendAck
-		if err := httpClient.requestProto(ctx, "POST", path, pbInput, &pbAck); err != nil {
+		if err := httpClient.requestProtoWithHeaders(
+			ctx,
+			"POST",
+			path,
+			pbInput,
+			&pbAck,
+			encryptionHeaders(s.encryptionKey),
+		); err != nil {
 			return nil, err
 		}
 
@@ -121,6 +128,7 @@ func (p *transportAppendSession) start(ctx context.Context) error {
 	if basinName := p.streamClient.basinClient.basinHeaderValue(); basinName != "" {
 		req.Header.Set("s2-basin", basinName)
 	}
+	setEncryptionKeyHeader(req.Header, p.streamClient.encryptionKey)
 
 	p.mu.Lock()
 	p.requestWriter = pipeWriter

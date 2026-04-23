@@ -165,6 +165,7 @@ func ExampleBasinsClient_Create() {
 		Basin: "my-new-basin",
 		Scope: s2.Ptr(s2.BasinScopeAwsUsEast1),
 		Config: &s2.BasinConfig{
+			StreamCipher: s2.Ptr(s2.EncryptionAlgorithmAes256Gcm),
 			DefaultStreamConfig: &s2.StreamConfig{
 				StorageClass: s2.Ptr(s2.StorageClassStandard),
 			},
@@ -364,6 +365,20 @@ func ExampleStreamClient_CheckTail() {
 	}
 
 	fmt.Printf("tail: seq=%d ts=%d\n", tail.Tail.SeqNum, tail.Tail.Timestamp)
+}
+
+func ExampleBasinClient_StreamWithOptions() {
+	client := s2.New("your-access-token", nil)
+
+	key, err := s2.NewEncryptionKey("AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=")
+	if err != nil {
+		log.Fatalf("new encryption key: %v", err)
+	}
+
+	stream := client.Basin("my-basin").StreamWithOptions("my-stream", &s2.StreamOptions{
+		EncryptionKey: &key,
+	})
+	_ = stream
 }
 
 func ExampleStreamClient_Append() {

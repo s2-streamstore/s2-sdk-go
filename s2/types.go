@@ -19,6 +19,7 @@ type StreamName string
 // Basin scope.
 type BasinScope string
 
+type EncryptionAlgorithm string
 type MetricUnit string
 type TimeseriesInterval string
 type AccountMetricSet string
@@ -30,6 +31,11 @@ type TimestampingMode string
 
 const (
 	BasinScopeAwsUsEast1 BasinScope = "aws:us-east-1"
+)
+
+const (
+	EncryptionAlgorithmAegis256  EncryptionAlgorithm = "aegis-256"
+	EncryptionAlgorithmAes256Gcm EncryptionAlgorithm = "aes-256-gcm"
 )
 
 const (
@@ -169,6 +175,9 @@ type BasinConfig struct {
 	// Create stream on read if it doesn't exist, using the default stream configuration.
 	// Defaults to false.
 	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
+	// Default encryption algorithm for newly created streams.
+	// Appends and reads to encrypted streams require a client-supplied encryption key.
+	StreamCipher *EncryptionAlgorithm `json:"stream_cipher,omitempty"`
 	// Default stream configuration.
 	DefaultStreamConfig *StreamConfig `json:"default_stream_config,omitempty"`
 }
@@ -179,6 +188,8 @@ type StreamInfo struct {
 	CreatedAt time.Time `json:"created_at"`
 	// Deletion time, if the stream is being deleted.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	// Encryption algorithm for the stream, if encryption is enabled.
+	Cipher *EncryptionAlgorithm `json:"cipher,omitempty"`
 }
 
 type StreamConfig struct {
@@ -237,6 +248,9 @@ type BasinReconfiguration struct {
 	CreateStreamOnAppend *bool `json:"create_stream_on_append,omitempty"`
 	// Create a stream on read.
 	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
+	// Default encryption algorithm for newly created streams.
+	// Appends and reads to encrypted streams require a client-supplied encryption key.
+	StreamCipher *EncryptionAlgorithm `json:"stream_cipher,omitempty"`
 	// Basin configuration.
 	DefaultStreamConfig *StreamReconfiguration `json:"default_stream_config,omitempty"`
 }

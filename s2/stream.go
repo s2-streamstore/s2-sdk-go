@@ -21,18 +21,40 @@ type StreamClient struct {
 	name                 StreamName
 	basinClient          *BasinClient
 	logger               *slog.Logger
+	encryptionKey        *EncryptionKey
 	appendSessionFactory func(ctx context.Context) (*transportAppendSession, error)
 }
 
 func (b *BasinClient) Stream(name StreamName) *StreamClient {
+	return b.StreamWithOptions(name, nil)
+}
+
+// Options for creating a [StreamClient].
+type StreamOptions struct {
+	// Client-supplied encryption key material for append and read operations.
+	EncryptionKey *EncryptionKey
+}
+
+// Create a stream client with optional client-side settings.
+func (b *BasinClient) StreamWithOptions(name StreamName, opts *StreamOptions) *StreamClient {
 	if name == "" {
 		panic("stream name cannot be empty")
 	}
 
+	var encryptionKey *EncryptionKey
+	if opts != nil && opts.EncryptionKey != nil {
+		if opts.EncryptionKey.isZero() {
+			panic("stream encryption key cannot be empty; use s2.NewEncryptionKey or s2.NewEncryptionKeyFromBytes")
+		}
+
+		encryptionKey = cloneEncryptionKeyPtr(opts.EncryptionKey)
+	}
+
 	return &StreamClient{
-		name:        name,
-		basinClient: b,
-		logger:      b.logger,
+		name:          name,
+		basinClient:   b,
+		logger:        b.logger,
+		encryptionKey: encryptionKey,
 	}
 }
 
@@ -272,6 +294,15 @@ func cloneStringPtr(src *string) *string {
 	if src == nil {
 		return nil
 	}
+	val := *src
+	return &val
+}
+
+func cloneEncryptionKeyPtr(src *EncryptionKey) *EncryptionKey {
+	if src == nil {
+		return nil
+	}
+
 	val := *src
 	return &val
 }

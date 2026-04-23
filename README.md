@@ -113,6 +113,22 @@ go run ./examples/starwars -basin "<basin name>" -stream "<stream name>"
 Head over to [pkg.go.dev](https://pkg.go.dev/github.com/s2-streamstore/s2-sdk-go/s2)
 for detailed documentation and package reference.
 
+## Client-Supplied Encryption Keys
+
+Use `NewEncryptionKey` or `NewEncryptionKeyFromBytes` to create a stream handle for encrypted
+append and read operations:
+
+```go
+key, err := s2.NewEncryptionKeyFromBytes(rawKey)
+if err != nil {
+    log.Fatal(err)
+}
+
+stream := basin.StreamWithOptions("my-stream", &s2.StreamOptions{
+    EncryptionKey: &key,
+})
+```
+
 ## Feedback
 
 We use [Github Issues](https://github.com/s2-streamstore/s2-sdk-go/issues) to
