@@ -50,13 +50,13 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 
 	ack, err := withAppendRetries(ctx, s.basinClient.retryConfig, s.logger, prepared, func() (*AppendAck, error) {
 		var pbAck pb.AppendAck
-		if err := httpClient.requestProtoWithHeaders(
+		if err := httpClient.requestProto(
 			ctx,
 			"POST",
 			path,
 			pbInput,
 			&pbAck,
-			encryptionHeaders(s.encryptionKey),
+			s.encryptionKey,
 		); err != nil {
 			return nil, err
 		}

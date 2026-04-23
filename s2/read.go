@@ -106,13 +106,13 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		}
 
 		var pbBatch pb.ReadBatch
-		if err := httpClient.requestProtoWithHeaders(
+		if err := httpClient.requestProto(
 			ctx,
 			"GET",
 			path,
 			nil,
 			&pbBatch,
-			encryptionHeaders(s.encryptionKey),
+			s.encryptionKey,
 		); err != nil {
 			return nil, err
 		}

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 )
 
@@ -14,31 +15,51 @@ const (
 
 // Encryption key material for append and read operations on encrypted streams.
 type EncryptionKey struct {
-	encoded string
+	material *encryptionKeyMaterial
+}
+
+type encryptionKeyMaterial struct {
+	encoded [maxEncryptionKeyHeaderValueLen]byte
+	length  int
 }
 
 // Create a new [EncryptionKey] from base64-encoded key material.
 func NewEncryptionKey(key string) (EncryptionKey, error) {
 	normalized := strings.TrimSpace(key)
-	return newEncryptionKey(normalized, len(normalized))
+	if normalized == "" || len(normalized) > maxEncryptionKeyHeaderValueLen {
+		return EncryptionKey{}, invalidEncryptionKeyLength(len(normalized))
+	}
+
+	material := newEncryptionKeyMaterial(len(normalized))
+	copy(material.encoded[:], normalized)
+
+	return EncryptionKey{material: material}, nil
 }
 
 // Create a new [EncryptionKey] from raw key material.
 func NewEncryptionKeyFromBytes(key []byte) (EncryptionKey, error) {
-	encoded := base64.StdEncoding.EncodeToString(key)
-	return newEncryptionKey(encoded, len(key))
-}
-
-func newEncryptionKey(encoded string, invalidLength int) (EncryptionKey, error) {
-	if encoded == "" || len(encoded) > maxEncryptionKeyHeaderValueLen {
-		return EncryptionKey{}, invalidEncryptionKeyLength(invalidLength)
+	encodedLen := base64.StdEncoding.EncodedLen(len(key))
+	if encodedLen == 0 || encodedLen > maxEncryptionKeyHeaderValueLen {
+		return EncryptionKey{}, invalidEncryptionKeyLength(len(key))
 	}
 
-	return EncryptionKey{encoded: encoded}, nil
+	material := newEncryptionKeyMaterial(encodedLen)
+	base64.StdEncoding.Encode(material.encoded[:encodedLen], key)
+
+	return EncryptionKey{material: material}, nil
+}
+
+func newEncryptionKeyMaterial(length int) *encryptionKeyMaterial {
+	material := &encryptionKeyMaterial{length: length}
+	runtime.SetFinalizer(material, func(material *encryptionKeyMaterial) {
+		clear(material.encoded[:])
+		material.length = 0
+	})
+	return material
 }
 
 func (k EncryptionKey) String() string {
-	if k.encoded == "" {
+	if k.isZero() {
 		return "EncryptionKey(<invalid>)"
 	}
 
@@ -50,11 +71,15 @@ func (k EncryptionKey) GoString() string {
 }
 
 func (k EncryptionKey) headerValue() string {
-	return k.encoded
+	if k.material == nil {
+		return ""
+	}
+
+	return string(k.material.encoded[:k.material.length])
 }
 
 func (k EncryptionKey) isZero() bool {
-	return k.encoded == ""
+	return k.material == nil || k.material.length == 0
 }
 
 func invalidEncryptionKeyLength(length int) error {
@@ -69,12 +94,4 @@ func setEncryptionKeyHeader(headers http.Header, key *EncryptionKey) {
 	}
 
 	headers.Set(s2EncryptionKeyHeader, key.headerValue())
-}
-
-func encryptionHeaders(key *EncryptionKey) map[string]string {
-	if key == nil {
-		return nil
-	}
-
-	return map[string]string{s2EncryptionKeyHeader: key.headerValue()}
 }

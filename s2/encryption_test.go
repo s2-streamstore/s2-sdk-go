@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -72,6 +73,10 @@ func TestEncryptionKeyStringRedactsValue(t *testing.T) {
 
 	if got := key.String(); got != "EncryptionKey(<redacted>)" {
 		t.Fatalf("expected redacted string, got %q", got)
+	}
+
+	if got := fmt.Sprintf("%#v", key); got != "EncryptionKey(<redacted>)" {
+		t.Fatalf("expected redacted GoString, got %q", got)
 	}
 }
 

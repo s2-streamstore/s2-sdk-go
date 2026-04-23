@@ -92,23 +92,19 @@ func (h *httpClient) requestWithHeaders(ctx context.Context, method, path string
 	return nil
 }
 
-func (h *httpClient) requestProto(ctx context.Context, method, path string, body proto.Message, result proto.Message) error {
-	return h.requestProtoWithHeaders(ctx, method, path, body, result, nil)
-}
-
-func (h *httpClient) requestProtoWithHeaders(
+func (h *httpClient) requestProto(
 	ctx context.Context,
 	method, path string,
 	body proto.Message,
 	result proto.Message,
-	extraHeaders map[string]string,
+	encryptionKey *EncryptionKey,
 ) error {
 	const protoContentType = "application/protobuf"
 	logInfo(h.logger, "s2 http proto request",
 		"method", method,
 		"path", path,
 		"url", h.baseURL+path,
-		"extra_headers", len(extraHeaders),
+		"encryption", encryptionKey != nil,
 		"compression", h.compression.ContentEncoding(),
 	)
 
@@ -150,9 +146,7 @@ func (h *httpClient) requestProtoWithHeaders(
 	if h.basinName != "" {
 		req.Header.Set("s2-basin", h.basinName)
 	}
-	for k, v := range extraHeaders {
-		req.Header.Set(k, v)
-	}
+	setEncryptionKeyHeader(req.Header, encryptionKey)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
