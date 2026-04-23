@@ -89,7 +89,7 @@ func invalidEncryptionKeyLength(length int) error {
 }
 
 func setEncryptionKeyHeader(headers http.Header, key *EncryptionKey) {
-	if key == nil {
+	if key == nil || key.isZero() {
 		return
 	}
 
