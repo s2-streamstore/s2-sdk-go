@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.15.0] - 2026-04-23
+
+### Features
+
+- Encryption support ([#274](https://github.com/s2-streamstore/s2-sdk-go/issues/274))
+
+### Miscellaneous Tasks
+
+- Update s2-specs to 751e3b4 ([#273](https://github.com/s2-streamstore/s2-sdk-go/issues/273))
+
 ## [v0.14.0] - 2026-04-11
 
 ### Features
@@ -28,6 +38,7 @@ All notable changes to this project will be documented in this file.
 
 - Update s2-specs to 7d9167d ([#242](https://github.com/s2-streamstore/s2-sdk-go/issues/242))
 - Upgrade and SHA-pin GitHub Actions dependencies ([#263](https://github.com/s2-streamstore/s2-sdk-go/issues/263))
+- *(release)* V0.14.0 ([#264](https://github.com/s2-streamstore/s2-sdk-go/issues/264))
 
 ## [v0.13.3] - 2026-03-11
 
