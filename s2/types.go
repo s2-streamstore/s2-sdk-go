@@ -1,6 +1,7 @@
 package s2
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -19,6 +20,8 @@ type StreamName string
 // Basin scope.
 type BasinScope string
 
+// Encryption algorithm.
+type EncryptionAlgorithm string
 type MetricUnit string
 type TimeseriesInterval string
 type AccountMetricSet string
@@ -30,6 +33,13 @@ type TimestampingMode string
 
 const (
 	BasinScopeAwsUsEast1 BasinScope = "aws:us-east-1"
+)
+
+const (
+	// AEGIS-256
+	EncryptionAlgorithmAegis256 EncryptionAlgorithm = "aegis-256"
+	// AES-256-GCM
+	EncryptionAlgorithmAes256Gcm EncryptionAlgorithm = "aes-256-gcm"
 )
 
 const (
@@ -169,6 +179,9 @@ type BasinConfig struct {
 	// Create stream on read if it doesn't exist, using the default stream configuration.
 	// Defaults to false.
 	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
+	// Encryption algorithm to apply to newly created streams in the basin.
+	// Appends and reads to encrypted streams require a client-supplied encryption key.
+	StreamCipher *EncryptionAlgorithm `json:"stream_cipher,omitempty"`
 	// Default stream configuration.
 	DefaultStreamConfig *StreamConfig `json:"default_stream_config,omitempty"`
 }
@@ -179,6 +192,8 @@ type StreamInfo struct {
 	CreatedAt time.Time `json:"created_at"`
 	// Deletion time, if the stream is being deleted.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	// Encryption algorithm for the stream, if encryption is enabled.
+	Cipher *EncryptionAlgorithm `json:"cipher,omitempty"`
 }
 
 type StreamConfig struct {
@@ -237,33 +252,141 @@ type BasinReconfiguration struct {
 	CreateStreamOnAppend *bool `json:"create_stream_on_append,omitempty"`
 	// Create a stream on read.
 	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
-	// Basin configuration.
-	DefaultStreamConfig *StreamReconfiguration `json:"default_stream_config,omitempty"`
+	// Override for the existing stream cipher.
+	StreamCipher *EncryptionAlgorithm `json:"stream_cipher,omitempty"`
+	// Set to true to clear the stream cipher, removing encryption for newly created streams.
+	// Takes precedence over StreamCipher.
+	ClearStreamCipher        bool                   `json:"-"`
+	DefaultStreamConfig      *StreamReconfiguration `json:"default_stream_config,omitempty"`
+	// Set to true to clear the default stream config.
+	// Takes precedence over DefaultStreamConfig.
+	ClearDefaultStreamConfig bool `json:"-"`
+}
+
+func (r BasinReconfiguration) MarshalJSON() ([]byte, error) {
+	m := make(map[string]any)
+	if r.CreateStreamOnAppend != nil {
+		m["create_stream_on_append"] = *r.CreateStreamOnAppend
+	}
+	if r.CreateStreamOnRead != nil {
+		m["create_stream_on_read"] = *r.CreateStreamOnRead
+	}
+	switch {
+	case r.ClearStreamCipher:
+		m["stream_cipher"] = nil
+	case r.StreamCipher != nil:
+		m["stream_cipher"] = *r.StreamCipher
+	}
+	switch {
+	case r.ClearDefaultStreamConfig:
+		m["default_stream_config"] = nil
+	case r.DefaultStreamConfig != nil:
+		m["default_stream_config"] = r.DefaultStreamConfig
+	}
+	return json.Marshal(m)
 }
 
 type StreamReconfiguration struct {
 	// Delete-on-empty configuration.
 	DeleteOnEmpty *DeleteOnEmptyReconfiguration `json:"delete_on_empty,omitempty"`
+	// Set to true to clear the delete-on-empty configuration.
+	// Takes precedence over DeleteOnEmpty.
+	ClearDeleteOnEmpty bool `json:"-"`
 	// Retention policy for the stream.
 	// If unspecified, the default is to retain records for 7 days.
 	RetentionPolicy *RetentionPolicy `json:"retention_policy,omitempty"`
+	// Set to true to clear the retention policy, restoring the server default (7 days).
+	// Takes precedence over RetentionPolicy.
+	ClearRetentionPolicy bool `json:"-"`
 	// Storage class for recent writes.
 	StorageClass *StorageClass `json:"storage_class,omitempty"`
+	// Set to true to clear the storage class, restoring the server default.
+	// Takes precedence over StorageClass.
+	ClearStorageClass bool `json:"-"`
 	// Timestamping behavior.
 	Timestamping *TimestampingReconfiguration `json:"timestamping,omitempty"`
+	// Set to true to clear the timestamping configuration, restoring the server default.
+	// Takes precedence over Timestamping.
+	ClearTimestamping bool `json:"-"`
+}
+
+func (r StreamReconfiguration) MarshalJSON() ([]byte, error) {
+	m := make(map[string]any)
+	switch {
+	case r.ClearDeleteOnEmpty:
+		m["delete_on_empty"] = nil
+	case r.DeleteOnEmpty != nil:
+		m["delete_on_empty"] = r.DeleteOnEmpty
+	}
+	switch {
+	case r.ClearRetentionPolicy:
+		m["retention_policy"] = nil
+	case r.RetentionPolicy != nil:
+		m["retention_policy"] = r.RetentionPolicy
+	}
+	switch {
+	case r.ClearStorageClass:
+		m["storage_class"] = nil
+	case r.StorageClass != nil:
+		m["storage_class"] = *r.StorageClass
+	}
+	switch {
+	case r.ClearTimestamping:
+		m["timestamping"] = nil
+	case r.Timestamping != nil:
+		m["timestamping"] = r.Timestamping
+	}
+	return json.Marshal(m)
 }
 
 type DeleteOnEmptyReconfiguration struct {
 	// Minimum age in seconds before an empty stream can be deleted.
 	// Set to 0 to disable delete-on-empty (don't delete automatically).
 	MinAgeSecs *int64 `json:"min_age_secs,omitempty"`
+	// Set to true to clear the min_age_secs field, restoring the server default.
+	// Takes precedence over MinAgeSecs.
+	ClearMinAgeSecs bool `json:"-"`
+}
+
+func (r DeleteOnEmptyReconfiguration) MarshalJSON() ([]byte, error) {
+	m := make(map[string]any)
+	switch {
+	case r.ClearMinAgeSecs:
+		m["min_age_secs"] = nil
+	case r.MinAgeSecs != nil:
+		m["min_age_secs"] = *r.MinAgeSecs
+	}
+	return json.Marshal(m)
 }
 
 type TimestampingReconfiguration struct {
 	// Timestamping mode for appends that influences how timestamps are handled.
-	Mode *TimestampingMode `json:"mode,omitempty"`
+	Mode      *TimestampingMode `json:"mode,omitempty"`
+	// Set to true to clear the timestamping mode, restoring the server default.
+	// Takes precedence over Mode.
+	ClearMode bool              `json:"-"`
 	// Allow client-specified timestamps to exceed the arrival time.
 	Uncapped *bool `json:"uncapped,omitempty"`
+	// Set to true to clear the uncapped setting, restoring the server default.
+	// Takes precedence over Uncapped.
+	ClearUncapped bool `json:"-"`
+}
+
+func (r TimestampingReconfiguration) MarshalJSON() ([]byte, error) {
+	m := make(map[string]any)
+	switch {
+	case r.ClearMode:
+		m["mode"] = nil
+	case r.Mode != nil:
+		m["mode"] = *r.Mode
+	}
+	switch {
+	case r.ClearUncapped:
+		m["uncapped"] = nil
+	case r.Uncapped != nil:
+		m["uncapped"] = *r.Uncapped
+	}
+	return json.Marshal(m)
 }
 
 type ScalarMetric struct {

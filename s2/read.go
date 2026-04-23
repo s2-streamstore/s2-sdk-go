@@ -106,7 +106,14 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		}
 
 		var pbBatch pb.ReadBatch
-		if err := httpClient.requestProto(ctx, "GET", path, nil, &pbBatch); err != nil {
+		if err := httpClient.requestProto(
+			ctx,
+			"GET",
+			path,
+			nil,
+			&pbBatch,
+			s.encryptionKey,
+		); err != nil {
 			return nil, err
 		}
 
@@ -137,12 +144,12 @@ type streamReader struct {
 
 	baseOpts *ReadOptions
 
-	stateMu        sync.RWMutex
-	lastTail       *StreamPosition
-	lastTailAt     time.Time
-	nextSeq        uint64
-	nextTS         uint64
-	hasNextSeq     bool
+	stateMu    sync.RWMutex
+	lastTail   *StreamPosition
+	lastTailAt time.Time
+	nextSeq    uint64
+	nextTS     uint64
+	hasNextSeq bool
 
 	respBody       io.ReadCloser
 	bodyMu         sync.Mutex
@@ -429,6 +436,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 	if basinName := r.streamClient.basinClient.basinHeaderValue(); basinName != "" {
 		req.Header.Set("s2-basin", basinName)
 	}
+	setEncryptionKeyHeader(req.Header, r.streamClient.encryptionKey)
 
 	resp, err := r.streamClient.getHTTPClient().Do(req)
 	if err != nil {
