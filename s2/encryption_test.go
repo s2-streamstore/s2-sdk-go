@@ -71,11 +71,11 @@ func TestEncryptionKeyStringRedactsValue(t *testing.T) {
 		t.Fatalf("new encryption key failed: %v", err)
 	}
 
-	if got := key.String(); got != "EncryptionKey(<redacted>)" {
+	if got := key.String(); got != encryptionKeyRedacted {
 		t.Fatalf("expected redacted string, got %q", got)
 	}
 
-	if got := fmt.Sprintf("%#v", key); got != "EncryptionKey(<redacted>)" {
+	if got := fmt.Sprintf("%#v", key); got != encryptionKeyRedacted {
 		t.Fatalf("expected redacted GoString, got %q", got)
 	}
 }

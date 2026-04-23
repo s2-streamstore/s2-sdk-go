@@ -11,6 +11,8 @@ import (
 const (
 	maxEncryptionKeyHeaderValueLen = 44
 	s2EncryptionKeyHeader          = "s2-encryption-key"
+	encryptionKeyRedacted          = "EncryptionKey(<redacted>)"
+	encryptionKeyInvalid           = "EncryptionKey(<invalid>)"
 )
 
 // Encryption key material for append and read operations on encrypted streams.
@@ -60,10 +62,10 @@ func newEncryptionKeyMaterial(length int) *encryptionKeyMaterial {
 
 func (k EncryptionKey) String() string {
 	if k.isZero() {
-		return "EncryptionKey(<invalid>)"
+		return encryptionKeyInvalid
 	}
 
-	return "EncryptionKey(<redacted>)"
+	return encryptionKeyRedacted
 }
 
 func (k EncryptionKey) GoString() string {
