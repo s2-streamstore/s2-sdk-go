@@ -140,7 +140,9 @@ func (h *httpClient) requestProto(
 	}
 	if result != nil {
 		req.Header.Set("Accept", protoContentType)
-		req.Header.Set("Accept-Encoding", "zstd, gzip")
+		if encoding := h.compression.AcceptEncoding(); encoding != "" {
+			req.Header.Set("Accept-Encoding", encoding)
+		}
 	}
 
 	if h.basinName != "" {
