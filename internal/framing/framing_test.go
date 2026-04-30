@@ -365,3 +365,22 @@ func TestRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestAcceptEncoding(t *testing.T) {
+	cases := []struct {
+		name string
+		c    CompressionType
+		want string
+	}{
+		{"none", CompressionNone, ""},
+		{"gzip", CompressionGzip, "zstd, gzip"},
+		{"zstd", CompressionZstd, "zstd, gzip"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.c.AcceptEncoding(); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

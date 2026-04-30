@@ -431,7 +431,9 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 
 	req.Header.Set("Authorization", "Bearer "+r.streamClient.basinClient.accessToken)
 	req.Header.Set("Accept", "application/protobuf")
-	req.Header.Set("Accept-Encoding", "zstd, gzip")
+	if encoding := r.streamClient.basinClient.compression.AcceptEncoding(); encoding != "" {
+		req.Header.Set("Accept-Encoding", encoding)
+	}
 	req.Header.Set("Content-Type", "s2s/proto")
 	if basinName := r.streamClient.basinClient.basinHeaderValue(); basinName != "" {
 		req.Header.Set("s2-basin", basinName)
