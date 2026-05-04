@@ -123,7 +123,9 @@ func (p *transportAppendSession) start(ctx context.Context) error {
 
 	req.Header.Set("Authorization", "Bearer "+p.streamClient.basinClient.accessToken)
 	req.Header.Set("Accept", "application/protobuf")
-	req.Header.Set("Accept-Encoding", "zstd, gzip")
+	if encoding := p.streamClient.basinClient.compression.AcceptEncoding(); encoding != "" {
+		req.Header.Set("Accept-Encoding", encoding)
+	}
 	req.Header.Set("Content-Type", "s2s/proto")
 	if basinName := p.streamClient.basinClient.basinHeaderValue(); basinName != "" {
 		req.Header.Set("s2-basin", basinName)

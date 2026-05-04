@@ -20,6 +20,16 @@ func (c CompressionType) ContentEncoding() string {
 	}
 }
 
+// AcceptEncoding returns the Accept-Encoding header value advertising
+// algorithms the client can decode, or "" when the client opted out via
+// CompressionNone.
+func (c CompressionType) AcceptEncoding() string {
+	if c == CompressionNone {
+		return ""
+	}
+	return "zstd, gzip"
+}
+
 func ParseContentEncoding(encoding string) CompressionType {
 	switch encoding {
 	case "zstd":
