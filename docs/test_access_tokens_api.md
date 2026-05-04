@@ -285,7 +285,7 @@
   - Expected: SDK validation error or 422 (`invalid`)
 
 - **Invalid token ID (too long)**
-  - Input: `id=<97+ characters>`
+  - Input: `id=<97+ bytes>`
   - Expected: SDK validation error or 422 (`invalid`)
 
 - **Permission escalation attempt (ops)**
