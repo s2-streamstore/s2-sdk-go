@@ -78,32 +78,37 @@ func (tam *toAckMap) MarkDone(ctx context.Context, records []s2.SequencedRecord,
 	batchStatus.Acked = true
 	tam.inner.Set(seqNum, batchStatus)
 
-	var lastAcked *batchAckStatus
-
-	for {
-		_, first, ok := tam.inner.Min()
-		if !ok || !first.Acked {
-			// Immediately break after finding the first one that's not acked.
-			break
+	// Walk the contiguous prefix of acked batches without mutating the map: if
+	// the cache update fails we leave tracking untouched so the user can retry
+	// (or so a subsequent contiguous ack can sweep the range up).
+	var (
+		toDelete  []uint64
+		lastAcked *batchAckStatus
+	)
+	tam.inner.Scan(func(k uint64, v batchAckStatus) bool {
+		if !v.Acked {
+			return false
 		}
-
-		if lastAcked != nil && first.FirstSeqNum != lastAcked.LastSeqNum+1 {
-			// We only want to ack continuous batches. Ensures that everything
-			// has been received.
-			break
+		if lastAcked != nil && v.FirstSeqNum != lastAcked.LastSeqNum+1 {
+			return false
 		}
-
-		// Pop this batch
-		tam.inner.Delete(first.FirstSeqNum)
-		lastAcked = &first
-	}
+		toDelete = append(toDelete, k)
+		cur := v
+		lastAcked = &cur
+		return true
+	})
 
 	if lastAcked != nil && updateCache {
 		nextSeqNum := lastAcked.LastSeqNum + 1
 		tam.logger.With("stream", tam.stream, "start_seq_num", nextSeqNum).Debug("Updating cached sequence number")
-		return tam.cache.Set(ctx, tam.stream, nextSeqNum)
+		if err := tam.cache.Set(ctx, tam.stream, nextSeqNum); err != nil {
+			return err
+		}
 	}
 
+	for _, k := range toDelete {
+		tam.inner.Delete(k)
+	}
 	return nil
 }
 
