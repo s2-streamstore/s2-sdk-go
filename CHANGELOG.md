@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.16.0] - 2026-05-05
+
+### Features
+
+- Add aws:us-west-2 and aws:eu-north-1 basin scopes ([#286](https://github.com/s2-streamstore/s2-sdk-go/issues/286))
+
+### Bug Fixes
+
+- Omit Accept-Encoding when Compression is None ([#279](https://github.com/s2-streamstore/s2-sdk-go/issues/279))
+- Validate access token ID length by bytes, not runes ([#280](https://github.com/s2-streamstore/s2-sdk-go/issues/280))
+- *(bento)* Persist cache before deleting acked batches from tracking ([#283](https://github.com/s2-streamstore/s2-sdk-go/issues/283))
+- Scope tail watchdog to network wait only ([#284](https://github.com/s2-streamstore/s2-sdk-go/issues/284))
+- Resolve pending batches on ctx cancellation in flushLocked ([#285](https://github.com/s2-streamstore/s2-sdk-go/issues/285))
+- Iter Limit is a per-page hint, not a total cap ([#287](https://github.com/s2-streamstore/s2-sdk-go/issues/287))
+
+### Documentation
+
+- Correct access token ID length from characters to bytes ([#282](https://github.com/s2-streamstore/s2-sdk-go/issues/282))
+
+### Miscellaneous Tasks
+
+- Encryption example for doc gen ([#276](https://github.com/s2-streamstore/s2-sdk-go/issues/276))
+- Update s2-specs to a47ed3e ([#278](https://github.com/s2-streamstore/s2-sdk-go/issues/278))
+- Update s2-specs to f43a620 ([#281](https://github.com/s2-streamstore/s2-sdk-go/issues/281))
+
 ## [v0.15.0] - 2026-04-23
 
 ### Features
@@ -11,6 +36,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Update s2-specs to 751e3b4 ([#273](https://github.com/s2-streamstore/s2-sdk-go/issues/273))
+- *(release)* V0.15.0 ([#275](https://github.com/s2-streamstore/s2-sdk-go/issues/275))
 
 ## [v0.14.0] - 2026-04-11
 
