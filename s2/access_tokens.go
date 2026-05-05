@@ -47,22 +47,16 @@ func (a *AccessTokensClient) List(ctx context.Context, args *ListAccessTokensArg
 }
 
 // Iterate over access tokens.
+// Limit, when set, is the page size for each underlying List call, not a total cap.
+// Iteration drains all matching access tokens; break out of the loop to stop early, or use [AccessTokensClient.List] for a capped single-page result.
 func (a *AccessTokensClient) Iter(ctx context.Context, args *ListAccessTokensArgs) *AccessTokenIterator {
 	base := ListAccessTokensArgs{}
 	if args != nil {
 		base = *args
 	}
-	remaining := copyLimit(base.Limit)
-	base.Limit = nil
 	fetch := func(ctx context.Context, startAfter string) (*pagedResponse[AccessTokenInfo], error) {
-		if remainingDepleted(remaining) {
-			return &pagedResponse[AccessTokenInfo]{}, nil
-		}
 		params := base
 		params.StartAfter = startAfter
-		if limit, ok := nextRequestLimit(remaining); ok {
-			params.Limit = &limit
-		}
 		resp, err := a.List(ctx, &params)
 		if err != nil {
 			return nil, err
@@ -70,9 +64,6 @@ func (a *AccessTokensClient) Iter(ctx context.Context, args *ListAccessTokensArg
 		next := ""
 		if resp.HasMore && len(resp.AccessTokens) > 0 {
 			next = string(resp.AccessTokens[len(resp.AccessTokens)-1].ID)
-		}
-		if consumeRemaining(remaining, len(resp.AccessTokens)) {
-			next = ""
 		}
 		return &pagedResponse[AccessTokenInfo]{items: resp.AccessTokens, nextKey: next}, nil
 	}
