@@ -32,7 +32,9 @@ type StorageClass string
 type TimestampingMode string
 
 const (
-	BasinScopeAwsUsEast1 BasinScope = "aws:us-east-1"
+	BasinScopeAwsUsEast1  BasinScope = "aws:us-east-1"
+	BasinScopeAwsUsWest2  BasinScope = "aws:us-west-2"
+	BasinScopeAwsEuNorth1 BasinScope = "aws:eu-north-1"
 )
 
 const (
@@ -635,6 +637,7 @@ type CreateBasinArgs struct {
 	// Basin configuration.
 	Config *BasinConfig `json:"config,omitempty"`
 	// Basin scope.
+	// If omitted, defaults to `aws:us-east-1`.
 	Scope *BasinScope `json:"scope,omitempty"`
 }
 
