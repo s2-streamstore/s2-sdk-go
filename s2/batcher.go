@@ -157,6 +157,14 @@ func (b *Batcher) flushLocked() {
 	select {
 	case b.batchesCh <- &BatchOutput{Input: input, recordMeta: meta}:
 	case <-b.ctx.Done():
+		err := b.ctx.Err()
+		for _, m := range meta {
+			select {
+			case m.resultCh <- &producerOutcome{err: err}:
+				close(m.resultCh)
+			default:
+			}
+		}
 	}
 }
 
