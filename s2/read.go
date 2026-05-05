@@ -464,14 +464,13 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 	tailTimer := time.NewTimer(tailWatchdogTimeout)
 	defer tailTimer.Stop()
 
-	resetTailTimer := func() {
+	stopTailTimer := func() {
 		if !tailTimer.Stop() {
 			select {
 			case <-tailTimer.C:
 			default:
 			}
 		}
-		tailTimer.Reset(tailWatchdogTimeout)
 	}
 
 	type frameResult struct {
@@ -508,6 +507,12 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 				Code:    "TIMEOUT",
 			}
 		case fr = <-frameCh:
+			// Network wait satisfied: stop the watchdog so consumer-delivery
+			// time (handleRecord can block on the records channel) does not
+			// count toward it. The timer is reset at the end of the loop body
+			// when the next network wait begins. Mirrors the Rust SDK's
+			// `timeout(20s, batches.next())` scope, which excludes yield.
+			stopTailTimer()
 		}
 
 		if fr.err != nil {
@@ -539,7 +544,6 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			return err
 		}
 		logInfo(r.logger, "s2 read session batch", "stream", string(r.streamClient.name), "records", len(batch.Records))
-		resetTailTimer()
 
 		if batch.Tail != nil {
 			logInfo(r.logger, "s2 read session batch tail", "stream", string(r.streamClient.name), "seq_num", batch.Tail.SeqNum)
@@ -559,6 +563,8 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 				return err
 			}
 		}
+
+		tailTimer.Reset(tailWatchdogTimeout)
 	}
 }
 

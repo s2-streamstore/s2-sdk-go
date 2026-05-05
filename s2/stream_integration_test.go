@@ -26,7 +26,9 @@ var (
 func TestMain(m *testing.M) {
 	token := os.Getenv("S2_ACCESS_TOKEN")
 	if token == "" {
-		os.Exit(0)
+		// No token: run unit tests only. Integration tests self-skip via
+		// streamTestClient / getSharedBasin when the shared client is nil.
+		os.Exit(m.Run())
 	}
 
 	sharedTestClient = s2.NewFromEnvironment(nil)

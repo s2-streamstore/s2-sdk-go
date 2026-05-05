@@ -291,3 +291,42 @@ func TestBatcher_PipeToAppendSession(t *testing.T) {
 		t.Fatalf("expected second ack to start at %d, got %d", ack1.End.SeqNum, ack2.Start.SeqNum)
 	}
 }
+
+// flushLocked must resolve pending result channels with the context error
+// when its send to batchesCh loses the select to b.ctx.Done(); otherwise
+// callers waiting on the per-record outcome would block forever.
+func TestBatcher_FlushOnCtxCancelResolvesPending(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	batcher := NewBatcher(ctx, &BatchingOptions{
+		MaxRecords:    10,
+		Linger:        time.Hour,
+		ChannelBuffer: 1,
+	})
+
+	if err := batcher.Add(AppendRecord{Body: []byte("a")}, nil); err != nil {
+		t.Fatalf("add 1: %v", err)
+	}
+	batcher.Flush()
+
+	resultCh := make(chan *producerOutcome, 1)
+	if err := batcher.Add(AppendRecord{Body: []byte("b")}, resultCh); err != nil {
+		t.Fatalf("add 2: %v", err)
+	}
+
+	cancel()
+	batcher.Flush()
+
+	select {
+	case outcome, ok := <-resultCh:
+		if !ok {
+			t.Fatal("resultCh closed without payload")
+		}
+		if outcome == nil || outcome.err == nil {
+			t.Fatalf("resultCh got %+v, want non-nil err", outcome)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resultCh never resolved on ctx cancellation; flushLocked dropped the batch")
+	}
+}
