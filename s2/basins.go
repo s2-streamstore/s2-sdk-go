@@ -49,6 +49,8 @@ func (b *BasinsClient) List(ctx context.Context, args *ListBasinsArgs) (*ListBas
 }
 
 // Iterate over basins.
+// Limit, when set, is the page size for each underlying List call, not a total cap.
+// Iteration drains all matching basins; break out of the loop to stop early, or use [BasinsClient.List] for a capped single-page result.
 // By default, basins that are being deleted are excluded. Set IncludeDeleted to true to include them.
 func (b *BasinsClient) Iter(ctx context.Context, args *ListBasinsArgs) *BasinsIterator {
 	base := ListBasinsArgs{}
@@ -56,22 +58,14 @@ func (b *BasinsClient) Iter(ctx context.Context, args *ListBasinsArgs) *BasinsIt
 		base = *args
 	}
 	includeDeleted := base.IncludeDeleted
-	remaining := copyLimit(base.Limit)
-	base.Limit = nil
 	fetch := func(ctx context.Context, startAfter string) (*pagedResponse[BasinInfo], error) {
-		if remainingDepleted(remaining) {
-			return &pagedResponse[BasinInfo]{}, nil
-		}
 		params := base
 		params.StartAfter = startAfter
-		if limit, ok := nextRequestLimit(remaining); ok {
-			params.Limit = &limit
-		}
 		resp, err := b.List(ctx, &params)
 		if err != nil {
 			return nil, err
 		}
-		// Filter out deleted basins unless IncludeDeleted is true
+		// Filter out deleted basins unless IncludeDeleted is true.
 		basins := resp.Basins
 		if !includeDeleted {
 			basins = make([]BasinInfo, 0, len(resp.Basins))
@@ -84,9 +78,6 @@ func (b *BasinsClient) Iter(ctx context.Context, args *ListBasinsArgs) *BasinsIt
 		next := ""
 		if resp.HasMore && len(resp.Basins) > 0 {
 			next = string(resp.Basins[len(resp.Basins)-1].Name)
-		}
-		if consumeRemaining(remaining, len(basins)) {
-			next = ""
 		}
 		return &pagedResponse[BasinInfo]{items: basins, nextKey: next}, nil
 	}

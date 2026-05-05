@@ -4,42 +4,6 @@ import (
 	"context"
 )
 
-const maxListPageSize = 1000
-
-func copyLimit(limit *int) *int {
-	if limit == nil {
-		return nil
-	}
-	val := *limit
-	return &val
-}
-
-func remainingDepleted(remaining *int) bool {
-	return remaining != nil && *remaining <= 0
-}
-
-func nextRequestLimit(remaining *int) (int, bool) {
-	if remaining == nil {
-		return 0, false
-	}
-	if *remaining <= 0 {
-		return 0, false
-	}
-	limit := *remaining
-	if limit > maxListPageSize {
-		limit = maxListPageSize
-	}
-	return limit, true
-}
-
-func consumeRemaining(remaining *int, consumed int) bool {
-	if remaining == nil {
-		return false
-	}
-	*remaining -= consumed
-	return *remaining <= 0
-}
-
 type pager[T any] struct {
 	ctx        context.Context
 	fetch      func(context.Context, string) (*pagedResponse[T], error)

@@ -48,6 +48,8 @@ func (s *StreamsClient) List(ctx context.Context, args *ListStreamsArgs) (*ListS
 }
 
 // Iterate over streams in a basin.
+// Limit, when set, is the page size for each underlying List call, not a total cap.
+// Iteration drains all matching streams; break out of the loop to stop early, or use [StreamsClient.List] for a capped single-page result.
 // By default, streams that are being deleted are excluded. Set IncludeDeleted to true to include them.
 func (s *StreamsClient) Iter(ctx context.Context, args *ListStreamsArgs) *StreamsIterator {
 	base := ListStreamsArgs{}
@@ -55,22 +57,14 @@ func (s *StreamsClient) Iter(ctx context.Context, args *ListStreamsArgs) *Stream
 		base = *args
 	}
 	includeDeleted := base.IncludeDeleted
-	remaining := copyLimit(base.Limit)
-	base.Limit = nil
 	fetch := func(ctx context.Context, startAfter string) (*pagedResponse[StreamInfo], error) {
-		if remainingDepleted(remaining) {
-			return &pagedResponse[StreamInfo]{}, nil
-		}
 		params := base
 		params.StartAfter = startAfter
-		if limit, ok := nextRequestLimit(remaining); ok {
-			params.Limit = &limit
-		}
 		resp, err := s.List(ctx, &params)
 		if err != nil {
 			return nil, err
 		}
-		// Filter out deleted streams unless IncludeDeleted is true
+		// Filter out deleted streams unless IncludeDeleted is true.
 		streams := resp.Streams
 		if !includeDeleted {
 			streams = make([]StreamInfo, 0, len(resp.Streams))
@@ -83,9 +77,6 @@ func (s *StreamsClient) Iter(ctx context.Context, args *ListStreamsArgs) *Stream
 		next := ""
 		if resp.HasMore && len(resp.Streams) > 0 {
 			next = string(resp.Streams[len(resp.Streams)-1].Name)
-		}
-		if consumeRemaining(remaining, len(streams)) {
-			next = ""
 		}
 		return &pagedResponse[StreamInfo]{items: streams, nextKey: next}, nil
 	}

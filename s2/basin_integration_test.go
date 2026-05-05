@@ -279,6 +279,38 @@ func TestListBasins_LimitZero(t *testing.T) {
 	t.Logf("Listed %d basins with limit=0", len(resp.Basins))
 }
 
+func TestIterBasins_LimitZero(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	t.Log("Testing: Iter with Limit=0 drains all basins")
+
+	client := testClient(t)
+
+	iterAll := client.Basins.Iter(ctx, nil)
+	allCount := 0
+	for iterAll.Next() {
+		allCount++
+	}
+	if err := iterAll.Err(); err != nil {
+		t.Fatalf("Iter (no limit): %v", err)
+	}
+
+	zero := 0
+	iterZero := client.Basins.Iter(ctx, &s2.ListBasinsArgs{Limit: &zero})
+	zeroCount := 0
+	for iterZero.Next() {
+		zeroCount++
+	}
+	if err := iterZero.Err(); err != nil {
+		t.Fatalf("Iter (Limit=0): %v", err)
+	}
+
+	if zeroCount != allCount {
+		t.Errorf("Iter(Limit=0) returned %d items; Iter(nil) returned %d. Limit=0 should be 'no limit'.",
+			zeroCount, allCount)
+	}
+}
+
 func TestListBasins_LimitExceeds1000(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
