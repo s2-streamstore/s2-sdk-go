@@ -163,7 +163,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - `scope` (BasinScope, optional)
   - Basin scope (immutable after creation)
-  - Values: `aws:us-east-1`
+  - Values: `aws:us-east-1`, `aws:us-west-2`, `aws:eu-north-1`
 
 - `config` (BasinConfig, optional)
   - Basin configuration
