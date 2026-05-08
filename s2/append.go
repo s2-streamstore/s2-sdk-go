@@ -81,6 +81,7 @@ type transportAppendSession struct {
 	conn          *http.Response
 	requestWriter io.WriteCloser
 	pendingWrites int
+	terminalErr   error
 }
 
 func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppendSession, error) {
@@ -185,6 +186,7 @@ func (p *transportAppendSession) reportError(err error) {
 	if err == nil {
 		return
 	}
+	p.recordTerminalError(err)
 	select {
 	case <-p.closed:
 	case p.errorsCh <- err:
@@ -192,8 +194,37 @@ func (p *transportAppendSession) reportError(err error) {
 	}
 }
 
+func (p *transportAppendSession) reportErrorIfOpen(err error) {
+	select {
+	case <-p.closed:
+		return
+	default:
+		p.reportError(err)
+	}
+}
+
+func (p *transportAppendSession) recordTerminalError(err error) {
+	if err == nil {
+		return
+	}
+	p.mu.Lock()
+	if p.terminalErr == nil {
+		p.terminalErr = err
+	}
+	p.mu.Unlock()
+}
+
+func (p *transportAppendSession) terminalError() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.terminalErr
+}
+
 func (p *transportAppendSession) appendInput(input *AppendInput) error {
 	if p.isClosed() {
+		if err := p.terminalError(); err != nil {
+			return err
+		}
 		return ErrSessionClosed
 	}
 
@@ -210,12 +241,18 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 	writer := p.requestWriter
 	p.mu.Unlock()
 	if writer == nil {
+		if err := p.terminalError(); err != nil {
+			return err
+		}
 		return ErrSessionClosed
 	}
 
 	p.markWriteSignalled()
 	_, err = writer.Write(frame)
 	if err != nil {
+		if terminalErr := p.terminalError(); terminalErr != nil {
+			return terminalErr
+		}
 		if p.isClosed() {
 			return ErrSessionClosed
 		}
@@ -289,19 +326,12 @@ func (p *transportAppendSession) readAcksLoop(conn *http.Response) {
 			if isExpectedFrameReadError(err) {
 				return
 			}
-			select {
-			case <-p.closed:
-				return
-			case p.errorsCh <- fmt.Errorf("read frame error: %w", err):
-			}
+			p.reportErrorIfOpen(fmt.Errorf("read frame error: %w", err))
 			return
 		}
 
 		if err := p.handleFrame(frame); err != nil {
-			select {
-			case p.errorsCh <- err:
-			case <-p.closed:
-			}
+			p.reportErrorIfOpen(err)
 			return
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 )
@@ -766,5 +767,148 @@ func TestAppendSession_NoSideEffectsNoRetryWithNonIdempotentSentPipeline(t *test
 	}
 	if factoryCalls != 1 {
 		t.Fatalf("expected 1 session attempt, got %d", factoryCalls)
+	}
+}
+
+func TestAppendSession_HandleSessionErrorIsIdempotentAcrossConcurrentCalls(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       5,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}
+
+	stream := newTestStreamClientForAppend(retryCfg)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		return newTransportSession(stream, &signalWriteCloser{}), nil
+	}
+
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("AppendSession: %v", err)
+	}
+	defer session.Close()
+
+	failed := newTransportSession(stream, &signalWriteCloser{})
+	session.sessionMu.Lock()
+	session.currentSession = failed
+	session.sessionMu.Unlock()
+
+	const callers = 8
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	transportErr := errors.New("transport boom")
+
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			session.handleSessionError(failed, transportErr)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	session.stateMu.RLock()
+	got := session.currentAttempt
+	session.stateMu.RUnlock()
+	if got != 1 {
+		t.Fatalf("one logical failure should bump currentAttempt by 1, got %d after %d concurrent reports", got, callers)
+	}
+
+	session.sessionMu.RLock()
+	current := session.currentSession
+	session.sessionMu.RUnlock()
+	if current != nil {
+		t.Fatalf("expected currentSession cleared after claim, still %p", current)
+	}
+}
+
+func TestAppendSession_WriteUnblockedByTerminalErrorUsesServerError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       5,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}
+
+	stream := newTestStreamClientForAppend(retryCfg)
+	writer := &blockingClosedPipeWriter{
+		started: make(chan struct{}),
+		closed:  make(chan struct{}),
+	}
+	failed := newTransportSession(stream, writer)
+	session := &AppendSession{
+		streamClient:   stream,
+		options:        &AppendSessionOptions{RetryConfig: retryCfg},
+		capacity:       newCapacityTracker(1024, 1),
+		sessionRefs:    make(map[*transportAppendSession]int),
+		currentSession: failed,
+		pumpCtx:        ctx,
+		pumpCancel:     cancel,
+		closeDone:      make(chan struct{}),
+		wakeup:         make(chan struct{}, 1),
+	}
+	entry := &inflightEntry{
+		input:         &AppendInput{Records: []AppendRecord{{Body: []byte("x")}}},
+		expectedCount: 1,
+		meteredBytes:  1,
+		resultCh:      make(chan *inflightResult, 1),
+	}
+	session.inflightQueue = []*inflightEntry{entry}
+
+	done := make(chan struct{})
+	go func() {
+		session.submitInflightBatches()
+		close(done)
+	}()
+
+	select {
+	case <-writer.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for append write to start")
+	}
+
+	terminalErr := &S2Error{
+		Message: "bad request",
+		Status:  400,
+		Origin:  "server",
+	}
+	failed.reportError(terminalErr)
+	if err := failed.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for submitInflightBatches to return")
+	}
+
+	select {
+	case result := <-entry.resultCh:
+		if result == nil || result.err == nil {
+			t.Fatalf("expected terminal error result, got %#v", result)
+		}
+		var s2Err *S2Error
+		if !errors.As(result.err, &s2Err) || s2Err.Status != 400 {
+			t.Fatalf("expected terminal S2Error status 400, got %v", result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for inflight entry to fail")
+	}
+
+	session.stateMu.RLock()
+	attempt := session.currentAttempt
+	session.stateMu.RUnlock()
+	if attempt != 0 {
+		t.Fatalf("non-retryable terminal error should not consume a retry attempt, got %d", attempt)
 	}
 }
