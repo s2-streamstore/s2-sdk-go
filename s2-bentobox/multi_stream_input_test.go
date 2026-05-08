@@ -249,3 +249,46 @@ func (m *mapCache) Set(_ context.Context, stream string, seqNum uint64) error {
 	m.data[stream] = seqNum
 	return nil
 }
+
+type failingSetCache struct {
+	getValue uint64
+	setErr   error
+}
+
+func (f *failingSetCache) Get(context.Context, string) (uint64, error) {
+	return f.getValue, nil
+}
+
+func (f *failingSetCache) Set(context.Context, string, uint64) error {
+	return f.setErr
+}
+
+func TestStreamSourceRecvLoopForgetsStaleMemEntryWhenSetFails(t *testing.T) {
+	const stream = "demo"
+	const stale uint64 = 42
+	const tailSeqNum uint64 = 9001
+
+	inner := &failingSetCache{getValue: stale, setErr: errors.New("durable cache write failed")}
+	cache := newSeqNumCache(inner, silentLogger{})
+
+	// Warm the in-memory layer with the stale value (simulates prior successful
+	// Set that has since become stale relative to the stream tail).
+	if _, err := cache.Get(context.Background(), stream); err != nil {
+		t.Fatalf("warm cache: %v", err)
+	}
+
+	rangeErr := &s2.RangeNotSatisfiableError{
+		S2Error: &s2.S2Error{Status: 416, Code: "RANGE_NOT_SATISFIABLE", Origin: "server"},
+		Tail:    &s2.StreamPosition{SeqNum: tailSeqNum},
+	}
+	src := &fakeBatchSource{results: []readResult{{err: rangeErr}}}
+	inputStream := make(chan recvOutput, 1)
+
+	streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{})
+
+	// In-mem must be cleared so the next reconnect falls through to inner.Get
+	// instead of returning the stale value and tight-looping on 416.
+	if _, ok := cache.mem.Get(stream); ok {
+		t.Fatal("expected in-memory cache entry to be cleared after failed Set")
+	}
+}

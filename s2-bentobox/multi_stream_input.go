@@ -253,6 +253,9 @@ func streamSourceRecvLoop(
 				if setErr := cache.Set(ctx, stream, rangeErr.Tail.SeqNum); setErr != nil {
 					logger.With("stream", stream, "error", setErr).
 						Error("Failed to reset cached sequence number after 416")
+					// Drop the stale in-memory entry so the next reconnect doesn't
+					// shadow the inner cache and tight-loop on 416.
+					cache.Forget(stream)
 				}
 				return
 			}
