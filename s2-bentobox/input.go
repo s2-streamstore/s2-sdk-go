@@ -82,6 +82,14 @@ func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum uint64) err
 	return nil
 }
 
+// Drops the in-memory entry for stream so a subsequent Get re-reads the inner
+// durable cache. Used when a stream leaves the configured set: if it returns
+// later (possibly delete/recreated), we don't shadow the inner cache with a
+// stale value held only in memory.
+func (s *seqNumCache) Forget(stream string) {
+	s.mem.Remove(stream)
+}
+
 type InputStreams interface {
 	list(ctx context.Context, basin *s2.BasinClient) ([]string, error)
 }
