@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.16.1] - 2026-05-08
+
+### Bug Fixes
+
+- *(bentobox)* Handle 416 in recv loop and clear cache on stream removal ([#290](https://github.com/s2-streamstore/s2-sdk-go/issues/290))
+- *(append)* Dedupe handleSessionError so one failure consumes one attempt ([#291](https://github.com/s2-streamstore/s2-sdk-go/issues/291))
+
 ## [v0.16.0] - 2026-05-05
 
 ### Features
@@ -26,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - Encryption example for doc gen ([#276](https://github.com/s2-streamstore/s2-sdk-go/issues/276))
 - Update s2-specs to a47ed3e ([#278](https://github.com/s2-streamstore/s2-sdk-go/issues/278))
 - Update s2-specs to f43a620 ([#281](https://github.com/s2-streamstore/s2-sdk-go/issues/281))
+- *(release)* V0.16.0 ([#288](https://github.com/s2-streamstore/s2-sdk-go/issues/288))
 
 ## [v0.15.0] - 2026-04-23
 
