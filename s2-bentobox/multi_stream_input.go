@@ -154,6 +154,7 @@ managerLoop:
 				worker.Close()
 				worker.Wait()
 				delete(existingWorkers, stream)
+				cache.Forget(stream)
 			}
 		}
 	}
@@ -201,14 +202,6 @@ func streamSource(
 
 		input, err := connectStreamInput(ctx, basin, cache, logger, stream, maxInflight, inputStartSeqNum)
 		if err != nil {
-			var rangeErr *s2.RangeNotSatisfiableError
-			if errors.As(err, &rangeErr) && rangeErr.Tail != nil {
-				logger.With("stream", stream, "tail_seq_num", rangeErr.Tail.SeqNum).
-					Warn("Cached position beyond stream tail, resetting to tail")
-				_ = cache.Set(ctx, stream, rangeErr.Tail.SeqNum)
-				continue
-			}
-
 			logger.With("error", err, "stream", stream).Error("Failed to connect, retrying.")
 
 			jitter := time.Duration(rand.Int63n(int64(10 * time.Millisecond)))
@@ -217,13 +210,21 @@ func streamSource(
 			continue
 		}
 
-		streamSourceRecvLoop(ctx, input, stream, inputStream, logger)
+		streamSourceRecvLoop(ctx, input, cache, stream, inputStream, logger)
 	}
+}
+
+// Surface of *streamInput that streamSourceRecvLoop needs. Defined here so
+// tests can drive the loop with a fake reader.
+type recvBatchSource interface {
+	ReadBatch(ctx context.Context) ([]s2.SequencedRecord, AckFunc, error)
+	Close(ctx context.Context) error
 }
 
 func streamSourceRecvLoop(
 	ctx context.Context,
-	input *streamInput,
+	input recvBatchSource,
+	cache *seqNumCache,
 	stream string,
 	inputStream chan<- recvOutput,
 	logger Logger,
@@ -242,6 +243,20 @@ func streamSourceRecvLoop(
 			if errors.Is(err, ErrInputClosed) {
 				logger.With("stream", stream).Debug("Restarting source")
 
+				return
+			}
+
+			var rangeErr *s2.RangeNotSatisfiableError
+			if errors.As(err, &rangeErr) && rangeErr.Tail != nil {
+				logger.With("stream", stream, "tail_seq_num", rangeErr.Tail.SeqNum).
+					Warn("Cached position beyond stream tail, resetting to tail")
+				if setErr := cache.Set(ctx, stream, rangeErr.Tail.SeqNum); setErr != nil {
+					logger.With("stream", stream, "error", setErr).
+						Error("Failed to reset cached sequence number after 416")
+					// Drop the stale in-memory entry so the next reconnect doesn't
+					// shadow the inner cache and tight-loop on 416.
+					cache.Forget(stream)
+				}
 				return
 			}
 
