@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 )
@@ -766,5 +767,63 @@ func TestAppendSession_NoSideEffectsNoRetryWithNonIdempotentSentPipeline(t *test
 	}
 	if factoryCalls != 1 {
 		t.Fatalf("expected 1 session attempt, got %d", factoryCalls)
+	}
+}
+
+func TestAppendSession_HandleSessionErrorIsIdempotentAcrossConcurrentCalls(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       5,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}
+
+	stream := newTestStreamClientForAppend(retryCfg)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		return newTransportSession(stream, &signalWriteCloser{}), nil
+	}
+
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("AppendSession: %v", err)
+	}
+	defer session.Close()
+
+	failed := newTransportSession(stream, &signalWriteCloser{})
+	session.sessionMu.Lock()
+	session.currentSession = failed
+	session.sessionMu.Unlock()
+
+	const callers = 8
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	transportErr := errors.New("transport boom")
+
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			session.handleSessionError(failed, transportErr)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	session.stateMu.RLock()
+	got := session.currentAttempt
+	session.stateMu.RUnlock()
+	if got != 1 {
+		t.Fatalf("one logical failure should bump currentAttempt by 1, got %d after %d concurrent reports", got, callers)
+	}
+
+	session.sessionMu.RLock()
+	current := session.currentSession
+	session.sessionMu.RUnlock()
+	if current != nil {
+		t.Fatalf("expected currentSession cleared after claim, still %p", current)
 	}
 }

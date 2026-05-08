@@ -539,14 +539,26 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		return
 	}
 
+	// Atomically claim ownership of the failed session. Both the write path
+	// and the read-acks path can call into here for the same transport
+	// failure; without the claim, both proceed past the old read-only
+	// isCurrent check, log twice, increment currentAttempt twice, and
+	// double-schedule a retry. Whichever caller swaps currentSession from
+	// failedSession to nil wins; the loser bails.
 	if failedSession != nil {
-		r.sessionMu.RLock()
-		isCurrent := r.currentSession == failedSession
-		r.sessionMu.RUnlock()
-		if !isCurrent {
+		r.sessionMu.Lock()
+		if r.currentSession != failedSession {
+			r.sessionMu.Unlock()
 			r.closeSessionIfUnused(failedSession)
 			return
 		}
+		r.currentSession = nil
+		r.sessionMu.Unlock()
+		r.closeSessionIfUnused(failedSession)
+	} else {
+		r.sessionMu.Lock()
+		r.currentSession = nil
+		r.sessionMu.Unlock()
 	}
 
 	logError(r.streamClient.logger, "append session transport error",
@@ -569,19 +581,6 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		}
 	}
 
-	if failedSession != nil {
-		r.sessionMu.Lock()
-		if r.currentSession == failedSession {
-			r.currentSession = nil
-		}
-		r.sessionMu.Unlock()
-		r.closeSessionIfUnused(failedSession)
-	} else {
-		r.sessionMu.Lock()
-		r.currentSession = nil
-		r.sessionMu.Unlock()
-	}
-
 	var s2Err *S2Error
 	if errors.As(err, &s2Err) && !s2Err.IsRetryable() {
 		logError(r.streamClient.logger, "append session error not retryable",
@@ -597,11 +596,9 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		maxAttempts = 1
 	}
 
-	r.stateMu.RLock()
-	currentAttempt := r.currentAttempt
-	r.stateMu.RUnlock()
-
-	if currentAttempt >= maxAttempts-1 {
+	r.stateMu.Lock()
+	if r.currentAttempt >= maxAttempts-1 {
+		r.stateMu.Unlock()
 		logError(r.streamClient.logger, "append session max attempts exhausted",
 			"stream", string(r.streamClient.name),
 			"attempts", maxAttempts)
@@ -609,8 +606,6 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 			maxAttempts, err, ErrMaxAttemptsExhausted))
 		return
 	}
-
-	r.stateMu.Lock()
 	r.currentAttempt++
 	r.stateMu.Unlock()
 
