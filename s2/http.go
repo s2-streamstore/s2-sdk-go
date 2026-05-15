@@ -16,6 +16,7 @@ import (
 )
 
 const maxErrorBodyBytes = 64 * 1024 // 64 KiB
+const provisionResultHeader = "s2-provision-result"
 
 type httpClient struct {
 	client      *http.Client
@@ -26,11 +27,21 @@ type httpClient struct {
 	compression CompressionType
 }
 
+type responseMeta struct {
+	statusCode int
+	header     http.Header
+}
+
 func (h *httpClient) request(ctx context.Context, method, path string, body interface{}, result interface{}) error {
 	return h.requestWithHeaders(ctx, method, path, body, result, nil)
 }
 
 func (h *httpClient) requestWithHeaders(ctx context.Context, method, path string, body interface{}, result interface{}, extraHeaders map[string]string) error {
+	_, err := h.requestWithHeadersResult(ctx, method, path, body, result, extraHeaders)
+	return err
+}
+
+func (h *httpClient) requestWithHeadersResult(ctx context.Context, method, path string, body interface{}, result interface{}, extraHeaders map[string]string) (*responseMeta, error) {
 	logInfo(h.logger, "s2 http request",
 		"method", method,
 		"path", path,
@@ -42,7 +53,7 @@ func (h *httpClient) requestWithHeaders(ctx context.Context, method, path string
 	if body != nil {
 		jsonData, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("marshal request body: %w", err)
+			return nil, fmt.Errorf("marshal request body: %w", err)
 		}
 		reqBody = bytes.NewBuffer(jsonData)
 	}
@@ -50,7 +61,7 @@ func (h *httpClient) requestWithHeaders(ctx context.Context, method, path string
 	url := h.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+h.accessToken)
@@ -69,7 +80,7 @@ func (h *httpClient) requestWithHeaders(ctx context.Context, method, path string
 	resp, err := h.client.Do(req)
 	if err != nil {
 		logError(h.logger, "s2 http perform error", "error", err, "method", method, "path", path)
-		return fmt.Errorf("perform request: %w", err)
+		return nil, fmt.Errorf("perform request: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -79,17 +90,31 @@ func (h *httpClient) requestWithHeaders(ctx context.Context, method, path string
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		apiErr := decodeAPIError(resp.StatusCode, body)
 		logError(h.logger, "s2 http error response", "method", method, "path", path, "status", resp.StatusCode, "message", apiErr.Error())
-		return apiErr
+		return nil, apiErr
 	}
 
 	if result != nil && resp.StatusCode != http.StatusNoContent {
 		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
 			logError(h.logger, "s2 http decode response error", "error", err, "method", method, "path", path)
-			return fmt.Errorf("decode response: %w", err)
+			return nil, fmt.Errorf("decode response: %w", err)
 		}
 	}
 
-	return nil
+	return &responseMeta{statusCode: resp.StatusCode, header: resp.Header.Clone()}, nil
+}
+
+func provisionResultFromResponse(meta *responseMeta) ProvisionResult {
+	if meta == nil {
+		return ProvisionResultUpdated
+	}
+	switch result := ProvisionResult(meta.header.Get(provisionResultHeader)); result {
+	case ProvisionResultCreated, ProvisionResultUpdated, ProvisionResultNoop:
+		return result
+	}
+	if meta.statusCode == http.StatusCreated {
+		return ProvisionResultCreated
+	}
+	return ProvisionResultUpdated
 }
 
 func (h *httpClient) requestProto(

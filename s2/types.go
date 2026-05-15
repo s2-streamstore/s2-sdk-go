@@ -30,6 +30,7 @@ type StreamMetricSet string
 type MetricSample [2]float64
 type StorageClass string
 type TimestampingMode string
+type ProvisionResult string
 
 const (
 	BasinScopeAwsUsEast1  BasinScope = "aws:us-east-1"
@@ -82,6 +83,12 @@ const (
 	TimestampingModeClientPrefer  TimestampingMode = "client-prefer"
 	TimestampingModeClientRequire TimestampingMode = "client-require"
 	TimestampingModeArrival       TimestampingMode = "arrival"
+)
+
+const (
+	ProvisionResultCreated ProvisionResult = "created"
+	ProvisionResultUpdated ProvisionResult = "updated"
+	ProvisionResultNoop    ProvisionResult = "noop"
 )
 
 type AccessTokenInfo struct {
@@ -258,8 +265,8 @@ type BasinReconfiguration struct {
 	StreamCipher *EncryptionAlgorithm `json:"stream_cipher,omitempty"`
 	// Set to true to clear the stream cipher, removing encryption for newly created streams.
 	// Takes precedence over StreamCipher.
-	ClearStreamCipher        bool                   `json:"-"`
-	DefaultStreamConfig      *StreamReconfiguration `json:"default_stream_config,omitempty"`
+	ClearStreamCipher   bool                   `json:"-"`
+	DefaultStreamConfig *StreamReconfiguration `json:"default_stream_config,omitempty"`
 	// Set to true to clear the default stream config.
 	// Takes precedence over DefaultStreamConfig.
 	ClearDefaultStreamConfig bool `json:"-"`
@@ -363,10 +370,10 @@ func (r DeleteOnEmptyReconfiguration) MarshalJSON() ([]byte, error) {
 
 type TimestampingReconfiguration struct {
 	// Timestamping mode for appends that influences how timestamps are handled.
-	Mode      *TimestampingMode `json:"mode,omitempty"`
+	Mode *TimestampingMode `json:"mode,omitempty"`
 	// Set to true to clear the timestamping mode, restoring the server default.
 	// Takes precedence over Mode.
-	ClearMode bool              `json:"-"`
+	ClearMode bool `json:"-"`
 	// Allow client-specified timestamps to exceed the arrival time.
 	Uncapped *bool `json:"uncapped,omitempty"`
 	// Set to true to clear the uncapped setting, restoring the server default.
@@ -648,6 +655,24 @@ type ReconfigureBasinArgs struct {
 	Config BasinReconfiguration
 }
 
+type EnsureBasinArgs struct {
+	// Basin name.
+	Basin BasinName
+	// Desired basin configuration.
+	// If omitted, the basin is ensured with the default configuration.
+	Config *BasinConfig
+	// Basin scope.
+	// If omitted when creating, defaults to aws:us-east-1. Cannot be changed once set.
+	Scope *BasinScope
+}
+
+type EnsureBasinResponse struct {
+	// Provisioning outcome reported by the service.
+	Result ProvisionResult
+	// Current basin state.
+	Basin BasinInfo
+}
+
 type ListStreamsArgs struct {
 	// Filter to streams whose name begins with this prefix.
 	Prefix string `json:"prefix,omitempty"`
@@ -673,4 +698,19 @@ type ReconfigureStreamArgs struct {
 	Stream StreamName
 	// Stream reconfiguration.
 	Config StreamReconfiguration
+}
+
+type EnsureStreamArgs struct {
+	// Stream name.
+	Stream StreamName
+	// Desired stream configuration before basin and global defaults are applied.
+	// If omitted, the stream is ensured using those defaults.
+	Config *StreamConfig
+}
+
+type EnsureStreamResponse struct {
+	// Provisioning outcome reported by the service.
+	Result ProvisionResult
+	// Current stream state.
+	Stream StreamInfo
 }

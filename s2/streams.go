@@ -139,6 +139,44 @@ func (s *StreamsClient) Create(ctx context.Context, args CreateStreamArgs) (*Str
 	})
 }
 
+// Ensure a stream exists with the requested configuration.
+func (s *StreamsClient) Ensure(ctx context.Context, args EnsureStreamArgs) (*EnsureStreamResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := validateStreamName(args.Stream); err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/streams/%s", url.PathEscape(string(args.Stream)))
+	var body interface{}
+	if args.Config != nil {
+		body = args.Config
+	}
+
+	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*EnsureStreamResponse, error) {
+		httpClient := &httpClient{
+			client:      s.basin.httpClient,
+			baseURL:     s.basin.baseURL,
+			accessToken: s.basin.accessToken,
+			logger:      s.basin.logger,
+			basinName:   s.basin.basinHeaderValue(),
+			compression: s.basin.compression,
+		}
+
+		var stream StreamInfo
+		meta, err := httpClient.requestWithHeadersResult(ctx, "PUT", path, body, &stream, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		return &EnsureStreamResponse{
+			Result: provisionResultFromResponse(meta),
+			Stream: stream,
+		}, nil
+	})
+}
+
 // Delete a stream.
 func (s *StreamsClient) Delete(ctx context.Context, streamName StreamName) error {
 	if ctx == nil {
