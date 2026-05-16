@@ -12,6 +12,11 @@ type BasinsClient struct {
 	client *Client
 }
 
+type ensureBasinRequest struct {
+	Config *BasinConfig `json:"config,omitempty"`
+	Scope  *BasinScope  `json:"scope,omitempty"`
+}
+
 // Iterator over basins returned by [BasinsClient.Iter].
 // Use Next to advance, Value to get the current item, and Err to check for errors.
 type BasinsIterator struct {
@@ -134,6 +139,53 @@ func (b *BasinsClient) Create(ctx context.Context, args CreateBasinArgs) (*Basin
 		}
 
 		return &result, nil
+	})
+}
+
+// Ensure ensures a basin.
+//
+// It creates the basin if it doesn't exist, or ensures its config exactly matches the
+// provided configuration after defaults are applied. It uses HTTP PUT semantics and is always
+// idempotent.
+//
+// It returns [ProvisionResultCreated] with the basin info if the basin was newly created,
+// [ProvisionResultUpdated] if its config changed, or [ProvisionResultNoop] if no write was needed.
+func (b *BasinsClient) Ensure(ctx context.Context, args EnsureBasinArgs) (*EnsureBasinResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := validateBasinName(args.Basin); err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/basins/%s", url.PathEscape(string(args.Basin)))
+	var body interface{}
+	if args.Config != nil || args.Scope != nil {
+		body = ensureBasinRequest{
+			Config: args.Config,
+			Scope:  args.Scope,
+		}
+	}
+
+	return withRetries(ctx, b.client.retryConfig, b.client.logger, func() (*EnsureBasinResponse, error) {
+		httpClient := &httpClient{
+			client:      b.client.httpClient,
+			baseURL:     b.client.baseURL,
+			accessToken: b.client.accessToken,
+			logger:      b.client.logger,
+			compression: b.client.compression,
+		}
+
+		var basin BasinInfo
+		meta, err := httpClient.requestWithHeadersResult(ctx, "PUT", path, body, &basin, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		return &EnsureBasinResponse{
+			Result: provisionResultFromResponse(meta),
+			Basin:  basin,
+		}, nil
 	})
 }
 

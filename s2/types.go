@@ -31,6 +31,9 @@ type MetricSample [2]float64
 type StorageClass string
 type TimestampingMode string
 
+// ProvisionResult indicates whether provisioning created, updated, or skipped writing a resource.
+type ProvisionResult string
+
 const (
 	BasinScopeAwsUsEast1  BasinScope = "aws:us-east-1"
 	BasinScopeAwsUsWest2  BasinScope = "aws:us-west-2"
@@ -82,6 +85,15 @@ const (
 	TimestampingModeClientPrefer  TimestampingMode = "client-prefer"
 	TimestampingModeClientRequire TimestampingMode = "client-require"
 	TimestampingModeArrival       TimestampingMode = "arrival"
+)
+
+const (
+	// ProvisionResultCreated indicates the resource was newly created.
+	ProvisionResultCreated ProvisionResult = "created"
+	// ProvisionResultUpdated indicates the resource already existed and now matches the requested config.
+	ProvisionResultUpdated ProvisionResult = "updated"
+	// ProvisionResultNoop indicates the resource already existed and no write was performed.
+	ProvisionResultNoop ProvisionResult = "noop"
 )
 
 type AccessTokenInfo struct {
@@ -258,8 +270,8 @@ type BasinReconfiguration struct {
 	StreamCipher *EncryptionAlgorithm `json:"stream_cipher,omitempty"`
 	// Set to true to clear the stream cipher, removing encryption for newly created streams.
 	// Takes precedence over StreamCipher.
-	ClearStreamCipher        bool                   `json:"-"`
-	DefaultStreamConfig      *StreamReconfiguration `json:"default_stream_config,omitempty"`
+	ClearStreamCipher   bool                   `json:"-"`
+	DefaultStreamConfig *StreamReconfiguration `json:"default_stream_config,omitempty"`
 	// Set to true to clear the default stream config.
 	// Takes precedence over DefaultStreamConfig.
 	ClearDefaultStreamConfig bool `json:"-"`
@@ -363,10 +375,10 @@ func (r DeleteOnEmptyReconfiguration) MarshalJSON() ([]byte, error) {
 
 type TimestampingReconfiguration struct {
 	// Timestamping mode for appends that influences how timestamps are handled.
-	Mode      *TimestampingMode `json:"mode,omitempty"`
+	Mode *TimestampingMode `json:"mode,omitempty"`
 	// Set to true to clear the timestamping mode, restoring the server default.
 	// Takes precedence over Mode.
-	ClearMode bool              `json:"-"`
+	ClearMode bool `json:"-"`
 	// Allow client-specified timestamps to exceed the arrival time.
 	Uncapped *bool `json:"uncapped,omitempty"`
 	// Set to true to clear the uncapped setting, restoring the server default.
@@ -648,6 +660,26 @@ type ReconfigureBasinArgs struct {
 	Config BasinReconfiguration
 }
 
+// EnsureBasinArgs is input for [BasinsClient.Ensure].
+type EnsureBasinArgs struct {
+	// Basin name.
+	Basin BasinName
+	// Desired configuration for the basin.
+	// If omitted, the basin is ensured with the default configuration.
+	Config *BasinConfig
+	// Basin scope.
+	// Defaults to [BasinScopeAwsUsEast1]. Cannot be changed once set.
+	Scope *BasinScope
+}
+
+// EnsureBasinResponse is the result of [BasinsClient.Ensure].
+type EnsureBasinResponse struct {
+	// Provisioning outcome.
+	Result ProvisionResult
+	// Current basin state.
+	Basin BasinInfo
+}
+
 type ListStreamsArgs struct {
 	// Filter to streams whose name begins with this prefix.
 	Prefix string `json:"prefix,omitempty"`
@@ -673,4 +705,23 @@ type ReconfigureStreamArgs struct {
 	Stream StreamName
 	// Stream reconfiguration.
 	Config StreamReconfiguration
+}
+
+// EnsureStreamArgs is input for [StreamsClient.Ensure].
+type EnsureStreamArgs struct {
+	// Stream name.
+	Stream StreamName
+	// Desired stream configuration before basin defaults are applied.
+	// Missing fields are filled from the current basin default stream configuration and then
+	// global defaults before comparing or writing. If omitted, the stream is ensured using those
+	// defaults.
+	Config *StreamConfig
+}
+
+// EnsureStreamResponse is the result of [StreamsClient.Ensure].
+type EnsureStreamResponse struct {
+	// Provisioning outcome.
+	Result ProvisionResult
+	// Current stream state.
+	Stream StreamInfo
 }

@@ -139,6 +139,51 @@ func (s *StreamsClient) Create(ctx context.Context, args CreateStreamArgs) (*Str
 	})
 }
 
+// Ensure ensures a stream.
+//
+// It creates the stream if it doesn't exist, or ensures its config exactly matches the provided
+// configuration after basin defaults and global defaults are applied. It uses HTTP PUT semantics
+// and is always idempotent.
+//
+// It returns [ProvisionResultCreated] with the stream info if the stream was newly created,
+// [ProvisionResultUpdated] if its config changed, or [ProvisionResultNoop] if no write was needed.
+func (s *StreamsClient) Ensure(ctx context.Context, args EnsureStreamArgs) (*EnsureStreamResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := validateStreamName(args.Stream); err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/streams/%s", url.PathEscape(string(args.Stream)))
+	var body interface{}
+	if args.Config != nil {
+		body = args.Config
+	}
+
+	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*EnsureStreamResponse, error) {
+		httpClient := &httpClient{
+			client:      s.basin.httpClient,
+			baseURL:     s.basin.baseURL,
+			accessToken: s.basin.accessToken,
+			logger:      s.basin.logger,
+			basinName:   s.basin.basinHeaderValue(),
+			compression: s.basin.compression,
+		}
+
+		var stream StreamInfo
+		meta, err := httpClient.requestWithHeadersResult(ctx, "PUT", path, body, &stream, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		return &EnsureStreamResponse{
+			Result: provisionResultFromResponse(meta),
+			Stream: stream,
+		}, nil
+	})
+}
+
 // Delete a stream.
 func (s *StreamsClient) Delete(ctx context.Context, streamName StreamName) error {
 	if ctx == nil {
