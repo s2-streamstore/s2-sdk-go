@@ -142,7 +142,14 @@ func (b *BasinsClient) Create(ctx context.Context, args CreateBasinArgs) (*Basin
 	})
 }
 
-// Ensure a basin exists with the requested configuration.
+// Ensure ensures a basin.
+//
+// It creates the basin if it doesn't exist, or ensures its config exactly matches the
+// provided configuration after defaults are applied. It uses HTTP PUT semantics and is always
+// idempotent.
+//
+// It returns [ProvisionResultCreated] with the basin info if the basin was newly created,
+// [ProvisionResultUpdated] if its config changed, or [ProvisionResultNoop] if no write was needed.
 func (b *BasinsClient) Ensure(ctx context.Context, args EnsureBasinArgs) (*EnsureBasinResponse, error) {
 	if ctx == nil {
 		ctx = context.Background()

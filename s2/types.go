@@ -30,6 +30,8 @@ type StreamMetricSet string
 type MetricSample [2]float64
 type StorageClass string
 type TimestampingMode string
+
+// ProvisionResult indicates whether provisioning created, updated, or skipped writing a resource.
 type ProvisionResult string
 
 const (
@@ -86,9 +88,12 @@ const (
 )
 
 const (
+	// ProvisionResultCreated indicates the resource was newly created.
 	ProvisionResultCreated ProvisionResult = "created"
+	// ProvisionResultUpdated indicates the resource already existed and now matches the requested config.
 	ProvisionResultUpdated ProvisionResult = "updated"
-	ProvisionResultNoop    ProvisionResult = "noop"
+	// ProvisionResultNoop indicates the resource already existed and no write was performed.
+	ProvisionResultNoop ProvisionResult = "noop"
 )
 
 type AccessTokenInfo struct {
@@ -655,19 +660,21 @@ type ReconfigureBasinArgs struct {
 	Config BasinReconfiguration
 }
 
+// EnsureBasinArgs is input for [BasinsClient.Ensure].
 type EnsureBasinArgs struct {
 	// Basin name.
 	Basin BasinName
-	// Desired basin configuration.
+	// Desired configuration for the basin.
 	// If omitted, the basin is ensured with the default configuration.
 	Config *BasinConfig
 	// Basin scope.
-	// If omitted when creating, defaults to aws:us-east-1. Cannot be changed once set.
+	// Defaults to [BasinScopeAwsUsEast1]. Cannot be changed once set.
 	Scope *BasinScope
 }
 
+// EnsureBasinResponse is the result of [BasinsClient.Ensure].
 type EnsureBasinResponse struct {
-	// Provisioning outcome reported by the service.
+	// Provisioning outcome.
 	Result ProvisionResult
 	// Current basin state.
 	Basin BasinInfo
@@ -700,16 +707,20 @@ type ReconfigureStreamArgs struct {
 	Config StreamReconfiguration
 }
 
+// EnsureStreamArgs is input for [StreamsClient.Ensure].
 type EnsureStreamArgs struct {
 	// Stream name.
 	Stream StreamName
-	// Desired stream configuration before basin and global defaults are applied.
-	// If omitted, the stream is ensured using those defaults.
+	// Desired stream configuration before basin defaults are applied.
+	// Missing fields are filled from the current basin default stream configuration and then
+	// global defaults before comparing or writing. If omitted, the stream is ensured using those
+	// defaults.
 	Config *StreamConfig
 }
 
+// EnsureStreamResponse is the result of [StreamsClient.Ensure].
 type EnsureStreamResponse struct {
-	// Provisioning outcome reported by the service.
+	// Provisioning outcome.
 	Result ProvisionResult
 	// Current stream state.
 	Stream StreamInfo
