@@ -2,12 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.17.0] - 2026-05-19
+
+### Features
+
+- Add ensure basin and stream APIs ([#297](https://github.com/s2-streamstore/s2-sdk-go/issues/297))
+
 ## [v0.16.1] - 2026-05-08
 
 ### Bug Fixes
 
 - *(bentobox)* Handle 416 in recv loop and clear cache on stream removal ([#290](https://github.com/s2-streamstore/s2-sdk-go/issues/290))
 - *(append)* Dedupe handleSessionError so one failure consumes one attempt ([#291](https://github.com/s2-streamstore/s2-sdk-go/issues/291))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.16.1 ([#292](https://github.com/s2-streamstore/s2-sdk-go/issues/292))
 
 ## [v0.16.0] - 2026-05-05
 
