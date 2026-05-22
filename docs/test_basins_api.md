@@ -257,7 +257,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Expected: 201
 
 - **Create with location**
-  - Input: `{"basin": "...", "location": "aws:us-east-1"}`
+  - Input: get a location from the Locations API, then create with `{"basin": "...", "location": "<location-name>"}`
   - Expected: 201
 
 - **Create with full config**

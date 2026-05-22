@@ -162,8 +162,7 @@ func ExampleBasinsClient_Create() {
 	ctx := context.Background()
 
 	info, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
-		Basin:    "my-new-basin",
-		Location: s2.Ptr(s2.LocationAwsUsEast1),
+		Basin: "my-new-basin",
 		Config: &s2.BasinConfig{
 			StreamCipher: s2.Ptr(s2.EncryptionAlgorithmAes256Gcm),
 			DefaultStreamConfig: &s2.StreamConfig{

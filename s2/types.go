@@ -35,12 +35,6 @@ type TimestampingMode string
 type ProvisionResult string
 
 const (
-	LocationAwsUsEast1  LocationName = "aws:us-east-1"
-	LocationAwsUsWest2  LocationName = "aws:us-west-2"
-	LocationAwsEuNorth1 LocationName = "aws:eu-north-1"
-)
-
-const (
 	// AEGIS-256
 	EncryptionAlgorithmAegis256 EncryptionAlgorithm = "aegis-256"
 	// AES-256-GCM
@@ -187,6 +181,13 @@ type BasinInfo struct {
 	CreatedAt time.Time `json:"created_at"`
 	// Deletion time, if the basin is being deleted.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+}
+
+type LocationInfo struct {
+	// Location name.
+	Name LocationName `json:"name"`
+	// Location represents a private placement, limited by account.
+	IsPrivate bool `json:"is_private"`
 }
 
 type BasinConfig struct {

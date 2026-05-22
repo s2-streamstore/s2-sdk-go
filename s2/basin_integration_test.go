@@ -492,10 +492,15 @@ func TestCreateBasin_WithLocation(t *testing.T) {
 	t.Log("Testing: Create basin with location")
 
 	client := testClient(t)
-	basinName := uniqueBasinName("test-cscp")
+	basinName := uniqueBasinName("test-cloc")
 	defer deleteBasin(ctx, client, basinName)
 
-	location := s2.LocationAwsUsEast1
+	defaultLocation, err := client.Locations.GetDefault(ctx)
+	if err != nil {
+		t.Fatalf("Get default location failed: %v", err)
+	}
+
+	location := defaultLocation.Name
 	info, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin:    basinName,
 		Location: &location,
@@ -504,8 +509,8 @@ func TestCreateBasin_WithLocation(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	if info.Location == nil || *info.Location != s2.LocationAwsUsEast1 {
-		t.Fatalf("Expected location aws:us-east-1, got %#v", info.Location)
+	if info.Location == nil || *info.Location != location {
+		t.Fatalf("Expected location %s, got %#v", location, info.Location)
 	}
 	t.Logf("Created basin with location: %s", *info.Location)
 }

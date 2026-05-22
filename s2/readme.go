@@ -188,8 +188,7 @@ Basins
 
 	// Create a basin
 	info, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
-		Basin:    "my-basin",
-		Location: s2.Ptr(s2.LocationAwsUsEast1),
+		Basin: "my-basin",
 	})
 
 	// List basins

@@ -31,7 +31,7 @@ func jsonResponse(status int, provisionResult ProvisionResult, body string) *htt
 
 func TestBasinsEnsure(t *testing.T) {
 	createOnAppend := false
-	location := LocationAwsUsWest2
+	location := LocationName("private-placement")
 
 	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPut {
@@ -52,7 +52,7 @@ func TestBasinsEnsure(t *testing.T) {
 			t.Fatalf("unexpected config: %#v", payload.Config)
 		}
 
-		return jsonResponse(http.StatusOK, ProvisionResultNoop, `{"name":"ensure-basin","location":"aws:us-west-2","created_at":"2026-05-22T00:00:00Z"}`), nil
+		return jsonResponse(http.StatusOK, ProvisionResultNoop, `{"name":"ensure-basin","location":"private-placement","created_at":"2026-05-22T00:00:00Z"}`), nil
 	})
 
 	client := New("token", &ClientOptions{
@@ -80,7 +80,7 @@ func TestBasinsEnsure(t *testing.T) {
 }
 
 func TestCreateBasinArgsUsesLocation(t *testing.T) {
-	location := LocationAwsUsEast1
+	location := LocationName("private-placement")
 	payload, err := json.Marshal(CreateBasinArgs{
 		Basin:    "create-basin",
 		Location: &location,
