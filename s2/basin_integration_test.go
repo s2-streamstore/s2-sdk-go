@@ -486,28 +486,28 @@ func TestCreateBasin_Minimal(t *testing.T) {
 	t.Logf("Created basin: %s, created_at: %s", info.Name, info.CreatedAt)
 }
 
-func TestCreateBasin_WithScope(t *testing.T) {
+func TestCreateBasin_WithLocation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
-	t.Log("Testing: Create basin with scope")
+	t.Log("Testing: Create basin with location")
 
 	client := testClient(t)
 	basinName := uniqueBasinName("test-cscp")
 	defer deleteBasin(ctx, client, basinName)
 
-	scope := s2.BasinScopeAwsUsEast1
+	location := s2.LocationAwsUsEast1
 	info, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
-		Basin: basinName,
-		Scope: &scope,
+		Basin:    basinName,
+		Location: &location,
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	if info.Scope != s2.BasinScopeAwsUsEast1 {
-		t.Errorf("Expected scope aws:us-east-1, got %s", info.Scope)
+	if info.Location == nil || *info.Location != s2.LocationAwsUsEast1 {
+		t.Fatalf("Expected location aws:us-east-1, got %#v", info.Location)
 	}
-	t.Logf("Created basin with scope: %s", info.Scope)
+	t.Logf("Created basin with location: %s", *info.Location)
 }
 
 func TestCreateBasin_WithFullConfig(t *testing.T) {
