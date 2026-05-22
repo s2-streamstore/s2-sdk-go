@@ -17,8 +17,12 @@ type BasinName string
 // It can be between 1 and 512 bytes in length.
 type StreamName string
 
-// Basin scope.
-type BasinScope string
+// LocationName identifies where a basin is placed.
+// Locations are defined by the service and may include public or account-private placements,
+// so discover available values with [LocationsClient.List] or [LocationsClient.GetDefault].
+//
+// See https://s2.dev/docs/concepts/basins#location.
+type LocationName string
 
 // Encryption algorithm.
 type EncryptionAlgorithm string
@@ -33,12 +37,6 @@ type TimestampingMode string
 
 // ProvisionResult indicates whether provisioning created, updated, or skipped writing a resource.
 type ProvisionResult string
-
-const (
-	BasinScopeAwsUsEast1  BasinScope = "aws:us-east-1"
-	BasinScopeAwsUsWest2  BasinScope = "aws:us-west-2"
-	BasinScopeAwsEuNorth1 BasinScope = "aws:eu-north-1"
-)
 
 const (
 	// AEGIS-256
@@ -126,27 +124,30 @@ type AccessTokenScope struct {
 }
 
 const (
-	OperationListBasins        = "list-basins"
-	OperationCreateBasin       = "create-basin"
-	OperationDeleteBasin       = "delete-basin"
-	OperationReconfigureBasin  = "reconfigure-basin"
-	OperationGetBasinConfig    = "get-basin-config"
-	OperationIssueAccessToken  = "issue-access-token"
-	OperationRevokeAccessToken = "revoke-access-token"
-	OperationListAccessTokens  = "list-access-tokens"
-	OperationListStreams       = "list-streams"
-	OperationCreateStream      = "create-stream"
-	OperationDeleteStream      = "delete-stream"
-	OperationGetStreamConfig   = "get-stream-config"
-	OperationReconfigureStream = "reconfigure-stream"
-	OperationCheckTail         = "check-tail"
-	OperationAppend            = "append"
-	OperationRead              = "read"
-	OperationTrim              = "trim"
-	OperationFence             = "fence"
-	OperationAccountMetrics    = "account-metrics"
-	OperationBasinMetrics      = "basin-metrics"
-	OperationStreamMetrics     = "stream-metrics"
+	OperationListBasins         = "list-basins"
+	OperationCreateBasin        = "create-basin"
+	OperationDeleteBasin        = "delete-basin"
+	OperationReconfigureBasin   = "reconfigure-basin"
+	OperationGetBasinConfig     = "get-basin-config"
+	OperationIssueAccessToken   = "issue-access-token"
+	OperationRevokeAccessToken  = "revoke-access-token"
+	OperationListAccessTokens   = "list-access-tokens"
+	OperationListStreams        = "list-streams"
+	OperationCreateStream       = "create-stream"
+	OperationDeleteStream       = "delete-stream"
+	OperationGetStreamConfig    = "get-stream-config"
+	OperationReconfigureStream  = "reconfigure-stream"
+	OperationCheckTail          = "check-tail"
+	OperationAppend             = "append"
+	OperationRead               = "read"
+	OperationTrim               = "trim"
+	OperationFence              = "fence"
+	OperationAccountMetrics     = "account-metrics"
+	OperationBasinMetrics       = "basin-metrics"
+	OperationStreamMetrics      = "stream-metrics"
+	OperationListLocations      = "list-locations"
+	OperationGetDefaultLocation = "get-default-location"
+	OperationSetDefaultLocation = "set-default-location"
 )
 
 type ResourceSet struct {
@@ -178,12 +179,22 @@ type ReadWritePermissions struct {
 type BasinInfo struct {
 	// Basin name.
 	Name BasinName `json:"name"`
-	// Basin scope.
-	Scope BasinScope `json:"scope"`
+	// Basin location, if returned by the service.
+	Location *LocationName `json:"location,omitempty"`
 	// Creation time.
 	CreatedAt time.Time `json:"created_at"`
 	// Deletion time, if the basin is being deleted.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+}
+
+// LocationInfo describes a service-defined basin placement location.
+// Locations determine where newly created basins live; private locations are
+// restricted to accounts configured for access.
+type LocationInfo struct {
+	// Location name.
+	Name LocationName `json:"name"`
+	// IsPrivate is true for account-private placements.
+	IsPrivate bool `json:"is_private"`
 }
 
 type BasinConfig struct {
@@ -648,9 +659,10 @@ type CreateBasinArgs struct {
 	Basin BasinName `json:"basin"`
 	// Basin configuration.
 	Config *BasinConfig `json:"config,omitempty"`
-	// Basin scope.
-	// If omitted, defaults to `aws:us-east-1`.
-	Scope *BasinScope `json:"scope,omitempty"`
+	// Basin location.
+	// If omitted, the service uses the account's default location.
+	// Use [LocationsClient.List] or [LocationsClient.GetDefault] to discover valid values.
+	Location *LocationName `json:"location,omitempty"`
 }
 
 type ReconfigureBasinArgs struct {
@@ -667,16 +679,17 @@ type EnsureBasinArgs struct {
 	// Desired configuration for the basin.
 	// If omitted, the basin is ensured with the default configuration.
 	Config *BasinConfig
-	// Basin scope.
-	// Defaults to [BasinScopeAwsUsEast1]. Cannot be changed once set.
-	Scope *BasinScope
+	// Basin location.
+	// If omitted when creating, the service uses the account's default location.
+	// Cannot be changed once the basin exists.
+	Location *LocationName
 }
 
 // EnsureBasinResponse is the result of [BasinsClient.Ensure].
 type EnsureBasinResponse struct {
 	// Provisioning outcome.
 	Result ProvisionResult
-	// Current basin state.
+	// Current basin info.
 	Basin BasinInfo
 }
 

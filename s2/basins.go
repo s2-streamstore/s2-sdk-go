@@ -13,8 +13,8 @@ type BasinsClient struct {
 }
 
 type ensureBasinRequest struct {
-	Config *BasinConfig `json:"config,omitempty"`
-	Scope  *BasinScope  `json:"scope,omitempty"`
+	Config   *BasinConfig  `json:"config,omitempty"`
+	Location *LocationName `json:"location,omitempty"`
 }
 
 // Iterator over basins returned by [BasinsClient.Iter].
@@ -160,10 +160,10 @@ func (b *BasinsClient) Ensure(ctx context.Context, args EnsureBasinArgs) (*Ensur
 
 	path := fmt.Sprintf("/basins/%s", url.PathEscape(string(args.Basin)))
 	var body interface{}
-	if args.Config != nil || args.Scope != nil {
+	if args.Config != nil || args.Location != nil {
 		body = ensureBasinRequest{
-			Config: args.Config,
-			Scope:  args.Scope,
+			Config:   args.Config,
+			Location: args.Location,
 		}
 	}
 

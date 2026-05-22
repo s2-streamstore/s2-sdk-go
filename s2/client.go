@@ -72,6 +72,8 @@ type Client struct {
 	Basins *BasinsClient
 	// Client for metrics.
 	Metrics *MetricsClient
+	// Client for locations.
+	Locations *LocationsClient
 }
 
 // Create a new Client.
@@ -160,6 +162,7 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	c.AccessTokens = &AccessTokensClient{client: c}
 	c.Basins = &BasinsClient{client: c}
 	c.Metrics = &MetricsClient{client: c}
+	c.Locations = &LocationsClient{client: c}
 
 	return c
 }

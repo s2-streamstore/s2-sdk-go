@@ -31,7 +31,7 @@ func jsonResponse(status int, provisionResult ProvisionResult, body string) *htt
 
 func TestBasinsEnsure(t *testing.T) {
 	createOnAppend := false
-	scope := BasinScopeAwsUsWest2
+	location := LocationName("private-placement")
 
 	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPut {
@@ -45,14 +45,14 @@ func TestBasinsEnsure(t *testing.T) {
 		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
-		if payload.Scope == nil || *payload.Scope != scope {
-			t.Fatalf("unexpected scope: %#v", payload.Scope)
+		if payload.Location == nil || *payload.Location != location {
+			t.Fatalf("unexpected location: %#v", payload.Location)
 		}
 		if payload.Config == nil || payload.Config.CreateStreamOnAppend == nil || *payload.Config.CreateStreamOnAppend {
 			t.Fatalf("unexpected config: %#v", payload.Config)
 		}
 
-		return jsonResponse(http.StatusOK, ProvisionResultNoop, `{"name":"ensure-basin","scope":"aws:us-west-2"}`), nil
+		return jsonResponse(http.StatusOK, ProvisionResultNoop, `{"name":"ensure-basin","location":"private-placement","created_at":"2026-05-22T00:00:00Z"}`), nil
 	})
 
 	client := New("token", &ClientOptions{
@@ -61,9 +61,9 @@ func TestBasinsEnsure(t *testing.T) {
 	})
 
 	resp, err := client.Basins.Ensure(context.Background(), EnsureBasinArgs{
-		Basin:  "ensure-basin",
-		Config: &BasinConfig{CreateStreamOnAppend: &createOnAppend},
-		Scope:  &scope,
+		Basin:    "ensure-basin",
+		Config:   &BasinConfig{CreateStreamOnAppend: &createOnAppend},
+		Location: &location,
 	})
 	if err != nil {
 		t.Fatalf("ensure basin: %v", err)
@@ -73,6 +73,31 @@ func TestBasinsEnsure(t *testing.T) {
 	}
 	if resp.Basin.Name != "ensure-basin" {
 		t.Fatalf("unexpected basin: %#v", resp.Basin)
+	}
+	if resp.Basin.Location == nil || *resp.Basin.Location != location {
+		t.Fatalf("unexpected basin location: %#v", resp.Basin.Location)
+	}
+}
+
+func TestCreateBasinArgsUsesLocation(t *testing.T) {
+	location := LocationName("private-placement")
+	payload, err := json.Marshal(CreateBasinArgs{
+		Basin:    "create-basin",
+		Location: &location,
+	})
+	if err != nil {
+		t.Fatalf("marshal create basin args: %v", err)
+	}
+
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode create basin args: %v", err)
+	}
+	if fields["location"] != string(location) {
+		t.Fatalf("unexpected location field: %#v", fields["location"])
+	}
+	if _, ok := fields["scope"]; ok {
+		t.Fatalf("unexpected scope field: %s", payload)
 	}
 }
 

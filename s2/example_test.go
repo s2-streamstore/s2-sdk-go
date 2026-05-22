@@ -163,7 +163,6 @@ func ExampleBasinsClient_Create() {
 
 	info, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: "my-new-basin",
-		Scope: s2.Ptr(s2.BasinScopeAwsUsEast1),
 		Config: &s2.BasinConfig{
 			StreamCipher: s2.Ptr(s2.EncryptionAlgorithmAes256Gcm),
 			DefaultStreamConfig: &s2.StreamConfig{
@@ -191,7 +190,7 @@ func ExampleBasinsClient_List() {
 	}
 
 	for _, basin := range resp.Basins {
-		fmt.Printf("basin: %s (scope=%s, created_at=%s)\n", basin.Name, basin.Scope, basin.CreatedAt)
+		fmt.Printf("basin: %s (location=%s, created_at=%s)\n", basin.Name, locationName(basin.Location), basin.CreatedAt)
 	}
 	fmt.Printf("has more: %v\n", resp.HasMore)
 }
@@ -205,11 +204,18 @@ func ExampleBasinsClient_Iter() {
 	})
 	for iter.Next() {
 		basin := iter.Value()
-		fmt.Printf("basin: %s (scope=%s, created_at=%s)\n", basin.Name, basin.Scope, basin.CreatedAt)
+		fmt.Printf("basin: %s (location=%s, created_at=%s)\n", basin.Name, locationName(basin.Location), basin.CreatedAt)
 	}
 	if err := iter.Err(); err != nil {
 		log.Fatalf("list basins: %v", err)
 	}
+}
+
+func locationName(location *s2.LocationName) string {
+	if location == nil {
+		return ""
+	}
+	return string(*location)
 }
 
 func ExampleBasinsClient_GetConfig() {

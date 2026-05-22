@@ -17,7 +17,7 @@
 > - Set a timeout for each test
 > - If the PUT based API for CreateOrReconfigure is not used in the SDK, don't implement the test
 > - If idempotency tokens are an internal detail of the SDK, don't implement a specific test
-> - After a delete, basin MAY appear in list with state=deleting OR not appear at all
+> - After a delete, basin MAY appear in list with `deleted_at` set OR not appear at all
 
 ---
 
@@ -54,7 +54,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Values > 1000 are clamped to 1000
 
 - `include_deleted` (boolean, optional, SDK iterator only)
-  - SDK-only flag used by listAll/Iter to include basins in deleting state
+  - SDK-only flag used by listAll/Iter to include basins that are being deleted
   - Not sent as an API query parameter; implemented client-side
 
 ### Response Codes
@@ -77,7 +77,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - `basins` (array of `BasinInfo`)
   - Matching basins (max 1000)
-  - Includes basins in "deleting" state with `state: "deleting"`
+  - Includes basins that are being deleted with `deleted_at` set
 
 - `has_more` (boolean)
   - Indicates more basins match criteria
@@ -116,7 +116,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - **Include deleting basins (iterator)**
   - Setup: delete a basin
   - Input: SDK listAll/Iter with `include_deleted=true`
-  - Expected: basin may appear with `state=deleting`
+  - Expected: basin may appear with `deleted_at` set
 
 - **Empty prefix**
   - Parameters: `prefix=""`
@@ -161,9 +161,9 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
     - Must end with lowercase letter or digit
     - No leading/trailing hyphen
 
-- `scope` (BasinScope, optional)
-  - Basin scope (immutable after creation)
-  - Values: `aws:us-east-1`
+- `location` (LocationName, optional)
+  - Basin location
+  - If omitted when creating, uses the default location for the service
 
 - `config` (BasinConfig, optional)
   - Basin configuration
@@ -246,9 +246,9 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 ### Response Schema: BasinInfo
 
 - `name` (string) — Basin name
-- `scope` (BasinScope) — Basin scope
-- `state` (BasinState) — Basin state
-  - Values: `active`, `creating`, `deleting`
+- `location` (LocationName, nullable) — Basin location
+- `created_at` (string/date-time) — Creation time
+- `deleted_at` (string/date-time, nullable) — Deletion time, if the basin is being deleted
 
 ### Test Cases
 
@@ -256,8 +256,8 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Input: `{"basin": "test-basin-01"}`
   - Expected: 201
 
-- **Create with scope**
-  - Input: `{"basin": "...", "scope": "aws:us-east-1"}`
+- **Create with location**
+  - Input: get a location from the Locations API, then create with `{"basin": "...", "location": "<location-name>"}`
   - Expected: 201
 
 - **Create with full config**
@@ -457,8 +457,9 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### Request Body: CreateOrReconfigureBasinRequest (optional, can be null)
 
-- `scope` (BasinScope, optional)
-  - Basin scope
+- `location` (LocationName, optional)
+  - Basin location
+  - If omitted when creating, uses the default location for the service
   - Cannot be changed on reconfiguration
 
 - `config` (BasinConfig, optional)
@@ -484,7 +485,7 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `409` — Conflict
   - Codes: `basin_deletion_pending`, `transaction_conflict`
 
-- `422` — Validation error / scope mismatch
+- `422` — Validation error / location mismatch
   - Code: `invalid`
 
 ### Test Cases
@@ -505,8 +506,8 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Input: existing basin, `{}`
   - Expected: 200 (reconfigured with defaults)
 
-- **Attempt to change scope**
-  - Input: different scope
+- **Attempt to change location**
+  - Input: different location
   - Expected: 422 (`invalid`)
 
 - **Create with defaults**
@@ -571,8 +572,8 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Input: basin in creating state
   - Expected: 503 (`unavailable`)
 
-- **Verify basin state after delete**
-  - Expected: state = "deleting"
+- **Verify basin after delete**
+  - Expected: basin may be omitted, or returned with `deleted_at` set
 
 - **Account frozen**
   - Setup: frozen account
@@ -817,7 +818,7 @@ When running against an account on the Free tier, certain configurations will be
   - Invalid frame format
 
 - `422` `invalid`
-  - Validation errors (config, arguments, scope mismatch, tier limits)
+  - Validation errors (config, arguments, location mismatch, tier limits)
 
 - `403` `permission_denied`
   - Token lacks required permissions or account frozen
