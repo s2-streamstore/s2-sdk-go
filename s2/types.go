@@ -17,7 +17,11 @@ type BasinName string
 // It can be between 1 and 512 bytes in length.
 type StreamName string
 
-// Location name.
+// LocationName identifies where a basin is placed.
+// Locations are defined by the service and may include public or account-private placements,
+// so discover available values with [LocationsClient.List] or [LocationsClient.GetDefault].
+//
+// See https://s2.dev/docs/concepts/basins#location.
 type LocationName string
 
 // Encryption algorithm.
@@ -175,7 +179,7 @@ type ReadWritePermissions struct {
 type BasinInfo struct {
 	// Basin name.
 	Name BasinName `json:"name"`
-	// Basin location.
+	// Basin location, if returned by the service.
 	Location *LocationName `json:"location,omitempty"`
 	// Creation time.
 	CreatedAt time.Time `json:"created_at"`
@@ -183,10 +187,13 @@ type BasinInfo struct {
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
+// LocationInfo describes a service-defined basin placement location.
+// Locations determine where newly created basins live; private locations are
+// restricted to accounts configured for access.
 type LocationInfo struct {
 	// Location name.
 	Name LocationName `json:"name"`
-	// Location represents a private placement, limited by account.
+	// IsPrivate is true for account-private placements.
 	IsPrivate bool `json:"is_private"`
 }
 
@@ -653,7 +660,8 @@ type CreateBasinArgs struct {
 	// Basin configuration.
 	Config *BasinConfig `json:"config,omitempty"`
 	// Basin location.
-	// If omitted, uses the default location for the service.
+	// If omitted, the service uses the account's default location.
+	// Use [LocationsClient.List] or [LocationsClient.GetDefault] to discover valid values.
 	Location *LocationName `json:"location,omitempty"`
 }
 
@@ -672,7 +680,8 @@ type EnsureBasinArgs struct {
 	// If omitted, the basin is ensured with the default configuration.
 	Config *BasinConfig
 	// Basin location.
-	// If omitted, uses the default location for the service. Cannot be changed once set.
+	// If omitted when creating, the service uses the account's default location.
+	// Cannot be changed once the basin exists.
 	Location *LocationName
 }
 
