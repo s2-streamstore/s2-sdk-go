@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.18.0] - 2026-05-22
+
+### Refactor
+
+- [**breaking**] Move `scope` to `location` ([#302](https://github.com/s2-streamstore/s2-sdk-go/issues/302))
+
+### Miscellaneous Tasks
+
+- Update s2-specs to 329de93 ([#301](https://github.com/s2-streamstore/s2-sdk-go/issues/301))
+
 ## [v0.17.0] - 2026-05-19
 
 ### Features
