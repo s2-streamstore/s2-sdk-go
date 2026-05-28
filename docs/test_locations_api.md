@@ -90,16 +90,12 @@ explicit location.
 - `403` — Forbidden
   - Code: `permission_denied`
 
-- `404` — No default location set
-  - Code: `not_found`
-
 - `408` — Timeout
   - Code: `request_timeout`
 
 ### Test Cases
 
 - **Get default location**
-  - Setup: account with a default location
   - Input: none
   - Expected: 200, `LocationInfo` whose `name` appears in `List`
 
@@ -123,12 +119,17 @@ Sets the account's default location. Body is the `LocationName`.
 
 - `location` (LocationName, required)
   - Location name to set as the account default
+  - Constraints: 1-64 bytes
   - SDK rejects an empty string client-side (no request sent)
 
 ### Response Codes
 
 - `200` — Success
   - Body: `LocationInfo` reflecting the new default
+
+- `400` — Bad request
+  - Code: `bad_json`
+  - Cause: malformed request body
 
 - `403` — Forbidden
   - Code: `permission_denied`

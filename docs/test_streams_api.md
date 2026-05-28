@@ -1517,9 +1517,10 @@ PUT semantics and is always safe to retry.
 - `201` — Stream newly created (mapped to `created`)
 - `400` — Bad request (`bad_json`)
 - `403` — Forbidden (`permission_denied`)
+- `404` — Basin not found (`basin_not_found`)
 - `408` — Timeout (`request_timeout`)
-- `409` — Conflict (`transaction_conflict`)
-- `422` — Validation error (`invalid`)
+- `409` — Conflict (`stream_deletion_pending`, `transaction_conflict`)
+- `422` — Validation error / invalid config (`invalid`)
 
 ### Test Cases
 
@@ -1553,6 +1554,15 @@ PUT semantics and is always safe to retry.
 - **Ensure with invalid stream name**
   - Input: invalid stream name
   - Expected: client-side validation error (no request sent)
+
+- **Ensure stream in non-existent basin**
+  - Setup: client targeting a basin that does not exist
+  - Input: any stream name
+  - Expected: 404 (`basin_not_found`)
+
+- **Ensure with invalid config**
+  - Input: config with an invalid field (e.g. `retention_policy.age = 0`)
+  - Expected: 422 (`invalid`)
 
 - **Permission denied**
   - Setup: token lacking the required op
