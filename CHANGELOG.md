@@ -2,7 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.18.0] - 2026-05-22
+## [v0.18.1] - 2026-05-28
+
+### Bug Fixes
+
+- *(append)* Make retryAt check-and-clear atomic to preserve backoff delay ([#304](https://github.com/s2-streamstore/s2-sdk-go/issues/304))
+- *(bentobox)* Make batch AckFunc idempotent to prevent duplicate processing ([#306](https://github.com/s2-streamstore/s2-sdk-go/issues/306))
+- *(bentobox)* Persist ack progress after stream close to prevent duplicates ([#307](https://github.com/s2-streamstore/s2-sdk-go/issues/307))
+
+### Documentation
+
+- Update CreateOrReconfigure test instructions to reference Ensure API ([#300](https://github.com/s2-streamstore/s2-sdk-go/issues/300))
+- Cover Ensure basin/stream and Locations API in test matrices ([#305](https://github.com/s2-streamstore/s2-sdk-go/issues/305))
+
+## [v0.18.0] - 2026-05-23
 
 ### Refactor
 
@@ -11,12 +24,17 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Update s2-specs to 329de93 ([#301](https://github.com/s2-streamstore/s2-sdk-go/issues/301))
+- *(release)* V0.18.0 ([#303](https://github.com/s2-streamstore/s2-sdk-go/issues/303))
 
 ## [v0.17.0] - 2026-05-19
 
 ### Features
 
 - Add ensure basin and stream APIs ([#297](https://github.com/s2-streamstore/s2-sdk-go/issues/297))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.17.0 ([#299](https://github.com/s2-streamstore/s2-sdk-go/issues/299))
 
 ## [v0.16.1] - 2026-05-08
 
