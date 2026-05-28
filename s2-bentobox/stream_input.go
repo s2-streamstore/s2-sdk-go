@@ -224,11 +224,27 @@ func (si *streamInput) handleBatch(_ context.Context, records []s2.SequencedReco
 
 	si.toAck.Add(records)
 
+	// Guard against multiple invocations: ack/nack side effects (cache writes,
+	// redelivery enqueues) must happen at most once per batch. A second call
+	// returns the cached result of the first instead of double-acking or
+	// re-enqueuing for redelivery, which would reprocess records.
+	//
+	// Bento calls the AckFunc "at least once" with no exactly-once guarantee,
+	// so the implementation must be idempotent. Mirrors the sync.Once used by
+	// Close.
+	var (
+		ackOnce   sync.Once
+		ackResult error
+	)
 	ackFunc := func(c context.Context, e error) error {
-		if e == nil {
-			return si.ack(c, records)
-		}
-		return si.nack(c, records)
+		ackOnce.Do(func() {
+			if e == nil {
+				ackResult = si.ack(c, records)
+			} else {
+				ackResult = si.nack(c, records)
+			}
+		})
+		return ackResult
 	}
 
 	return records, ackFunc, nil
