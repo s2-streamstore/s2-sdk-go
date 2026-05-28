@@ -32,6 +32,10 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 - `DELETE /basins/{basin}` — `delete_basin` — Delete a basin
 - `PATCH /basins/{basin}` — `reconfigure_basin` — Reconfigure a basin
 
+### SDK-Specific Operations
+
+- `Ensure` — Idempotently create-or-converge a basin to a desired config. Wraps `PUT /basins/{basin}` and surfaces a `ProvisionResult` (`created` / `updated` / `noop`) derived from the response.
+
 ---
 
 ## 1. List Basins
@@ -744,6 +748,97 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 - **Permission denied**
   - Setup: token without `reconfigure-basin` op
+  - Expected: 403 (`permission_denied`)
+
+---
+
+## 7. Ensure Basin (SDK)
+
+**SDK operation `Ensure` → `PUT /basins/{basin}`**
+
+An idempotent, SDK-level convenience that creates the basin if it does not
+exist, or converges its config to exactly match the requested configuration
+(after defaults are applied) if it does. Uses HTTP PUT semantics and is always
+safe to retry.
+
+### Arguments: EnsureBasinArgs
+
+- `basin` (BasinName, required)
+  - Basin name
+  - Constraints: 8-48 chars
+
+- `config` (BasinConfig, optional)
+  - Desired configuration for the basin
+  - If omitted, the basin is ensured with the default configuration
+
+- `location` (LocationName, optional)
+  - Basin location
+  - If omitted when creating, the service uses the account's default location
+  - Cannot be changed once the basin exists
+
+### Response: EnsureBasinResponse
+
+- `result` (ProvisionResult)
+  - `created` — basin was newly created
+  - `updated` — basin already existed and its config was changed to match
+  - `noop` — basin already existed and no write was needed
+
+- `basin` (BasinInfo)
+  - Current basin info
+
+### Response Codes
+
+- `200` — Basin already existed (mapped to `updated` or `noop`)
+- `201` — Basin newly created (mapped to `created`)
+- `400` — Bad request (`bad_json`)
+- `403` — Forbidden / limit exhausted (`permission_denied`, `quota_exhausted`)
+- `408` — Timeout (`request_timeout`)
+- `409` — Conflict (`basin_deletion_pending`, `transaction_conflict`)
+- `422` — Validation error / location mismatch (`invalid`)
+
+### Test Cases
+
+- **Ensure new basin (no config)**
+  - Input: new name, no config, no location
+  - Expected: `result == created`, basin created with default config
+
+- **Ensure new basin with config**
+  - Input: new name + config
+  - Expected: `result == created`, returned config matches requested (after defaults)
+
+- **Ensure existing basin with same config**
+  - Setup: basin already exists with matching config
+  - Input: same name + identical config
+  - Expected: `result == noop`, no write performed
+
+- **Ensure existing basin with changed config**
+  - Setup: basin exists with different config
+  - Input: same name + new config
+  - Expected: `result == updated`, config converged to requested
+
+- **Ensure is idempotent on repeat**
+  - Input: call Ensure twice with identical args
+  - Expected: first call `created` or `updated`, second call `noop`
+
+- **Ensure with location on create**
+  - Input: get a location from the Locations API, then ensure with that location
+  - Expected: `result == created`, basin placed in that location
+
+- **Ensure existing basin with different location**
+  - Setup: basin exists in location A
+  - Input: same name, location B
+  - Expected: 422 (`invalid`) — location cannot be changed
+
+- **Ensure with invalid basin name**
+  - Input: name outside 8-48 chars
+  - Expected: client-side validation error (no request sent)
+
+- **Ensure during basin deletion**
+  - Setup: delete basin, then Ensure
+  - Expected: 409 (`basin_deletion_pending`)
+
+- **Permission denied**
+  - Setup: token lacking the required op
   - Expected: 403 (`permission_denied`)
 
 ---
