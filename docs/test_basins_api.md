@@ -15,7 +15,7 @@
 > - Find the option to include the basin header and enable it in the client
 > - Show progress as each test progresses
 > - Set a timeout for each test
-> - If the PUT based API for CreateOrReconfigure is not used in the SDK, don't implement the test
+> - The PUT based API for CreateOrReconfigure is exposed in the SDK as `client.Basins.Ensure()`; implement tests for it
 > - If idempotency tokens are an internal detail of the SDK, don't implement a specific test
 > - After a delete, basin MAY appear in list with `deleted_at` set OR not appear at all
 
