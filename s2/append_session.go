@@ -268,14 +268,18 @@ func (r *AppendSession) processInflightQueue() {
 	default:
 	}
 
-	r.stateMu.RLock()
-	retryAt := r.retryAt
-	r.stateMu.RUnlock()
-	if !retryAt.IsZero() && time.Now().Before(retryAt) {
-		return
-	}
+	// Check-and-clear retryAt atomically under a single exclusive lock. A
+	// separate read/clear sequence leaves a gap in which a concurrent
+	// scheduleRetry (driven by the readAcks goroutine) can set retryAt only
+	// to have it immediately overwritten here, bypassing the backoff delay.
 	r.stateMu.Lock()
-	r.retryAt = time.Time{}
+	if retryAt := r.retryAt; !retryAt.IsZero() {
+		if time.Now().Before(retryAt) {
+			r.stateMu.Unlock()
+			return
+		}
+		r.retryAt = time.Time{}
+	}
 	r.stateMu.Unlock()
 
 	r.inflightMu.RLock()
