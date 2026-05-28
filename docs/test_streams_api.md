@@ -143,6 +143,10 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 - `fence` — Set fencing token via command record
 - `trim` — Trim records via command record
 
+### SDK-Specific Operations
+
+- `Ensure` — Idempotently create-or-converge a stream to a desired config. Wraps `PUT /streams/{stream}` and surfaces a `ProvisionResult` (`created` / `updated` / `noop`) derived from the response. See section 12.
+
 > **Note:** SDKs may expose additional helper methods that wrap these operations. See section 10 (Command Records) and section 11 (SDK Client Lifecycle) for SDK-specific tests.
 
 ---
@@ -1475,6 +1479,94 @@ Test client initialization, configuration, and cleanup patterns exposed by the S
   - Expected: bodies and headers match original content in both formats
 
 > **Note:** Test all client/session creation patterns the SDK exposes (builders, factory methods, config objects, etc.)
+
+---
+
+## 12. Ensure Stream (SDK)
+
+**SDK operation `Ensure` → `PUT /streams/{stream}`**
+
+An idempotent, SDK-level convenience that creates the stream if it does not
+exist, or converges its config to exactly match the requested configuration if
+it does. Missing config fields are filled from the basin's default stream
+configuration and then global defaults before comparing or writing. Uses HTTP
+PUT semantics and is always safe to retry.
+
+### Arguments: EnsureStreamArgs
+
+- `stream` (StreamName, required)
+  - Stream name
+
+- `config` (StreamConfig, optional)
+  - Desired stream configuration before basin defaults are applied
+  - If omitted, the stream is ensured using basin and global defaults
+
+### Response: EnsureStreamResponse
+
+- `result` (ProvisionResult)
+  - `created` — stream was newly created
+  - `updated` — stream already existed and its config was changed to match
+  - `noop` — stream already existed and no write was needed
+
+- `stream` (StreamInfo)
+  - Current stream state
+
+### Response Codes
+
+- `200` — Stream already existed (mapped to `updated` or `noop`)
+- `201` — Stream newly created (mapped to `created`)
+- `400` — Bad request (`bad_json`)
+- `403` — Forbidden (`permission_denied`)
+- `404` — Basin not found (`basin_not_found`)
+- `408` — Timeout (`request_timeout`)
+- `409` — Conflict (`stream_deletion_pending`, `transaction_conflict`)
+- `422` — Validation error / invalid config (`invalid`)
+
+### Test Cases
+
+- **Ensure new stream (no config)**
+  - Input: new name, no config
+  - Expected: `result == created`, stream created with basin/global defaults
+
+- **Ensure new stream with config**
+  - Input: new name + config
+  - Expected: `result == created`, returned config matches requested (after defaults)
+
+- **Ensure existing stream with same config**
+  - Setup: stream already exists with matching effective config
+  - Input: same name + identical config
+  - Expected: `result == noop`, no write performed
+
+- **Ensure existing stream with changed config**
+  - Setup: stream exists with different config
+  - Input: same name + new config
+  - Expected: `result == updated`, config converged to requested
+
+- **Ensure is idempotent on repeat**
+  - Input: call Ensure twice with identical args
+  - Expected: first call `created` or `updated`, second call `noop`
+
+- **Ensure partial config fills from basin defaults**
+  - Setup: basin has non-default default_stream_config
+  - Input: config with only some fields set
+  - Expected: omitted fields resolved from basin defaults before comparison
+
+- **Ensure with invalid stream name**
+  - Input: invalid stream name
+  - Expected: client-side validation error (no request sent)
+
+- **Ensure stream in non-existent basin**
+  - Setup: client targeting a basin that does not exist
+  - Input: any stream name
+  - Expected: 404 (`basin_not_found`)
+
+- **Ensure with invalid config**
+  - Input: config with an invalid field (e.g. `retention_policy.age = 0`)
+  - Expected: 422 (`invalid`)
+
+- **Permission denied**
+  - Setup: token lacking the required op
+  - Expected: 403 (`permission_denied`)
 
 ---
 
