@@ -178,15 +178,6 @@ func connectStreamInput(
 	}, nil
 }
 
-func (si *streamInput) isClosed() bool {
-	select {
-	case <-si.closedCh:
-		return true
-	default:
-		return false
-	}
-}
-
 func (si *streamInput) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, AckFunc, error) {
 	// Check for nacks first
 	select {
@@ -280,7 +271,13 @@ func (si *streamInput) ack(ctx context.Context, records []s2.SequencedRecord) er
 
 	si.Logger.With(withLog...).Debug("Acknowledging batch")
 
-	return si.toAck.MarkDone(ctx, records, !si.isClosed())
+	// Always persist acknowledged progress, even after the input is closed.
+	// Acks are dispatched to Bento asynchronously and routinely complete after
+	// the producing streamInput has been closed (session restart, stream
+	// removal, shutdown). Skipping the cache write on close silently loses that
+	// progress, so a reconnect or re-add resumes from a stale position and
+	// re-delivers already-acked records.
+	return si.toAck.MarkDone(ctx, records, true)
 }
 
 func (si *streamInput) Close(ctx context.Context) error {
