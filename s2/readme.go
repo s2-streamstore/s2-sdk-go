@@ -61,7 +61,7 @@ Generate an authentication token by logging onto the web console at s2.dev.
 
 The SDK has three levels of clients:
 
-  - [Client] — managing basins, access tokens, metrics
+  - [Client] — managing basins, access tokens, metrics, locations
   - [BasinClient] — managing streams within a basin
   - [StreamClient] — reading and writing records
 
