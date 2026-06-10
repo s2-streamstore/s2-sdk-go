@@ -162,7 +162,7 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 - `start_after` (string, optional, default `""`)
   - Filter to streams whose names lexicographically start after this string
-  - Constraint: must be >= `prefix`
+  - If `start_after` < `prefix`, the server clamps the cursor to the prefix range start
 
 - `limit` (integer, optional, default `1000`)
   - Number of results
@@ -268,9 +268,10 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
   - Parameters: `limit=1001`
   - Expected: 200, up to 1000 streams (clamped to max)
 
-- **Invalid start_after < prefix**
-  - Parameters: `prefix=z`, `start_after=a`
-  - Expected: 422 (`invalid`)
+- **start_after < prefix**
+  - Setup: create streams `{base}-a-a`, `{base}-a-b`, `{base}-b-a`
+  - Parameters: `prefix={base}-b`, `start_after={base}-a`
+  - Expected: 200, returns `[{base}-b-a]`, `has_more=false`
 
 - **Basin not found**
   - Setup: invalid basin
