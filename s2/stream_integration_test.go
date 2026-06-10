@@ -294,24 +294,6 @@ func TestListStreams_IteratorIncludeDeleted(t *testing.T) {
 	}
 }
 
-func TestListStreams_InvalidStartAfterLessThanPrefix(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
-	defer cancel()
-	t.Log("Testing: List streams with start_after < prefix")
-
-	basin := getSharedBasin(t)
-	_, err := basin.Streams.List(ctx, &s2.ListStreamsArgs{
-		Prefix:     "zzzzzzzz",
-		StartAfter: "aaaaaaaa",
-	})
-
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 422 error, got: %v", err)
-	}
-	t.Logf("Got expected error: %v", err)
-}
-
 func TestListStreams_LimitZero(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()

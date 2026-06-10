@@ -331,24 +331,6 @@ func TestListBasins_LimitExceeds1000(t *testing.T) {
 	t.Logf("Listed %d basins with limit=1500 (clamped)", len(resp.Basins))
 }
 
-func TestListBasins_InvalidStartAfterLessThanPrefix(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-	t.Log("Testing: List basins with start_after < prefix")
-
-	client := testClient(t)
-	_, err := client.Basins.List(ctx, &s2.ListBasinsArgs{
-		Prefix:     "zzzzzzzz",
-		StartAfter: "aaaaaaaa",
-	})
-
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 422 {
-		t.Errorf("Expected 422 error, got: %v", err)
-	}
-	t.Logf("Got expected error: %v", err)
-}
-
 func TestListBasins_IncludesDeletingBasins(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
