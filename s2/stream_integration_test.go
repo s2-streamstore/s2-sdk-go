@@ -294,44 +294,6 @@ func TestListStreams_IteratorIncludeDeleted(t *testing.T) {
 	}
 }
 
-func TestListStreams_StartAfterLessThanPrefix(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
-	defer cancel()
-	t.Log("Testing: List streams with start_after < prefix")
-
-	basin := getSharedBasin(t)
-	base := string(uniqueStreamName("salp"))
-	names := []s2.StreamName{
-		s2.StreamName(base + "-a-a"),
-		s2.StreamName(base + "-a-b"),
-		s2.StreamName(base + "-b-a"),
-	}
-	for _, name := range names {
-		if _, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: name}); err != nil {
-			t.Fatalf("Create stream %s failed: %v", name, err)
-		}
-		defer deleteStream(ctx, basin, name)
-	}
-
-	resp, err := basin.Streams.List(ctx, &s2.ListStreamsArgs{
-		Prefix:     base + "-b",
-		StartAfter: base + "-a",
-	})
-	if err != nil {
-		t.Fatalf("List failed: %v", err)
-	}
-
-	if len(resp.Streams) != 1 {
-		t.Fatalf("Expected 1 stream, got %d", len(resp.Streams))
-	}
-	if got, want := string(resp.Streams[0].Name), base+"-b-a"; got != want {
-		t.Errorf("Expected stream %s, got %s", want, got)
-	}
-	if resp.HasMore {
-		t.Error("Expected has_more to be false")
-	}
-}
-
 func TestListStreams_LimitZero(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()

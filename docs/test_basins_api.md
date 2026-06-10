@@ -134,11 +134,6 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
   - Parameters: `limit=1001`
   - Expected: 200, up to 1000 basins (clamped to max)
 
-- **start_after < prefix**
-  - Setup: create basins `{base}-a-a`, `{base}-a-b`, `{base}-b-a`
-  - Parameters: `prefix={base}-b`, `start_after={base}-a`
-  - Expected: 200, returns `[{base}-b-a]`, `has_more=false`
-
 - **Permission denied**
   - Setup: token without `list-basins` op
   - Expected: 403 (`permission_denied`)

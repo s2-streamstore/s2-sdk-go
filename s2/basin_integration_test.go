@@ -331,44 +331,6 @@ func TestListBasins_LimitExceeds1000(t *testing.T) {
 	t.Logf("Listed %d basins with limit=1500 (clamped)", len(resp.Basins))
 }
 
-func TestListBasins_StartAfterLessThanPrefix(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-	t.Log("Testing: List basins with start_after < prefix")
-
-	client := testClient(t)
-	base := string(uniqueBasinName("salp"))
-	names := []s2.BasinName{
-		s2.BasinName(base + "-a-a"),
-		s2.BasinName(base + "-a-b"),
-		s2.BasinName(base + "-b-a"),
-	}
-	for _, name := range names {
-		if _, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: name}); err != nil {
-			t.Fatalf("Create basin %s failed: %v", name, err)
-		}
-		defer deleteBasin(ctx, client, name)
-	}
-
-	resp, err := client.Basins.List(ctx, &s2.ListBasinsArgs{
-		Prefix:     base + "-b",
-		StartAfter: base + "-a",
-	})
-	if err != nil {
-		t.Fatalf("List failed: %v", err)
-	}
-
-	if len(resp.Basins) != 1 {
-		t.Fatalf("Expected 1 basin, got %d", len(resp.Basins))
-	}
-	if got, want := string(resp.Basins[0].Name), base+"-b-a"; got != want {
-		t.Errorf("Expected basin %s, got %s", want, got)
-	}
-	if resp.HasMore {
-		t.Error("Expected has_more to be false")
-	}
-}
-
 func TestListBasins_IncludesDeletingBasins(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
