@@ -212,12 +212,13 @@ type BasinConfig struct {
 }
 
 type StreamInfo struct {
+	// Stream name.
 	Name StreamName `json:"name"`
 	// Creation time.
 	CreatedAt time.Time `json:"created_at"`
 	// Deletion time, if the stream is being deleted.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
-	// Encryption algorithm for the stream, if encryption is enabled.
+	// Encryption algorithm for this stream, if encryption is enabled.
 	Cipher *EncryptionAlgorithm `json:"cipher,omitempty"`
 }
 
