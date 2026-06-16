@@ -278,7 +278,7 @@ func (s *StreamsClient) Reconfigure(ctx context.Context, args ReconfigureStreamA
 func validateStreamName(name StreamName) error {
 	length := len(name)
 	if length < 1 || length > 512 {
-		return fmt.Errorf("stream name must be between 1 and 512 bytes")
+		return newValidationError("stream name must be between 1 and 512 bytes")
 	}
 	return nil
 }

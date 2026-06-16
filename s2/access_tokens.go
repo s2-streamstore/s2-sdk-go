@@ -152,7 +152,7 @@ func (a *AccessTokensClient) Revoke(ctx context.Context, args RevokeAccessTokenA
 func validateAccessTokenID(id AccessTokenID) error {
 	length := len(id)
 	if length < 1 || length > 96 {
-		return fmt.Errorf("access token ID must be between 1 and 96 bytes")
+		return newValidationError("access token ID must be between 1 and 96 bytes")
 	}
 	return nil
 }
