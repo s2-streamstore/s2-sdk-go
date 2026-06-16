@@ -222,7 +222,7 @@ func decodeAPIError(status int, body []byte) error {
 // Without this, a body read that fails mid-stream would feed partial bytes to
 // decodeAPIError and surface as a misleading server error.
 func newBodyReadError(status int, partial []byte, err error) *S2Error {
-	message := fmt.Sprintf("failed to read error response body (HTTP %d): %s", status, err)
+	message := fmt.Sprintf("failed to read error response body: %s", err)
 	if trimmed := bytes.TrimSpace(partial); len(trimmed) > 0 {
 		message = fmt.Sprintf("%s (partial body: %q)", message, trimmed)
 	}
