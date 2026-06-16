@@ -282,10 +282,10 @@ var basinNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$
 func validateBasinName(name BasinName) error {
 	length := utf8.RuneCountInString(string(name))
 	if length < 8 || length > 48 {
-		return fmt.Errorf("basin name must be between 8 and 48 characters, got %d", length)
+		return newValidationError(fmt.Sprintf("basin name must be between 8 and 48 characters, got %d", length))
 	}
 	if !basinNameRegex.MatchString(string(name)) {
-		return fmt.Errorf("basin name must contain only lowercase letters, numbers, and hyphens, and cannot begin or end with a hyphen")
+		return newValidationError("basin name must contain only lowercase letters, numbers, and hyphens, and cannot begin or end with a hyphen")
 	}
 	return nil
 }
