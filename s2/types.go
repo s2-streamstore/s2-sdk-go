@@ -613,9 +613,9 @@ type AppendSessionOptions struct {
 }
 
 type ListAccessTokensArgs struct {
-	// Filter to access tokens whose ID begins with this prefix.
+	// Filter to access tokens whose IDs begin with this prefix.
 	Prefix string `json:"prefix,omitempty"`
-	// Filter to access tokens whose ID lexicographically starts after this string.
+	// Filter to access tokens whose IDs lexicographically start after this string.
 	StartAfter string `json:"start_after,omitempty"`
 	// Number of results, up to a maximum of 1000.
 	Limit *int `json:"limit,omitempty"`
@@ -694,9 +694,9 @@ type EnsureBasinResponse struct {
 }
 
 type ListStreamsArgs struct {
-	// Filter to streams whose name begins with this prefix.
+	// Filter to streams whose names begin with this prefix.
 	Prefix string `json:"prefix,omitempty"`
-	// Filter to streams whose name begins with this prefix.
+	// Filter to streams whose names lexicographically start after this string.
 	// It must be greater than or equal to the `prefix` if specified.
 	StartAfter string `json:"start_after,omitempty"`
 	// Number of results, up to a maximum of 1000.
