@@ -330,3 +330,41 @@ func TestBatcher_FlushOnCtxCancelResolvesPending(t *testing.T) {
 		t.Fatal("resultCh never resolved on ctx cancellation; flushLocked dropped the batch")
 	}
 }
+
+// flushLocked must not advance the match sequence number when its send to
+// batchesCh loses the select to b.ctx.Done(): the batch was never enqueued, so
+// advancing would leave the client ahead of the server and trigger
+// SeqNumMismatchError (HTTP 412) on subsequent appends.
+func TestBatcher_FlushOnCtxCancelDoesNotAdvanceSeqNum(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	start := uint64(0)
+	batcher := NewBatcher(ctx, &BatchingOptions{
+		MaxRecords:    10,
+		Linger:        time.Hour,
+		ChannelBuffer: 1,
+		MatchSeqNum:   &start,
+	})
+
+	// First batch fills the single-slot channel; nobody drains it.
+	if err := batcher.Add(AppendRecord{Body: []byte("a")}, nil); err != nil {
+		t.Fatalf("add 1: %v", err)
+	}
+	batcher.Flush()
+	if got := *batcher.nextMatchSeqNum; got != 1 {
+		t.Fatalf("after first flush, seq num = %d, want 1", got)
+	}
+
+	// Second batch cannot be enqueued (channel full) and the context is done,
+	// so the send loses the select and the batch is dropped.
+	if err := batcher.Add(AppendRecord{Body: []byte("b")}, nil); err != nil {
+		t.Fatalf("add 2: %v", err)
+	}
+	cancel()
+	batcher.Flush()
+
+	if got := *batcher.nextMatchSeqNum; got != 1 {
+		t.Fatalf("seq num advanced to %d for a batch that was never sent, want 1", got)
+	}
+}

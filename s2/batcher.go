@@ -142,7 +142,6 @@ func (b *Batcher) flushLocked() {
 	if b.nextMatchSeqNum != nil {
 		v := *b.nextMatchSeqNum
 		matchSeqNum = &v
-		*b.nextMatchSeqNum += uint64(len(records))
 	}
 
 	input := &AppendInput{
@@ -156,6 +155,9 @@ func (b *Batcher) flushLocked() {
 
 	select {
 	case b.batchesCh <- &BatchOutput{Input: input, recordMeta: meta}:
+		if b.nextMatchSeqNum != nil {
+			*b.nextMatchSeqNum += uint64(len(records))
+		}
 	case <-b.ctx.Done():
 		err := b.ctx.Err()
 		for _, m := range meta {
