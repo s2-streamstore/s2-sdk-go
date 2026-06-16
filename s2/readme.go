@@ -48,7 +48,7 @@ Generate an authentication token by logging onto the web console at s2.dev.
 		}
 		defer session.Close()
 
-		for session.Next(ctx) {
+		for session.Next() {
 			rec := session.Record()
 			fmt.Printf("[%d] %s\n", rec.SeqNum, string(rec.Body))
 		}
@@ -84,7 +84,7 @@ Read session
 	}
 	defer session.Close()
 
-	for session.Next(ctx) {
+	for session.Next() {
 		rec := session.Record()
 		// process rec
 	}
