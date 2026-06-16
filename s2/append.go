@@ -160,9 +160,14 @@ func (p *transportAppendSession) connectAndRead(req *http.Request, pipeWriter *i
 	}
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		resp.Body.Close()
-		apiErr := decodeAPIError(resp.StatusCode, body)
+		var apiErr error
+		if readErr != nil {
+			apiErr = newBodyReadError(resp.StatusCode, body, readErr)
+		} else {
+			apiErr = decodeAPIError(resp.StatusCode, body)
+		}
 		pipeWriter.CloseWithError(apiErr)
 		p.reportError(apiErr)
 		return

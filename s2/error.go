@@ -216,6 +216,23 @@ func decodeAPIError(status int, body []byte) error {
 	}
 }
 
+// newBodyReadError reports a failure to read an HTTP error-response body. The
+// HTTP status is preserved, but Origin is "network" because the body read (not
+// the server) is what failed; any partial body is included for diagnostics.
+// Without this, a body read that fails mid-stream would feed partial bytes to
+// decodeAPIError and surface as a misleading server error.
+func newBodyReadError(status int, partial []byte, err error) *S2Error {
+	message := fmt.Sprintf("failed to read error response body (HTTP %d): %s", status, err)
+	if trimmed := bytes.TrimSpace(partial); len(trimmed) > 0 {
+		message = fmt.Sprintf("%s (partial body: %q)", message, trimmed)
+	}
+	return &S2Error{
+		Message: message,
+		Status:  status,
+		Origin:  "network",
+	}
+}
+
 func makeStreamResetError(err error, context string) error {
 	var message string
 	if err != nil {

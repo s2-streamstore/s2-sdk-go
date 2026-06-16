@@ -97,7 +97,10 @@ func (s *StreamClient) CheckTail(ctx context.Context) (*TailResponse, error) {
 func parseHTTPError(resp *http.Response) error {
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+	if readErr != nil {
+		return newBodyReadError(resp.StatusCode, body, readErr)
+	}
 	return decodeAPIError(resp.StatusCode, body)
 }
 

@@ -87,7 +87,12 @@ func (h *httpClient) requestWithHeadersResult(ctx context.Context, method, path 
 	logInfo(h.logger, "s2 http response", "method", method, "path", path, "status", resp.StatusCode)
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		if readErr != nil {
+			bodyErr := newBodyReadError(resp.StatusCode, body, readErr)
+			logError(h.logger, "s2 http error response body read failed", "method", method, "path", path, "status", resp.StatusCode, "error", readErr)
+			return nil, bodyErr
+		}
 		apiErr := decodeAPIError(resp.StatusCode, body)
 		logError(h.logger, "s2 http error response", "method", method, "path", path, "status", resp.StatusCode, "message", apiErr.Error())
 		return nil, apiErr
@@ -185,7 +190,12 @@ func (h *httpClient) requestProto(
 	logInfo(h.logger, "s2 http proto response", "method", method, "path", path, "status", resp.StatusCode)
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		if readErr != nil {
+			bodyErr := newBodyReadError(resp.StatusCode, body, readErr)
+			logError(h.logger, "s2 http proto error response body read failed", "method", method, "path", path, "status", resp.StatusCode, "error", readErr)
+			return bodyErr
+		}
 		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
 			respCompression := internalframing.ParseContentEncoding(encoding)
 			decompressed, err := internalframing.Decompress(body, respCompression)
