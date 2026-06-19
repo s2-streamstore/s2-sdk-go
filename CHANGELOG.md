@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.18.2] - 2026-06-19
+
+### Bug Fixes
+
+- *(batcher)* Advance MatchSeqNum only after successful batch send ([#319](https://github.com/s2-streamstore/s2-sdk-go/issues/319))
+- *(docs)* Correct ReadSession.Next() usage in package docs ([#321](https://github.com/s2-streamstore/s2-sdk-go/issues/321))
+- *(validation)* Return *S2Error from identifier validators ([#322](https://github.com/s2-streamstore/s2-sdk-go/issues/322))
+- *(http)* Surface error-response body read failures as network errors ([#323](https://github.com/s2-streamstore/s2-sdk-go/issues/323))
+- *(metrics)* Limit error response body reads to 64 KiB ([#313](https://github.com/s2-streamstore/s2-sdk-go/issues/313)) ([#324](https://github.com/s2-streamstore/s2-sdk-go/issues/324))
+- *(bentobox)* Correct SeqNumCache miss contract ([#311](https://github.com/s2-streamstore/s2-sdk-go/issues/311)) ([#325](https://github.com/s2-streamstore/s2-sdk-go/issues/325))
+- *(bentobox)* Keep in-memory tail position when durable cache write fails ([#312](https://github.com/s2-streamstore/s2-sdk-go/issues/312)) ([#326](https://github.com/s2-streamstore/s2-sdk-go/issues/326))
+
+### Documentation
+
+- Add locations to Client description in readme.go ([#309](https://github.com/s2-streamstore/s2-sdk-go/issues/309))
+
+### Testing
+
+- Allow listing with start_after before prefix ([#317](https://github.com/s2-streamstore/s2-sdk-go/issues/317))
+
+### Miscellaneous Tasks
+
+- Add specsync skill; fix list args docs ([#320](https://github.com/s2-streamstore/s2-sdk-go/issues/320))
+
 ## [v0.18.1] - 2026-05-28
 
 ### Bug Fixes
@@ -14,6 +38,10 @@ All notable changes to this project will be documented in this file.
 
 - Update CreateOrReconfigure test instructions to reference Ensure API ([#300](https://github.com/s2-streamstore/s2-sdk-go/issues/300))
 - Cover Ensure basin/stream and Locations API in test matrices ([#305](https://github.com/s2-streamstore/s2-sdk-go/issues/305))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.18.1 ([#308](https://github.com/s2-streamstore/s2-sdk-go/issues/308))
 
 ## [v0.18.0] - 2026-05-23
 
