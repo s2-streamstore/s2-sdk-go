@@ -85,12 +85,14 @@ func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 }
 
 func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum uint64) error {
+	// Update the in-memory position even if the durable write fails, so the
+	// process keeps the latest position and a 416 reset to the tail isn't lost.
+	s.mem.Set(stream, seqNum)
 	if s.inner != nil {
 		if err := s.inner.Set(ctx, stream, seqNum); err != nil {
 			return err
 		}
 	}
-	s.mem.Set(stream, seqNum)
 	return nil
 }
 

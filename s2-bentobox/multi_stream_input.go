@@ -251,11 +251,11 @@ func streamSourceRecvLoop(
 				logger.With("stream", stream, "tail_seq_num", rangeErr.Tail.SeqNum).
 					Warn("Cached position beyond stream tail, resetting to tail")
 				if setErr := cache.Set(ctx, stream, rangeErr.Tail.SeqNum); setErr != nil {
+					// cache.Set already updated the in-memory position to the
+					// tail, so don't Forget: that would fall back to the stale
+					// durable value and tight-loop on 416.
 					logger.With("stream", stream, "error", setErr).
-						Error("Failed to reset cached sequence number after 416")
-					// Drop the stale in-memory entry so the next reconnect doesn't
-					// shadow the inner cache and tight-loop on 416.
-					cache.Forget(stream)
+						Error("Failed to durably reset cached sequence number after 416")
 				}
 				return
 			}
