@@ -263,16 +263,16 @@ func (f *failingSetCache) Set(context.Context, string, uint64) error {
 	return f.setErr
 }
 
-func TestStreamSourceRecvLoopForgetsStaleMemEntryWhenSetFails(t *testing.T) {
+func TestStreamSourceRecvLoopKeepsTailInMemWhenSetFails(t *testing.T) {
 	const stream = "demo"
 	const stale uint64 = 42
 	const tailSeqNum uint64 = 9001
 
+	// A durable cache stuck at a stale (beyond-tail) value whose writes fail.
 	inner := &failingSetCache{getValue: stale, setErr: errors.New("durable cache write failed")}
 	cache := newSeqNumCache(inner, silentLogger{})
 
-	// Warm the in-memory layer with the stale value (simulates prior successful
-	// Set that has since become stale relative to the stream tail).
+	// Warm the in-memory layer with the stale value.
 	if _, err := cache.Get(context.Background(), stream); err != nil {
 		t.Fatalf("warm cache: %v", err)
 	}
@@ -286,10 +286,18 @@ func TestStreamSourceRecvLoopForgetsStaleMemEntryWhenSetFails(t *testing.T) {
 
 	streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{})
 
-	// In-mem must be cleared so the next reconnect falls through to inner.Get
-	// instead of returning the stale value and tight-looping on 416.
-	if _, ok := cache.mem.Get(stream); ok {
-		t.Fatal("expected in-memory cache entry to be cleared after failed Set")
+	// The durable write failed, but the in-memory position must still be reset
+	// to the tail so the next reconnect doesn't fall back to the stale value.
+	if got, ok := cache.mem.Get(stream); !ok || got != tailSeqNum {
+		t.Fatalf("expected in-memory position reset to tail %d, got %d (present=%v)", tailSeqNum, got, ok)
+	}
+
+	got, err := cache.Get(context.Background(), stream)
+	if err != nil {
+		t.Fatalf("get after 416 reset: %v", err)
+	}
+	if got != tailSeqNum {
+		t.Fatalf("next reconnect should read from tail %d, got stale %d", tailSeqNum, got)
 	}
 }
 
