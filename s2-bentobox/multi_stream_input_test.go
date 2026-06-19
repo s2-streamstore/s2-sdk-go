@@ -292,3 +292,51 @@ func TestStreamSourceRecvLoopForgetsStaleMemEntryWhenSetFails(t *testing.T) {
 		t.Fatal("expected in-memory cache entry to be cleared after failed Set")
 	}
 }
+
+type erroringCache struct {
+	err error
+}
+
+func (c *erroringCache) Get(context.Context, string) (uint64, error) { return 0, c.err }
+func (c *erroringCache) Set(context.Context, string, uint64) error   { return nil }
+
+type warnCountingLogger struct {
+	silentLogger
+	warns *int
+}
+
+func (l warnCountingLogger) With(...any) Logger { return l }
+func (l warnCountingLogger) Warn(string)        { *l.warns++ }
+func (l warnCountingLogger) Warnf(string, ...any) {
+	*l.warns++
+}
+
+// A clean miss signalled via ErrNoCacheEntry must surface as ErrNoCacheEntry
+// without being logged as a failure; any other error is also surfaced as
+// ErrNoCacheEntry but logged as a warning since it may be a transient backend
+// fault rather than a real miss.
+func TestSeqNumCacheGetMissLogging(t *testing.T) {
+	t.Run("ErrNoCacheEntry does not warn", func(t *testing.T) {
+		var warns int
+		cache := newSeqNumCache(&erroringCache{err: ErrNoCacheEntry}, warnCountingLogger{warns: &warns})
+
+		if _, err := cache.Get(context.Background(), "s"); !errors.Is(err, ErrNoCacheEntry) {
+			t.Fatalf("expected ErrNoCacheEntry, got %v", err)
+		}
+		if warns != 0 {
+			t.Fatalf("clean miss should not warn; got %d warnings", warns)
+		}
+	})
+
+	t.Run("other error warns", func(t *testing.T) {
+		var warns int
+		cache := newSeqNumCache(&erroringCache{err: errors.New("backend down")}, warnCountingLogger{warns: &warns})
+
+		if _, err := cache.Get(context.Background(), "s"); !errors.Is(err, ErrNoCacheEntry) {
+			t.Fatalf("expected ErrNoCacheEntry, got %v", err)
+		}
+		if warns != 1 {
+			t.Fatalf("backend error should warn once; got %d warnings", warns)
+		}
+	})
+}
