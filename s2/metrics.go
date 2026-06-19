@@ -147,13 +147,17 @@ func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set s
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode >= 400 {
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+			if readErr != nil {
+				return nil, newBodyReadError(resp.StatusCode, body, readErr)
+			}
+			return nil, decodeAPIError(resp.StatusCode, body)
+		}
+
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("reading response: %w", err)
-		}
-
-		if resp.StatusCode >= 400 {
-			return nil, decodeAPIError(resp.StatusCode, body)
 		}
 
 		var result MetricSetResponse
