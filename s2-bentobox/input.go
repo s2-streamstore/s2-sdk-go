@@ -21,10 +21,19 @@ type (
 
 // SeqNumCache is used to persist read progress across restarts.
 //
-// Get must return (0, nil) when no entry exists for the given stream (cache
-// miss). Returning a non-nil error for a miss (e.g. redis.Nil, sql.ErrNoRows)
-// is treated as a cache failure: the error is logged as a warning and the
-// consumer falls back to the configured InputStartSeqNum default.
+// Get must return a non-nil error when no entry exists for the given stream
+// (a cache miss). Returning ErrNoCacheEntry is the idiomatic way to signal a
+// miss, but any non-nil error is treated the same: the consumer falls back to
+// the configured InputStartSeqNum default (so InputStartSeqNumLatest tails from
+// the end). Errors that are not ErrNoCacheEntry are also logged as a warning,
+// since they may indicate a transient backend failure rather than a clean miss
+// (e.g. redis.Nil and sql.ErrNoRows naturally surface as errors and can be
+// returned as-is).
+//
+// Do NOT return (0, nil) for a miss: the interface cannot distinguish that from
+// a real cached position of 0, so it is interpreted as "resume from sequence
+// number 0" and causes InputStartSeqNumLatest to replay from the beginning
+// instead of tailing.
 //
 // Set must durably store the next sequence number to consume for the stream.
 type SeqNumCache interface {
@@ -59,11 +68,14 @@ func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 
 	cached, err := s.inner.Get(ctx, stream)
 	if err != nil {
-		// The SeqNumCache interface cannot distinguish between a cache miss and
-		// a transient error. Log the error so it is visible, then treat it as
-		// no entry so the caller falls back to the configured default start
-		// position rather than blocking indefinitely.
-		s.logger.With("stream", stream, "error", err).Warn("Cache lookup failed, starting from default position")
+		// Any error from the inner cache is treated as no entry so the caller
+		// falls back to the configured default start position rather than
+		// blocking indefinitely. ErrNoCacheEntry is the idiomatic miss signal,
+		// so only log when the error is something else: it may indicate a
+		// transient backend failure rather than a clean miss.
+		if !errors.Is(err, ErrNoCacheEntry) {
+			s.logger.With("stream", stream, "error", err).Warn("Cache lookup failed, starting from default position")
+		}
 		return 0, ErrNoCacheEntry
 	}
 
