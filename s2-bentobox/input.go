@@ -3,6 +3,7 @@ package bentobox
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	cmap "github.com/orcaman/concurrent-map/v2"
@@ -47,6 +48,17 @@ type seqNumCache struct {
 	// We don't trust the user to provide a valid cache so we have our own layer
 	// on top of the one provided by the user.
 	mem cmap.ConcurrentMap[string, uint64]
+	// A 416 tail reset bumps a stream's generation. Acks carry the generation
+	// captured when their session started and are dropped if it's now stale, so
+	// an ack from before a reset can't clobber the corrected tail position. The
+	// mutex makes a stream's generation check, mem write and durable write one
+	// atomic step.
+	gens cmap.ConcurrentMap[string, *streamGen]
+}
+
+type streamGen struct {
+	mu  sync.Mutex
+	gen uint64
 }
 
 func newSeqNumCache(inner SeqNumCache, logger Logger) *seqNumCache {
@@ -54,7 +66,24 @@ func newSeqNumCache(inner SeqNumCache, logger Logger) *seqNumCache {
 		inner:  inner,
 		logger: logger,
 		mem:    cmap.New[uint64](),
+		gens:   cmap.New[*streamGen](),
 	}
+}
+
+func (s *seqNumCache) streamGenFor(stream string) *streamGen {
+	return s.gens.Upsert(stream, nil, func(exists bool, cur, _ *streamGen) *streamGen {
+		if exists {
+			return cur
+		}
+		return &streamGen{}
+	})
+}
+
+func (s *seqNumCache) generation(stream string) uint64 {
+	guard := s.streamGenFor(stream)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	return guard.gen
 }
 
 func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
@@ -84,9 +113,39 @@ func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 	return cached, nil
 }
 
-func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum uint64) error {
-	// Update the in-memory position even if the durable write fails, so the
-	// process keeps the latest position and a 416 reset to the tail isn't lost.
+// Set advances the cached position from an ack. gen is dropped if it's older
+// than the stream's current generation: the ack predates a 416 reset and would
+// move the position back beyond the tail.
+func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum, gen uint64) error {
+	guard := s.streamGenFor(stream)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+
+	if gen < guard.gen {
+		s.logger.With("stream", stream, "seq_num", seqNum).Debug("Dropping ack from before a 416 tail reset")
+		return nil
+	}
+
+	s.mem.Set(stream, seqNum)
+	if s.inner != nil {
+		if err := s.inner.Set(ctx, stream, seqNum); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResetToTail moves the cached position to the stream tail after a 416. Unlike
+// Set it may move backward, and it bumps the generation so in-flight acks from
+// before the reset are dropped. mem is written even if the durable write fails,
+// so the reset survives in-process.
+func (s *seqNumCache) ResetToTail(ctx context.Context, stream string, seqNum uint64) error {
+	guard := s.streamGenFor(stream)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+
+	guard.gen++
+
 	s.mem.Set(stream, seqNum)
 	if s.inner != nil {
 		if err := s.inner.Set(ctx, stream, seqNum); err != nil {

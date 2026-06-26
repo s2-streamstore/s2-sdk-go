@@ -250,8 +250,8 @@ func streamSourceRecvLoop(
 			if errors.As(err, &rangeErr) && rangeErr.Tail != nil {
 				logger.With("stream", stream, "tail_seq_num", rangeErr.Tail.SeqNum).
 					Warn("Cached position beyond stream tail, resetting to tail")
-				if setErr := cache.Set(ctx, stream, rangeErr.Tail.SeqNum); setErr != nil {
-					// cache.Set already updated the in-memory position to the
+				if setErr := cache.ResetToTail(ctx, stream, rangeErr.Tail.SeqNum); setErr != nil {
+					// ResetToTail already updated the in-memory position to the
 					// tail, so don't Forget: that would fall back to the stale
 					// durable value and tight-loop on 416.
 					logger.With("stream", stream, "error", setErr).

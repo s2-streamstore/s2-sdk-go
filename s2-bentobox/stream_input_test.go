@@ -14,7 +14,7 @@ func newTestStreamInput() *streamInput {
 	return &streamInput{
 		Stream:   "demo",
 		cache:    cache,
-		toAck:    newToAckMap("demo", cache, silentLogger{}),
+		toAck:    newToAckMap("demo", cache, 0, silentLogger{}),
 		nacks:    make(chan []s2.SequencedRecord, 8),
 		Logger:   silentLogger{},
 		closedCh: make(chan struct{}),
@@ -114,7 +114,7 @@ func TestAckAfterCloseDoesNotUpdateCache(t *testing.T) {
 	si := &streamInput{
 		Stream:   stream,
 		cache:    cache,
-		toAck:    newToAckMap(stream, cache, silentLogger{}),
+		toAck:    newToAckMap(stream, cache, 0, silentLogger{}),
 		nacks:    make(chan []s2.SequencedRecord, 8),
 		Logger:   silentLogger{},
 		closedCh: make(chan struct{}),
