@@ -109,10 +109,8 @@ func TestStreamSourceRecvLoopResetsCacheOn416(t *testing.T) {
 	}
 }
 
-// Regression for #328: an ack from a session that started before a 416 tail
-// reset lands asynchronously after the reset. It must not overwrite the
-// corrected tail position in either the in-memory or durable cache, otherwise
-// the next reconnect reads a beyond-tail position and hits 416 again.
+// Regression for #328: an ack from a session that predates a 416 tail reset
+// must not overwrite the corrected tail position in mem or durable cache.
 func TestStaleAckDoesNotOverwrite416TailReset(t *testing.T) {
 	const stream = "demo"
 	const tailSeqNum uint64 = 100
@@ -121,7 +119,6 @@ func TestStaleAckDoesNotOverwrite416TailReset(t *testing.T) {
 	inner := &mapCache{data: map[string]uint64{stream: staleSeqNum}}
 	cache := newSeqNumCache(inner, silentLogger{})
 
-	// The old session captured the pre-reset generation.
 	oldSi := &streamInput{
 		Stream:   stream,
 		cache:    cache,
@@ -148,7 +145,6 @@ func TestStaleAckDoesNotOverwrite416TailReset(t *testing.T) {
 		t.Fatalf("after 416, expected mem at tail %d, got %d (present=%v)", tailSeqNum, got, ok)
 	}
 
-	// The stale ack now completes; it predates the reset and must be dropped.
 	if err := ackFunc(context.Background(), nil); err != nil {
 		t.Fatalf("stale ack returned error: %v", err)
 	}
@@ -162,7 +158,7 @@ func TestStaleAckDoesNotOverwrite416TailReset(t *testing.T) {
 }
 
 // A session started after a 416 reset captures the bumped generation, so its
-// acks advance the cache normally rather than being dropped as stale.
+// acks advance the cache normally.
 func TestAckAfterTailResetAdvancesCache(t *testing.T) {
 	const stream = "demo"
 	const tailSeqNum uint64 = 100

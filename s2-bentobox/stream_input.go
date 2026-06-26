@@ -21,10 +21,8 @@ type batchAckStatus struct {
 type toAckMap struct {
 	stream string
 	logger Logger
-	// gen is the cache reset generation captured when the owning read session
-	// started. It is passed back on every cache write so acks that predate a
-	// 416 tail reset (which bumps the generation) are dropped instead of
-	// clobbering the corrected position.
+	// Cache generation captured when the session started, passed back on acks
+	// so the cache can drop ones that predate a 416 tail reset.
 	gen uint64
 
 	mu    sync.Mutex
@@ -147,9 +145,8 @@ func connectStreamInput(
 	// ErrNoCacheEntry (no entry, or inner error logged as warning); it never
 	// surfaces raw user cache errors here.
 	startSeqNum, err := cache.Get(ctx, stream)
-	// Capture the reset generation after reading the start position so this
-	// session's own acks are never dropped: a 416 reset racing in here only
-	// raises the generation, and an ack carrying the higher value still passes.
+	// After Get, so a 416 racing in only raises the generation we capture and
+	// this session's own acks are never dropped as stale.
 	gen := cache.generation(stream)
 	if errors.Is(err, ErrNoCacheEntry) {
 		// No cache entry: use the configured default start position.
