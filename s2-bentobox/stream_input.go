@@ -21,16 +21,22 @@ type batchAckStatus struct {
 type toAckMap struct {
 	stream string
 	logger Logger
+	// gen is the cache reset generation captured when the owning read session
+	// started. It is passed back on every cache write so acks that predate a
+	// 416 tail reset (which bumps the generation) are dropped instead of
+	// clobbering the corrected position.
+	gen uint64
 
 	mu    sync.Mutex
 	inner *btree.Map[uint64, batchAckStatus]
 	cache *seqNumCache
 }
 
-func newToAckMap(stream string, cache *seqNumCache, logger Logger) *toAckMap {
+func newToAckMap(stream string, cache *seqNumCache, gen uint64, logger Logger) *toAckMap {
 	return &toAckMap{
 		stream: stream,
 		logger: logger,
+		gen:    gen,
 		inner:  btree.NewMap[uint64, batchAckStatus](2),
 		cache:  cache,
 	}
@@ -101,7 +107,7 @@ func (tam *toAckMap) MarkDone(ctx context.Context, records []s2.SequencedRecord,
 	if lastAcked != nil && updateCache {
 		nextSeqNum := lastAcked.LastSeqNum + 1
 		tam.logger.With("stream", tam.stream, "start_seq_num", nextSeqNum).Debug("Updating cached sequence number")
-		if err := tam.cache.Set(ctx, tam.stream, nextSeqNum); err != nil {
+		if err := tam.cache.Set(ctx, tam.stream, nextSeqNum, tam.gen); err != nil {
 			return err
 		}
 	}
@@ -141,6 +147,10 @@ func connectStreamInput(
 	// ErrNoCacheEntry (no entry, or inner error logged as warning); it never
 	// surfaces raw user cache errors here.
 	startSeqNum, err := cache.Get(ctx, stream)
+	// Capture the reset generation after reading the start position so this
+	// session's own acks are never dropped: a 416 reset racing in here only
+	// raises the generation, and an ack carrying the higher value still passes.
+	gen := cache.generation(stream)
 	if errors.Is(err, ErrNoCacheEntry) {
 		// No cache entry: use the configured default start position.
 		if inputStartSeqNum == InputStartSeqNumLatest {
@@ -170,7 +180,7 @@ func connectStreamInput(
 		Stream:       stream,
 		session:      session,
 		cache:        cache,
-		toAck:        newToAckMap(stream, cache, logger),
+		toAck:        newToAckMap(stream, cache, gen, logger),
 		nacks:        make(chan []s2.SequencedRecord, maxInflight),
 		Logger:       logger,
 		closeSession: closeSession,

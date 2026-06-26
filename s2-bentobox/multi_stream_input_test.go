@@ -73,7 +73,7 @@ func TestStreamSourceRecvLoopResetsCacheOn416(t *testing.T) {
 		results: []readResult{{err: rangeErr}},
 	}
 	cache := newSeqNumCache(nil, silentLogger{})
-	if err := cache.Set(context.Background(), stream, 42); err != nil {
+	if err := cache.Set(context.Background(), stream, 42, 0); err != nil {
 		t.Fatalf("seed cache failed: %v", err)
 	}
 
@@ -109,6 +109,96 @@ func TestStreamSourceRecvLoopResetsCacheOn416(t *testing.T) {
 	}
 }
 
+// Regression for #328: an ack from a session that started before a 416 tail
+// reset lands asynchronously after the reset. It must not overwrite the
+// corrected tail position in either the in-memory or durable cache, otherwise
+// the next reconnect reads a beyond-tail position and hits 416 again.
+func TestStaleAckDoesNotOverwrite416TailReset(t *testing.T) {
+	const stream = "demo"
+	const tailSeqNum uint64 = 100
+	const staleSeqNum uint64 = 500
+
+	inner := &mapCache{data: map[string]uint64{stream: staleSeqNum}}
+	cache := newSeqNumCache(inner, silentLogger{})
+
+	// The old session captured the pre-reset generation.
+	oldSi := &streamInput{
+		Stream:   stream,
+		cache:    cache,
+		toAck:    newToAckMap(stream, cache, cache.generation(stream), silentLogger{}),
+		nacks:    make(chan []s2.SequencedRecord, 8),
+		Logger:   silentLogger{},
+		closedCh: make(chan struct{}),
+	}
+
+	records := []s2.SequencedRecord{{SeqNum: staleSeqNum - 2}, {SeqNum: staleSeqNum - 1}, {SeqNum: staleSeqNum}}
+	_, ackFunc, err := oldSi.handleBatch(context.Background(), records)
+	if err != nil {
+		t.Fatalf("handleBatch: %v", err)
+	}
+
+	rangeErr := &s2.RangeNotSatisfiableError{
+		S2Error: &s2.S2Error{Status: 416, Code: "RANGE_NOT_SATISFIABLE", Origin: "server"},
+		Tail:    &s2.StreamPosition{SeqNum: tailSeqNum},
+	}
+	src := &fakeBatchSource{results: []readResult{{err: rangeErr}}}
+	streamSourceRecvLoop(context.Background(), src, cache, stream, make(chan recvOutput, 1), silentLogger{})
+
+	if got, ok := cache.mem.Get(stream); !ok || got != tailSeqNum {
+		t.Fatalf("after 416, expected mem at tail %d, got %d (present=%v)", tailSeqNum, got, ok)
+	}
+
+	// The stale ack now completes; it predates the reset and must be dropped.
+	if err := ackFunc(context.Background(), nil); err != nil {
+		t.Fatalf("stale ack returned error: %v", err)
+	}
+
+	if got, ok := cache.mem.Get(stream); !ok || got != tailSeqNum {
+		t.Errorf("stale ack corrupted mem: expected tail %d, got %d", tailSeqNum, got)
+	}
+	if got, err := inner.Get(context.Background(), stream); err != nil || got != tailSeqNum {
+		t.Errorf("stale ack corrupted durable cache: expected tail %d, got %d (err=%v)", tailSeqNum, got, err)
+	}
+}
+
+// A session started after a 416 reset captures the bumped generation, so its
+// acks advance the cache normally rather than being dropped as stale.
+func TestAckAfterTailResetAdvancesCache(t *testing.T) {
+	const stream = "demo"
+	const tailSeqNum uint64 = 100
+
+	inner := &mapCache{data: map[string]uint64{}}
+	cache := newSeqNumCache(inner, silentLogger{})
+
+	if err := cache.ResetToTail(context.Background(), stream, tailSeqNum); err != nil {
+		t.Fatalf("reset to tail: %v", err)
+	}
+
+	newSi := &streamInput{
+		Stream:   stream,
+		cache:    cache,
+		toAck:    newToAckMap(stream, cache, cache.generation(stream), silentLogger{}),
+		nacks:    make(chan []s2.SequencedRecord, 8),
+		Logger:   silentLogger{},
+		closedCh: make(chan struct{}),
+	}
+
+	records := []s2.SequencedRecord{{SeqNum: tailSeqNum}, {SeqNum: tailSeqNum + 1}}
+	if _, ackFunc, err := newSi.handleBatch(context.Background(), records); err != nil {
+		t.Fatalf("handleBatch: %v", err)
+	} else if err := ackFunc(context.Background(), nil); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+
+	want := tailSeqNum + 2
+	if got, ok := cache.mem.Get(stream); !ok || got != want {
+		t.Errorf("expected mem advanced to %d, got %d", want, got)
+	}
+	if got, err := inner.Get(context.Background(), stream); err != nil || got != want {
+		t.Errorf("expected durable cache advanced to %d, got %d (err=%v)", want, got, err)
+	}
+}
+
 func TestStreamSourceRecvLoopForwardsOtherErrors(t *testing.T) {
 	const stream = "demo"
 	otherErr := errors.New("boom")
@@ -117,7 +207,7 @@ func TestStreamSourceRecvLoopForwardsOtherErrors(t *testing.T) {
 		results: []readResult{{err: otherErr}},
 	}
 	cache := newSeqNumCache(nil, silentLogger{})
-	if err := cache.Set(context.Background(), stream, 42); err != nil {
+	if err := cache.Set(context.Background(), stream, 42, 0); err != nil {
 		t.Fatalf("seed cache failed: %v", err)
 	}
 
@@ -163,7 +253,7 @@ func TestStreamSourceRecvLoopForwards416WhenTailMissing(t *testing.T) {
 		results: []readResult{{err: rangeErr}},
 	}
 	cache := newSeqNumCache(nil, silentLogger{})
-	if err := cache.Set(context.Background(), stream, 42); err != nil {
+	if err := cache.Set(context.Background(), stream, 42, 0); err != nil {
 		t.Fatalf("seed cache failed: %v", err)
 	}
 
@@ -197,7 +287,7 @@ func TestStreamSourceRecvLoopForwards416WhenTailMissing(t *testing.T) {
 
 func TestSeqNumCacheForgetDropsInMemoryEntry(t *testing.T) {
 	cache := newSeqNumCache(nil, silentLogger{})
-	if err := cache.Set(context.Background(), "s", 7); err != nil {
+	if err := cache.Set(context.Background(), "s", 7, 0); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
