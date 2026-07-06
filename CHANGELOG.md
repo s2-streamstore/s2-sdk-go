@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.18.3] - 2026-07-06
+
+### Bug Fixes
+
+- *(bentobox)* Drop stale acks that predate a 416 tail reset ([#328](https://github.com/s2-streamstore/s2-sdk-go/issues/328)) ([#329](https://github.com/s2-streamstore/s2-sdk-go/issues/329))
+
 ## [v0.18.2] - 2026-06-19
 
 ### Bug Fixes
@@ -25,6 +31,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Add specsync skill; fix list args docs ([#320](https://github.com/s2-streamstore/s2-sdk-go/issues/320))
+- *(release)* V0.18.2 ([#327](https://github.com/s2-streamstore/s2-sdk-go/issues/327))
 
 ## [v0.18.1] - 2026-05-28
 
