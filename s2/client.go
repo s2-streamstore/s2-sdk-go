@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	DefaultBaseURL           = "https://aws.s2.dev/v1"
+	DefaultBaseURL           = "https://a.s2.dev/v1"
 	defaultRequestTimeout    = 5 * time.Second
 	defaultConnectionTimeout = 3 * time.Second
 
@@ -30,7 +30,7 @@ const (
 
 type ClientOptions struct {
 	// Endpoint to connect to S2.
-	// Defaults to "https://aws.s2.dev/v1".
+	// Defaults to "https://a.s2.dev/v1".
 	BaseURL string
 	// HTTP client used for requests.
 	HTTPClient *http.Client

@@ -96,15 +96,12 @@ const (
 
 type AccessTokenInfo struct {
 	// Access token ID.
-	// It must be unique to the account and between 1 and 96 bytes in length.
 	ID AccessTokenID `json:"id"`
 	// Access token scope.
 	Scope AccessTokenScope `json:"scope"`
-	// Namespace streams based on the configured stream-level scope, which must be a prefix.
-	// Stream name arguments will be automatically prefixed, and the prefix will be stripped when listing streams.
+	// Namespace streams based on the configured stream-level scope.
 	AutoPrefixStreams bool `json:"auto_prefix_streams,omitempty"`
 	// Expiration time.
-	// If not set, the expiration will be set to that of the requestor's token.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
