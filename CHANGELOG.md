@@ -2,11 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.19.0] - 2026-07-07
+
+### Features
+
+- Default account endpoint aws.s2.dev -> a.s2.dev ([#332](https://github.com/s2-streamstore/s2-sdk-go/issues/332))
+
 ## [v0.18.3] - 2026-07-06
 
 ### Bug Fixes
 
 - *(bentobox)* Drop stale acks that predate a 416 tail reset ([#328](https://github.com/s2-streamstore/s2-sdk-go/issues/328)) ([#329](https://github.com/s2-streamstore/s2-sdk-go/issues/329))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.18.3 ([#330](https://github.com/s2-streamstore/s2-sdk-go/issues/330))
 
 ## [v0.18.2] - 2026-06-19
 
