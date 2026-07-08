@@ -23,13 +23,12 @@ func TestReadSessionBuildAttemptOptions_AdjustsLimits(t *testing.T) {
 			Wait:  Int32(baseWait),
 			Until: Uint64(baseUntil),
 		},
-		recordsRead:    4,
-		bytesRead:      40,
-		lastRecordTime: now.Add(-2 * time.Second),
-		lastTail:       &StreamPosition{SeqNum: 100},
-		lastTailAt:     now.Add(-2 * time.Second),
-		hasNextSeq:     true,
-		nextSeq:        7,
+		recordsRead: 4,
+		bytesRead:   40,
+		lastTail:    &StreamPosition{SeqNum: 100},
+		lastTailAt:  now.Add(-2 * time.Second),
+		hasNextSeq:  true,
+		nextSeq:     7,
 	}
 
 	opts := r.buildAttemptOptions(1 * time.Second)
