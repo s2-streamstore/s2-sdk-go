@@ -38,8 +38,9 @@ func gunzip(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Shared decoder for DecodeAll, which is safe for concurrent use.
-// Concurrency 0 keeps it goroutine-free since it never reads a stream.
+// Shared decoder for DecodeAll, which is safe for concurrent use and spawns
+// no goroutines (those are streaming-only). Concurrency 0 (GOMAXPROCS) sets
+// the number of pooled decoder states, bounding concurrent DecodeAll calls.
 var zstdDecoder = func() *zstd.Decoder {
 	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(0))
 	if err != nil {
