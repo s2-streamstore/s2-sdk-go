@@ -273,12 +273,18 @@ func CreateFrameWithStatus(data []byte, terminal bool, compression CompressionTy
 	return frame
 }
 
-func compressZstd(data []byte) ([]byte, error) {
+// Shared encoder for EncodeAll, which is safe for concurrent use.
+// Creating an encoder per call allocates its full window each time.
+var zstdEncoder = func() *zstd.Encoder {
 	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	return encoder.EncodeAll(data, nil), nil
+	return encoder
+}()
+
+func compressZstd(data []byte) ([]byte, error) {
+	return zstdEncoder.EncodeAll(data, nil), nil
 }
 
 func compressGzip(data []byte) ([]byte, error) {
