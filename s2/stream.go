@@ -129,9 +129,6 @@ func convertPbReadBatch(pbBatch *pb.ReadBatch) *ReadBatch {
 	return batch
 }
 
-// Takes ownership of the pb record's byte slices instead of copying them;
-// proto.Unmarshal allocates them fresh and the pb message is discarded
-// after conversion.
 func convertPbSequencedRecord(pbRecord *pb.SequencedRecord) SequencedRecord {
 	headers := make([]Header, len(pbRecord.Headers))
 	for i, pbHeader := range pbRecord.Headers {
