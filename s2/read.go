@@ -151,14 +151,12 @@ type streamReader struct {
 	nextTS     uint64
 	hasNextSeq bool
 
-	respBody       io.ReadCloser
-	bodyMu         sync.Mutex
-	recordsRead    uint64
-	bytesRead      uint64
-	startTime      time.Time
-	lastRecordTime time.Time
-	retryConfig    *RetryConfig
-	logger         *slog.Logger
+	respBody    io.ReadCloser
+	bodyMu      sync.Mutex
+	recordsRead uint64
+	bytesRead   uint64
+	retryConfig *RetryConfig
+	logger      *slog.Logger
 }
 
 func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (*streamReader, error) {
@@ -177,19 +175,16 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
 
-	now := time.Now()
 	session := &streamReader{
-		streamClient:   s,
-		recordsCh:      make(chan SequencedRecord, readSessionRecordsBuffer),
-		errorCh:        make(chan error, 1),
-		closed:         make(chan struct{}),
-		ctx:            sessionCtx,
-		cancel:         sessionCancel,
-		baseOpts:       cloneReadSessionOptions(opts),
-		startTime:      now,
-		lastRecordTime: now,
-		retryConfig:    retryCfg,
-		logger:         s.basinClient.logger,
+		streamClient: s,
+		recordsCh:    make(chan SequencedRecord, readSessionRecordsBuffer),
+		errorCh:      make(chan error, 1),
+		closed:       make(chan struct{}),
+		ctx:          sessionCtx,
+		cancel:       sessionCancel,
+		baseOpts:     cloneReadSessionOptions(opts),
+		retryConfig:  retryCfg,
+		logger:       s.basinClient.logger,
 	}
 
 	go session.run()
@@ -554,28 +549,36 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		}
 
 		ignoreCommandRecords := r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords
-		for _, record := range batch.Records {
+		for i, record := range batch.Records {
 			if ignoreCommandRecords && record.IsCommandRecord() {
-				r.advanceState(record)
 				continue
 			}
 			if err := r.handleRecord(ctx, record); err != nil {
+				r.advanceState(batch.Records[:i])
 				return err
 			}
 		}
+		r.advanceState(batch.Records)
 
 		tailTimer.Reset(tailWatchdogTimeout)
 	}
 }
 
-func (r *streamReader) advanceState(record SequencedRecord) {
+func (r *streamReader) advanceState(records []SequencedRecord) {
+	if len(records) == 0 {
+		return
+	}
+	var meteredBytes uint64
+	for _, record := range records {
+		meteredBytes += MeteredSequencedRecordBytes(record)
+	}
+	last := records[len(records)-1]
 	r.stateMu.Lock()
-	r.recordsRead++
-	r.bytesRead += MeteredSequencedRecordBytes(record)
-	r.lastRecordTime = time.Now()
-	r.nextSeq = record.SeqNum + 1
+	r.recordsRead += uint64(len(records))
+	r.bytesRead += meteredBytes
+	r.nextSeq = last.SeqNum + 1
 	r.hasNextSeq = true
-	r.nextTS = record.Timestamp
+	r.nextTS = last.Timestamp
 	r.stateMu.Unlock()
 }
 
@@ -589,8 +592,6 @@ func (r *streamReader) handleRecord(ctx context.Context, record SequencedRecord)
 	}
 
 	logInfo(r.logger, "s2 read session record", "stream", string(r.streamClient.name), "seq_num", record.SeqNum)
-
-	r.advanceState(record)
 
 	return nil
 }
