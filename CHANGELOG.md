@@ -2,11 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.19.1] - 2026-07-09
+
+### Performance
+
+- Reuse zstd encoder and decoder across frames ([#335](https://github.com/s2-streamstore/s2-sdk-go/issues/335))
+- Avoid re-copying record bytes when converting read batches ([#336](https://github.com/s2-streamstore/s2-sdk-go/issues/336))
+- Update read session state once per batch ([#337](https://github.com/s2-streamstore/s2-sdk-go/issues/337))
+- Deliver read session records to consumers one batch at a time ([#338](https://github.com/s2-streamstore/s2-sdk-go/issues/338))
+- Read frames directly into the parser buffer and consume via offset ([#339](https://github.com/s2-streamstore/s2-sdk-go/issues/339))
+- Single-allocation CreateFrame and no double clone on the Producer path ([#340](https://github.com/s2-streamstore/s2-sdk-go/issues/340))
+
 ## [v0.19.0] - 2026-07-07
 
 ### Features
 
 - Default account endpoint aws.s2.dev -> a.s2.dev ([#332](https://github.com/s2-streamstore/s2-sdk-go/issues/332))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.19.0 ([#334](https://github.com/s2-streamstore/s2-sdk-go/issues/334))
 
 ## [v0.18.3] - 2026-07-06
 
