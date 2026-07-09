@@ -223,26 +223,33 @@ const (
 	MaxFencingTokenLength = 36
 )
 
-func prepareAppendInput(input *AppendInput) (*AppendInput, int64, error) {
+func validateAppendInput(input *AppendInput) (int64, error) {
 	if input == nil {
-		return nil, 0, newValidationError("append input must not be nil")
+		return 0, newValidationError("append input must not be nil")
 	}
 	if len(input.Records) == 0 {
-		return nil, 0, newValidationError("append input must contain at least one record")
+		return 0, newValidationError("append input must contain at least one record")
 	}
 	if len(input.Records) > MaxBatchRecords {
-		return nil, 0, newValidationError(fmt.Sprintf("cannot append more than %d records at once, got %d", MaxBatchRecords, len(input.Records)))
+		return 0, newValidationError(fmt.Sprintf("cannot append more than %d records at once, got %d", MaxBatchRecords, len(input.Records)))
 	}
 	if input.FencingToken != nil && len(*input.FencingToken) > MaxFencingTokenLength {
-		return nil, 0, newValidationError(fmt.Sprintf("fencing token exceeds %d bytes in length", MaxFencingTokenLength))
+		return 0, newValidationError(fmt.Sprintf("fencing token exceeds %d bytes in length", MaxFencingTokenLength))
 	}
 
-	cloned := cloneAppendInput(input)
-	size := MeteredBatchBytes(cloned.Records)
+	size := MeteredBatchBytes(input.Records)
 	if size > MaxBatchMeteredBytes {
-		return nil, 0, newValidationError(fmt.Sprintf("batch size %d bytes exceeds maximum %d bytes (1 MiB)", size, MaxBatchMeteredBytes))
+		return 0, newValidationError(fmt.Sprintf("batch size %d bytes exceeds maximum %d bytes (1 MiB)", size, MaxBatchMeteredBytes))
 	}
-	return cloned, size, nil
+	return size, nil
+}
+
+func prepareAppendInput(input *AppendInput) (*AppendInput, int64, error) {
+	size, err := validateAppendInput(input)
+	if err != nil {
+		return nil, 0, err
+	}
+	return cloneAppendInput(input), size, nil
 }
 
 func cloneAppendInput(input *AppendInput) *AppendInput {

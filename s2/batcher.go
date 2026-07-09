@@ -42,6 +42,9 @@ func applyBatchingDefaults(opts *BatchingOptions) *BatchingOptions {
 		opts = &BatchingOptions{}
 	}
 	result := *opts
+	// Batch inputs reference this token without re-cloning it per batch, so
+	// detach it from the caller's pointer.
+	result.FencingToken = cloneStringPtr(result.FencingToken)
 	if result.Linger == 0 {
 		result.Linger = 5 * time.Millisecond
 	}
