@@ -15,6 +15,12 @@ type basinHeaderRoundTripper struct {
 	requests int
 }
 
+type stubRoundTripper struct{}
+
+func (*stubRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	panic("unexpected request")
+}
+
 func (r *basinHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.requests++
 	r.header = req.Header.Get("s2-basin")
@@ -75,8 +81,35 @@ func TestClient_DefaultHTTPTransport(t *testing.T) {
 	}
 }
 
+func TestUnaryHTTPTransport_FallsBackForCustomDefault(t *testing.T) {
+	var nilTransport *http.Transport
+	testCases := []struct {
+		name string
+		base http.RoundTripper
+	}{
+		{name: "custom round tripper", base: &stubRoundTripper{}},
+		{name: "typed nil transport", base: nilTransport},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := newUnaryHTTPTransport(tc.base, 11*time.Second)
+
+			if transport.DialContext == nil {
+				t.Fatal("expected a configured dialer")
+			}
+			if !transport.ForceAttemptHTTP2 {
+				t.Fatal("expected HTTP/2 attempts to be enabled")
+			}
+			if transport.MaxIdleConnsPerHost != defaultMaxIdleConnsPerHost {
+				t.Fatalf("expected %d idle connections per host, got %d", defaultMaxIdleConnsPerHost, transport.MaxIdleConnsPerHost)
+			}
+		})
+	}
+}
+
 func TestClient_CustomHTTPClientPreserved(t *testing.T) {
-	customTransport := &basinHeaderRoundTripper{}
+	customTransport := &stubRoundTripper{}
 	customClient := &http.Client{
 		Transport: customTransport,
 		Timeout:   23 * time.Second,

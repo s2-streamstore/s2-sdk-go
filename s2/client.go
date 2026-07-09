@@ -103,17 +103,9 @@ func New(accessToken string, opts *ClientOptions) *Client {
 			connectionTimeout = defaultConnectionTimeout
 		}
 
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.DialContext = (&net.Dialer{
-			Timeout:   connectionTimeout,
-			KeepAlive: defaultTCPKeepAlive,
-		}).DialContext
-		transport.ForceAttemptHTTP2 = true
-		transport.MaxIdleConnsPerHost = defaultMaxIdleConnsPerHost
-
 		httpClient = &http.Client{
 			Timeout:   requestTimeout,
-			Transport: transport,
+			Transport: newUnaryHTTPTransport(http.DefaultTransport, connectionTimeout),
 		}
 	}
 	baseTransport := httpClient.Transport
@@ -171,6 +163,25 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	c.Locations = &LocationsClient{client: c}
 
 	return c
+}
+
+func newUnaryHTTPTransport(base http.RoundTripper, connectionTimeout time.Duration) *http.Transport {
+	transport, ok := base.(*http.Transport)
+	if ok && transport != nil {
+		// Preserve the base transport's proxy, TLS, connection-pooling, and timeout settings.
+		transport = transport.Clone()
+	} else {
+		// http.DefaultTransport is replaceable, so its concrete type is not guaranteed.
+		transport = &http.Transport{}
+	}
+
+	transport.DialContext = (&net.Dialer{
+		Timeout:   connectionTimeout,
+		KeepAlive: defaultTCPKeepAlive,
+	}).DialContext
+	transport.ForceAttemptHTTP2 = true
+	transport.MaxIdleConnsPerHost = defaultMaxIdleConnsPerHost
+	return transport
 }
 
 type schemeAwareTransport struct {
