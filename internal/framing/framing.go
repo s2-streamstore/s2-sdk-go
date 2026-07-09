@@ -37,6 +37,9 @@ const (
 	// Maximum S2S frame size (2 MiB per protocol spec).
 	MaxFrameSize = 2 * 1024 * 1024
 
+	// Minimum spare buffer capacity offered to each network read.
+	readChunkSize = 64 * 1024
+
 	// Flag byte layout:
 	//   ┌───┬───┬───┬───┬───┬───┬───┬───┐
 	//   │ 7 │ 6 │ 5 │ 4 │ 3 │ 2 │ 1 │ 0 │
@@ -58,6 +61,13 @@ type S2SFrame struct {
 
 type S2SFrameParser struct {
 	buffer []byte
+	// off is the start of unconsumed data in buffer. Consumed frames advance
+	// the offset instead of compacting the buffer; compaction happens lazily
+	// in ensureSpare when more room is needed.
+	off int
+	// need is the total size of the pending incomplete frame (0 when
+	// unknown), so readFrom can size the buffer for it in one allocation.
+	need int
 }
 
 // NewS2SFrameParser creates a new frame parser.
@@ -67,33 +77,74 @@ func NewS2SFrameParser() *S2SFrameParser {
 	}
 }
 
-// Push adds data to the parser buffer.
-func (p *S2SFrameParser) Push(data []byte) {
-	// Efficiently append data to buffer
-	if cap(p.buffer)-len(p.buffer) < len(data) {
-		// Need to grow buffer - double size or accommodate new data
-		newCap := cap(p.buffer) * 2
-		if newCap < len(p.buffer)+len(data) {
-			newCap = len(p.buffer) + len(data)
-		}
-		newBuffer := make([]byte, len(p.buffer), newCap)
-		copy(newBuffer, p.buffer)
-		p.buffer = newBuffer
+// ensureSpare guarantees at least n bytes of spare capacity past len(buffer),
+// compacting consumed data first and growing only if that is not enough.
+func (p *S2SFrameParser) ensureSpare(n int) {
+	if cap(p.buffer)-len(p.buffer) >= n {
+		return
 	}
 
+	unread := len(p.buffer) - p.off
+	if p.off > 0 {
+		copy(p.buffer, p.buffer[p.off:])
+		p.buffer = p.buffer[:unread]
+		p.off = 0
+	}
+
+	if cap(p.buffer)-len(p.buffer) >= n {
+		return
+	}
+
+	// Grow: double size or accommodate new data
+	newCap := cap(p.buffer) * 2
+	if newCap < unread+n {
+		newCap = unread + n
+	}
+	newBuffer := make([]byte, unread, newCap)
+	copy(newBuffer, p.buffer)
+	p.buffer = newBuffer
+}
+
+// Push adds data to the parser buffer.
+func (p *S2SFrameParser) Push(data []byte) {
+	p.ensureSpare(len(data))
 	p.buffer = append(p.buffer, data...)
+}
+
+// readFrom reads once from r directly into the parser buffer's spare
+// capacity, avoiding an intermediate chunk allocation and copy.
+func (p *S2SFrameParser) readFrom(r io.Reader) (int, error) {
+	spare := readChunkSize
+	if p.need > 0 {
+		// The pending frame's size is known: demand exactly the bytes that
+		// complete it. Larger frames grow the buffer in one allocation;
+		// nearly-complete ones avoid growing at all.
+		if rem := p.need - (len(p.buffer) - p.off); rem > 0 {
+			spare = rem
+		}
+	}
+	p.ensureSpare(spare)
+	n, err := r.Read(p.buffer[len(p.buffer):cap(p.buffer)])
+	p.buffer = p.buffer[:len(p.buffer)+n]
+	return n, err
 }
 
 // ParseFrame tries to parse the next frame from the buffer.
 // Returns nil if not enough data is available.
 func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
+	buf := p.buffer[p.off:]
+
 	// Need at least 4 bytes (3-byte length + 1-byte flag)
-	if len(p.buffer) < 4 {
+	if len(buf) < 4 {
 		return nil, nil
 	}
 
 	// Read 3-byte length prefix (big-endian)
-	length := uint32(p.buffer[0])<<16 | uint32(p.buffer[1])<<8 | uint32(p.buffer[2])
+	length := uint32(buf[0])<<16 | uint32(buf[1])<<8 | uint32(buf[2])
+
+	// Reset the size hint; it is re-derived below if the frame is incomplete,
+	// so it can never go stale on the validation-error returns.
+	p.need = 0
 
 	// Validate frame size
 	if length == 0 {
@@ -105,12 +156,13 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 
 	// Check if we have the full message
 	totalSize := 3 + int(length) // 3-byte prefix + message
-	if len(p.buffer) < totalSize {
+	if len(buf) < totalSize {
+		p.need = totalSize
 		return nil, nil // Not enough data, need more
 	}
 
 	// Read flag byte
-	flag := p.buffer[3]
+	flag := buf[3]
 	terminal := (flag & flagTerminal) != 0
 
 	// Parse compression from bits 6-5
@@ -128,33 +180,34 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 		return nil, fmt.Errorf("unknown compression type: %d", compressionBits)
 	}
 
-	// Extract body (length includes flag byte, so body is length - 1 bytes)
-	bodyStart := 4
-	bodyEnd := 4 + int(length) - 1 // -1 because length includes the flag byte
-	body := make([]byte, bodyEnd-bodyStart)
-	copy(body, p.buffer[bodyStart:bodyEnd])
+	// Payload view into the buffer (length includes flag byte, so payload is
+	// length - 1 bytes)
+	payload := buf[4 : 4+int(length)-1]
 
 	var statusCode *int
 
 	// For terminal frames, extract status code (2 bytes)
 	if terminal {
-		if len(body) < 2 {
+		if len(payload) < 2 {
 			return nil, fmt.Errorf("terminal frame missing status code")
 		}
-		status := int(binary.BigEndian.Uint16(body[0:2]))
+		status := int(binary.BigEndian.Uint16(payload[0:2]))
 		statusCode = &status
-		// Remove status code from body
-		newBody := make([]byte, len(body)-2)
-		copy(newBody, body[2:])
-		body = newBody
+		payload = payload[2:]
 	}
 
-	// Remove parsed frame from buffer
-	remaining := len(p.buffer) - totalSize
-	if remaining > 0 {
-		copy(p.buffer[0:remaining], p.buffer[totalSize:])
+	// Single exactly-sized copy so the frame owns its body independently of
+	// the parser buffer.
+	body := make([]byte, len(payload))
+	copy(body, payload)
+
+	// Consume the frame by advancing the offset; compaction happens lazily
+	// when more buffer space is needed.
+	p.off += totalSize
+	if p.off == len(p.buffer) {
+		p.buffer = p.buffer[:0]
+		p.off = 0
 	}
-	p.buffer = p.buffer[:remaining]
 
 	return &S2SFrame{
 		Terminal:    terminal,
@@ -166,7 +219,7 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 
 // HasData returns true if the parser has buffered data.
 func (p *S2SFrameParser) HasData() bool {
-	return len(p.buffer) > 0
+	return len(p.buffer) > p.off
 }
 
 // FrameReader provides frame reading from an io.Reader.
@@ -200,12 +253,7 @@ func (fr *FrameReader) ReadFrame() (*S2SFrame, error) {
 			return nil, fr.pendingErr
 		}
 
-		chunk := make([]byte, 4096)
-		n, err := fr.reader.Read(chunk)
-
-		if n > 0 {
-			fr.parser.Push(chunk[:n])
-		}
+		n, err := fr.parser.readFrom(fr.reader)
 
 		if err != nil {
 			if n > 0 {
