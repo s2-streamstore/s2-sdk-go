@@ -96,6 +96,22 @@ func (r *AppendSession) Submit(input *AppendInput) (*SubmitFuture, error) {
 	return r.createSubmitFuture(prepared, size), nil
 }
 
+// submitOwned is Submit for inputs the caller exclusively owns and will not
+// mutate (e.g. batcher output on the Producer path, which is already deep
+// cloned on Add): it validates without the defensive clone.
+func (r *AppendSession) submitOwned(input *AppendInput) (*SubmitFuture, error) {
+	if r.closing.Load() {
+		return nil, ErrSessionClosed
+	}
+
+	size, err := validateAppendInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.createSubmitFuture(input, size), nil
+}
+
 func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *SubmitFuture {
 	ticketCh := make(chan *BatchSubmitTicket, 1)
 	errCh := make(chan error, 1)

@@ -71,8 +71,24 @@ func (p *Producer) consumeBatches() {
 	}
 }
 
+// ownedSubmitter is implemented by sessions that can skip the defensive deep
+// clone for inputs the caller exclusively owns.
+type ownedSubmitter interface {
+	submitOwned(input *AppendInput) (*SubmitFuture, error)
+}
+
 func (p *Producer) processBatch(batch *BatchOutput) {
-	future, err := p.session.Submit(batch.Input)
+	// The batcher deep-cloned every record on Add and this batch is its sole
+	// reference, so the session does not need to clone them again.
+	var (
+		future *SubmitFuture
+		err    error
+	)
+	if owned, ok := p.session.(ownedSubmitter); ok {
+		future, err = owned.submitOwned(batch.Input)
+	} else {
+		future, err = p.session.Submit(batch.Input)
+	}
 	if err != nil {
 		p.resolveBatchError(batch.recordMeta, err)
 		return
