@@ -142,6 +142,10 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 	// Read 3-byte length prefix (big-endian)
 	length := uint32(buf[0])<<16 | uint32(buf[1])<<8 | uint32(buf[2])
 
+	// Reset the size hint; it is re-derived below if the frame is incomplete,
+	// so it can never go stale on the validation-error returns.
+	p.need = 0
+
 	// Validate frame size
 	if length == 0 {
 		return nil, fmt.Errorf("invalid frame: length must be at least 1 (flag byte)")
@@ -156,7 +160,6 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 		p.need = totalSize
 		return nil, nil // Not enough data, need more
 	}
-	p.need = 0
 
 	// Read flag byte
 	flag := buf[3]
