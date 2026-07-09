@@ -7,6 +7,7 @@ import (
 
 type ReadSession struct {
 	reader  *streamReader
+	pending []SequencedRecord
 	current SequencedRecord
 	err     error
 	closed  atomic.Bool
@@ -30,9 +31,13 @@ func (s *ReadSession) Next() bool {
 		return false
 	}
 
+	if s.yieldPending() {
+		return true
+	}
+
 	for {
 		select {
-		case rec, ok := <-s.reader.Records():
+		case batch, ok := <-s.reader.Records():
 			if !ok {
 				// Records closed - drain any pending error before exiting
 				select {
@@ -45,19 +50,23 @@ func (s *ReadSession) Next() bool {
 				s.Close()
 				return false
 			}
-			s.current = rec
-			return true
+			s.pending = batch
+			if s.yieldPending() {
+				return true
+			}
 
 		case err, ok := <-s.reader.Errors():
 			if !ok {
 				select {
-				case rec, ok := <-s.reader.Records():
+				case batch, ok := <-s.reader.Records():
 					if !ok {
 						s.Close()
 						return false
 					}
-					s.current = rec
-					return true
+					s.pending = batch
+					if s.yieldPending() {
+						return true
+					}
 				default:
 					s.Close()
 					return false
@@ -70,6 +79,16 @@ func (s *ReadSession) Next() bool {
 			}
 		}
 	}
+}
+
+func (s *ReadSession) yieldPending() bool {
+	if len(s.pending) == 0 {
+		return false
+	}
+	s.current = s.pending[0]
+	s.pending[0] = SequencedRecord{} // release references so consumed records can be collected
+	s.pending = s.pending[1:]
+	return true
 }
 
 // Returns the most recent record fetched by Next.
