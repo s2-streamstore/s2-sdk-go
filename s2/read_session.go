@@ -86,6 +86,7 @@ func (s *ReadSession) yieldPending() bool {
 		return false
 	}
 	s.current = s.pending[0]
+	s.pending[0] = SequencedRecord{} // release references so consumed records can be collected
 	s.pending = s.pending[1:]
 	return true
 }
