@@ -38,16 +38,21 @@ func gunzip(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func unzstd(data []byte) ([]byte, error) {
-	decoder, err := zstd.NewReader(bytes.NewReader(data))
+// Shared decoder for DecodeAll, which is safe for concurrent use and spawns
+// no goroutines (those are streaming-only). Concurrency 0 (GOMAXPROCS) sets
+// the number of pooled decoder states, bounding concurrent DecodeAll calls.
+var zstdDecoder = func() *zstd.Decoder {
+	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(0))
 	if err != nil {
-		return nil, fmt.Errorf("zstd reader: %w", err)
+		panic(err)
 	}
-	defer decoder.Close()
+	return decoder
+}()
 
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, decoder); err != nil {
+func unzstd(data []byte) ([]byte, error) {
+	out, err := zstdDecoder.DecodeAll(data, nil)
+	if err != nil {
 		return nil, fmt.Errorf("zstd decompress: %w", err)
 	}
-	return buf.Bytes(), nil
+	return out, nil
 }
