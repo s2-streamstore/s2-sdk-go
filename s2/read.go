@@ -18,7 +18,7 @@ import (
 
 const (
 	tailWatchdogTimeout      = 20 * time.Second
-	readSessionRecordsBuffer = 100
+	readSessionBatchesBuffer = 10
 )
 
 var errSessionClosed = errors.New("read session closed")
@@ -134,7 +134,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 type streamReader struct {
 	streamClient *StreamClient
 
-	recordsCh chan SequencedRecord
+	recordsCh chan []SequencedRecord
 	errorCh   chan error
 	closed    chan struct{}
 	closeOnce sync.Once
@@ -177,7 +177,7 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 
 	session := &streamReader{
 		streamClient: s,
-		recordsCh:    make(chan SequencedRecord, readSessionRecordsBuffer),
+		recordsCh:    make(chan []SequencedRecord, readSessionBatchesBuffer),
 		errorCh:      make(chan error, 1),
 		closed:       make(chan struct{}),
 		ctx:          sessionCtx,
@@ -281,7 +281,7 @@ func (r *streamReader) run() {
 	}
 }
 
-func (r *streamReader) Records() <-chan SequencedRecord {
+func (r *streamReader) Records() <-chan []SequencedRecord {
 	return r.recordsCh
 }
 
@@ -548,33 +548,35 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.stateMu.Unlock()
 		}
 
-		ignoreCommandRecords := r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords
-		for i, record := range batch.Records {
-			if ignoreCommandRecords && record.IsCommandRecord() {
-				continue
+		if len(batch.Records) > 0 {
+			// Snapshot full-batch accounting before filtering: limits and the
+			// resume position must reflect every record read, including command
+			// records that are filtered out of delivery.
+			recordCount := uint64(len(batch.Records))
+			var meteredBytes uint64
+			for _, record := range batch.Records {
+				meteredBytes += MeteredSequencedRecordBytes(record)
 			}
-			if err := r.handleRecord(ctx, record); err != nil {
-				r.advanceState(batch.Records[:i])
-				return err
+			last := batch.Records[len(batch.Records)-1]
+
+			if r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords {
+				batch.filterCommandRecords()
 			}
+			if len(batch.Records) > 0 {
+				if err := r.sendBatch(ctx, batch.Records); err != nil {
+					return err
+				}
+			}
+			r.advanceState(recordCount, meteredBytes, last)
 		}
-		r.advanceState(batch.Records)
 
 		tailTimer.Reset(tailWatchdogTimeout)
 	}
 }
 
-func (r *streamReader) advanceState(records []SequencedRecord) {
-	if len(records) == 0 {
-		return
-	}
-	var meteredBytes uint64
-	for _, record := range records {
-		meteredBytes += MeteredSequencedRecordBytes(record)
-	}
-	last := records[len(records)-1]
+func (r *streamReader) advanceState(recordCount, meteredBytes uint64, last SequencedRecord) {
 	r.stateMu.Lock()
-	r.recordsRead += uint64(len(records))
+	r.recordsRead += recordCount
 	r.bytesRead += meteredBytes
 	r.nextSeq = last.SeqNum + 1
 	r.hasNextSeq = true
@@ -582,16 +584,14 @@ func (r *streamReader) advanceState(records []SequencedRecord) {
 	r.stateMu.Unlock()
 }
 
-func (r *streamReader) handleRecord(ctx context.Context, record SequencedRecord) error {
+func (r *streamReader) sendBatch(ctx context.Context, records []SequencedRecord) error {
 	select {
-	case r.recordsCh <- record:
+	case r.recordsCh <- records:
 	case <-r.closed:
 		return errSessionClosed
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-
-	logInfo(r.logger, "s2 read session record", "stream", string(r.streamClient.name), "seq_num", record.SeqNum)
 
 	return nil
 }
