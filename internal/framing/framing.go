@@ -300,23 +300,21 @@ func CreateFrameWithStatus(data []byte, terminal bool, compression CompressionTy
 	}
 	flag |= byte(actualCompression) << flagCompressionShift
 
-	var payload []byte
+	headerLen := 4 // 3-byte length prefix + flag byte
 	if terminal {
-		payload = make([]byte, 1+2+len(compressedData))
-		payload[0] = flag
-		binary.BigEndian.PutUint16(payload[1:3], uint16(statusCode))
-		copy(payload[3:], compressedData)
-	} else {
-		payload = make([]byte, 1+len(compressedData))
-		payload[0] = flag
-		copy(payload[1:], compressedData)
+		headerLen += 2 // status code
 	}
+	payloadLen := headerLen - 3 + len(compressedData) // flag (+ status) + data
 
-	frame := make([]byte, 3+len(payload))
-	frame[0] = byte(len(payload) >> 16)
-	frame[1] = byte(len(payload) >> 8)
-	frame[2] = byte(len(payload))
-	copy(frame[3:], payload)
+	frame := make([]byte, headerLen+len(compressedData))
+	frame[0] = byte(payloadLen >> 16)
+	frame[1] = byte(payloadLen >> 8)
+	frame[2] = byte(payloadLen)
+	frame[3] = flag
+	if terminal {
+		binary.BigEndian.PutUint16(frame[4:6], uint16(statusCode))
+	}
+	copy(frame[headerLen:], compressedData)
 
 	return frame
 }
