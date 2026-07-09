@@ -16,9 +16,11 @@ import (
 )
 
 const (
-	DefaultBaseURL           = "https://a.s2.dev/v1"
-	defaultRequestTimeout    = 5 * time.Second
-	defaultConnectionTimeout = 3 * time.Second
+	DefaultBaseURL             = "https://a.s2.dev/v1"
+	defaultRequestTimeout      = 5 * time.Second
+	defaultConnectionTimeout   = 3 * time.Second
+	defaultTCPKeepAlive        = 30 * time.Second
+	defaultMaxIdleConnsPerHost = 32
 
 	// HTTP/2 transport settings for streaming operations
 	http2MaxReadFrameSize  = 16 * 1024 * 1024
@@ -101,13 +103,17 @@ func New(accessToken string, opts *ClientOptions) *Client {
 			connectionTimeout = defaultConnectionTimeout
 		}
 
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.DialContext = (&net.Dialer{
+			Timeout:   connectionTimeout,
+			KeepAlive: defaultTCPKeepAlive,
+		}).DialContext
+		transport.ForceAttemptHTTP2 = true
+		transport.MaxIdleConnsPerHost = defaultMaxIdleConnsPerHost
+
 		httpClient = &http.Client{
-			Timeout: requestTimeout,
-			Transport: &http.Transport{
-				DialContext: (&net.Dialer{
-					Timeout: connectionTimeout,
-				}).DialContext,
-			},
+			Timeout:   requestTimeout,
+			Transport: transport,
 		}
 	}
 	baseTransport := httpClient.Transport
