@@ -16,9 +16,11 @@ import (
 )
 
 const (
-	DefaultBaseURL           = "https://a.s2.dev/v1"
-	defaultRequestTimeout    = 5 * time.Second
-	defaultConnectionTimeout = 3 * time.Second
+	DefaultBaseURL             = "https://a.s2.dev/v1"
+	defaultRequestTimeout      = 5 * time.Second
+	defaultConnectionTimeout   = 3 * time.Second
+	defaultTCPKeepAlive        = 30 * time.Second
+	defaultMaxIdleConnsPerHost = 32
 
 	// HTTP/2 transport settings for streaming operations
 	http2MaxReadFrameSize  = 16 * 1024 * 1024
@@ -102,12 +104,8 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		}
 
 		httpClient = &http.Client{
-			Timeout: requestTimeout,
-			Transport: &http.Transport{
-				DialContext: (&net.Dialer{
-					Timeout: connectionTimeout,
-				}).DialContext,
-			},
+			Timeout:   requestTimeout,
+			Transport: newUnaryHTTPTransport(http.DefaultTransport, connectionTimeout),
 		}
 	}
 	baseTransport := httpClient.Transport
@@ -165,6 +163,25 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	c.Locations = &LocationsClient{client: c}
 
 	return c
+}
+
+func newUnaryHTTPTransport(base http.RoundTripper, connectionTimeout time.Duration) *http.Transport {
+	transport, ok := base.(*http.Transport)
+	if ok && transport != nil {
+		// Preserve the base transport's proxy, TLS, connection-pooling, and timeout settings.
+		transport = transport.Clone()
+	} else {
+		// http.DefaultTransport is replaceable, so its concrete type is not guaranteed.
+		transport = &http.Transport{}
+	}
+
+	transport.DialContext = (&net.Dialer{
+		Timeout:   connectionTimeout,
+		KeepAlive: defaultTCPKeepAlive,
+	}).DialContext
+	transport.ForceAttemptHTTP2 = true
+	transport.MaxIdleConnsPerHost = defaultMaxIdleConnsPerHost
+	return transport
 }
 
 type schemeAwareTransport struct {
