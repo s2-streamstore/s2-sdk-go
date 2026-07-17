@@ -262,7 +262,6 @@ func TestStreamWithOptionsReadSessionSetsEncryptionHeader(t *testing.T) {
 
 	reader := &streamReader{
 		streamClient: stream,
-		closed:       make(chan struct{}),
 		logger:       stream.logger,
 	}
 

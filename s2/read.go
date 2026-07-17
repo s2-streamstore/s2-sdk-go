@@ -2,7 +2,6 @@ package s2
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,34 +20,28 @@ const (
 	readSessionBatchesBuffer = 10
 )
 
-var errSessionClosed = errors.New("read session closed")
-
 type ReadOptions struct {
-	// Start from a sequence number.
+	// SeqNum is the sequence number to start from.
 	SeqNum *uint64 `json:"seq_num,omitempty"`
-	// Start from a timestamp.
+	// Timestamp is the timestamp to start from.
 	Timestamp *uint64 `json:"timestamp,omitempty"`
-	// Start from number of records before the next sequence number.
+	// TailOffset is the number of records before the tail to start from.
 	TailOffset *int64 `json:"tail_offset,omitempty"`
-	// Record count limit.
-	// Non-streaming reads are capped by the default limit of 1000 records.
+	// Count limits the number of records returned. Unary reads default to 1000.
 	Count *uint64 `json:"count,omitempty"`
-	// Metered bytes limit.
-	// Non-streaming reads are capped by the default limit of 1 MiB.
+	// Bytes limits metered bytes returned. Unary reads default to 1 MiB.
 	Bytes *uint64 `json:"bytes,omitempty"`
-	// Duration in seconds to wait for new records.
-	// The default duration is 0 if there is a bound on `count`, `bytes`, or `until`, and otherwise infinite.
-	// Non-streaming reads are always bounded on `count` and `bytes`, so you can achieve long poll semantics by specifying a non-zero duration up to 60 seconds.
-	// In the context of an SSE or S2S streaming read, the duration will bound how much time can elapse between records throughout the lifetime of the session.
+	// Wait is the maximum number of seconds to wait for new records.
+	// It defaults to zero when Count, Bytes, or Until is set, and is otherwise unbounded.
+	// For streaming reads, it applies between records. Unary reads allow up to 60 seconds.
 	Wait *int32 `json:"wait,omitempty"`
-	// Exclusive timestamp to read until.
+	// Until is an exclusive timestamp bound.
 	Until *uint64 `json:"until,omitempty"`
-	// Start reading from the tail if the requested position is beyond it.
-	// Otherwise, a `416 Range Not Satisfiable` response is returned.
+	// Clamp starts from the tail when the requested position is beyond it.
+	// Without Clamp, the server returns 416 Range Not Satisfiable.
 	Clamp *bool `json:"clamp,omitempty"`
-	// Whether to filter out command records from read results.
-	// Filtering is performed client-side.
-	// Defaults to false.
+	// IgnoreCommandRecords filters command records from returned data.
+	// Filtering is client-side.
 	IgnoreCommandRecords bool `json:"-"`
 }
 
@@ -136,9 +129,7 @@ type streamReader struct {
 
 	recordsCh chan []SequencedRecord
 	errorCh   chan error
-	closed    chan struct{}
-	closeOnce sync.Once
-	caughtUp  *caughtUpState
+	caughtUp  caughtUpState
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -180,8 +171,6 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 		streamClient: s,
 		recordsCh:    make(chan []SequencedRecord, readSessionBatchesBuffer),
 		errorCh:      make(chan error, 1),
-		closed:       make(chan struct{}),
-		caughtUp:     &caughtUpState{},
 		ctx:          sessionCtx,
 		cancel:       sessionCancel,
 		baseOpts:     cloneReadSessionOptions(opts),
@@ -197,9 +186,7 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 func (r *streamReader) run() {
 	var terminalErr error
 	defer func() {
-		if r.caughtUp != nil {
-			r.caughtUp.end(terminalErr)
-		}
+		r.caughtUp.end(terminalErr)
 		if terminalErr != nil {
 			logError(r.logger, "s2 read session error forwarded", "stream", string(r.streamClient.name), "error", terminalErr)
 			r.errorCh <- terminalErr
@@ -237,7 +224,7 @@ func (r *streamReader) run() {
 		err := r.runOnce(tailCtx, opts)
 		tailCancel()
 
-		if err == nil || errors.Is(err, errSessionClosed) {
+		if err == nil {
 			return
 		}
 		if ctxErr := r.ctx.Err(); ctxErr != nil {
@@ -252,11 +239,9 @@ func (r *streamReader) run() {
 		}
 
 		if !isRetryableReadError(r.ctx, err) || consecutiveFailures >= maxAttempts {
-			if r.ctx.Err() == nil && !errors.Is(err, errSessionClosed) {
+			if r.ctx.Err() == nil {
 				terminalErr = err
-				if r.caughtUp != nil {
-					r.caughtUp.end(err)
-				}
+				r.caughtUp.end(err)
 				if consecutiveFailures >= maxAttempts {
 					logError(r.logger, "s2 read session max attempts exhausted",
 						"stream", string(r.streamClient.name),
@@ -271,12 +256,10 @@ func (r *streamReader) run() {
 			return
 		}
 
-		// A new connection must report the tail again before it is caught up.
-		if r.caughtUp != nil {
-			r.caughtUp.setBehind()
-		}
+		// A new connection must report a tail before the session is caught up.
+		r.caughtUp.setBehind()
 
-		// consecutiveFailures is a 0-based count; convert to 1-based attempt number
+		// Backoff uses the next attempt number.
 		delay := calculateRetryBackoff(cfg, consecutiveFailures+1)
 		opts = r.buildAttemptOptions(delay)
 
@@ -287,38 +270,17 @@ func (r *streamReader) run() {
 			"delay", delay,
 			"error", err)
 
-		select {
-		case <-r.ctx.Done():
-			return
-		case <-r.closed:
-			return
-		default:
-		}
-
 		if err := waitForRetryBackoff(r.ctx, delay); err != nil {
 			return
 		}
 	}
 }
 
-func (r *streamReader) Records() <-chan []SequencedRecord {
-	return r.recordsCh
-}
-
-func (r *streamReader) Errors() <-chan error {
-	return r.errorCh
-}
-
 func (r *streamReader) Close() error {
-	r.closeOnce.Do(func() {
-		if r.caughtUp != nil {
-			r.caughtUp.end(nil)
-		}
-		close(r.closed)
-		if r.cancel != nil {
-			r.cancel()
-		}
-	})
+	r.caughtUp.end(nil)
+	if r.cancel != nil {
+		r.cancel()
+	}
 	return nil
 }
 
@@ -400,11 +362,7 @@ func (r *streamReader) buildAttemptOptions(plannedDelay time.Duration) *ReadOpti
 			}
 			opts.Bytes = Uint64(remaining)
 		}
-		// Remaining wait budget for retry:
-		// During catchup (tail not yet observed), the full wait is sent.
-		// Once tailing, the wait budget is depleted based on time since
-		// the last batch with tail info, which approximates how long the
-		// server has been in its long polling state.
+		// Reduce the wait budget by time spent tailing and backing off.
 		if r.baseOpts.Wait != nil {
 			waitSecs := *r.baseOpts.Wait
 			if !lastTailAt.IsZero() {
@@ -518,8 +476,6 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-r.closed:
-			return errSessionClosed
 		case <-tailTimer.C:
 			return &S2Error{
 				Message: fmt.Sprintf("no batch received for %.0f seconds", tailWatchdogTimeout.Seconds()),
@@ -527,11 +483,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 				Code:    "TIMEOUT",
 			}
 		case fr = <-frameCh:
-			// Network wait satisfied: stop the watchdog so consumer-delivery
-			// time (handleRecord can block on the records channel) does not
-			// count toward it. The timer is reset at the end of the loop body
-			// when the next network wait begins. Mirrors the Rust SDK's
-			// `timeout(20s, batches.next())` scope, which excludes yield.
+			// Only time spent waiting for the next frame counts toward the watchdog.
 			stopTailTimer()
 		}
 
@@ -573,14 +525,10 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.stateMu.Unlock()
 		}
 
-		caughtUp := false
-		if batch.Tail != nil {
-			n := len(batch.Records)
-			caughtUp = n == 0 || batch.Records[n-1].SeqNum+1 == batch.Tail.SeqNum
-		}
+		caughtUp := readBatchCaughtUp(batch)
 
 		if len(batch.Records) > 0 {
-			// Count every record when tracking limits and the next read position.
+			// Track all records, including filtered command records.
 			recordCount := uint64(len(batch.Records))
 			var meteredBytes uint64
 			for _, record := range batch.Records {
@@ -595,7 +543,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		}
 
 		hasRecords := len(batch.Records) > 0
-		if r.caughtUp != nil && (!caughtUp || hasRecords) {
+		if !caughtUp || hasRecords {
 			r.caughtUp.setBehind()
 		}
 
@@ -604,7 +552,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 				return err
 			}
 		}
-		if r.caughtUp != nil && caughtUp {
+		if caughtUp {
 			r.caughtUp.setCaughtUp(*batch.Tail)
 		}
 
@@ -623,19 +571,21 @@ func (r *streamReader) advanceState(recordCount, meteredBytes uint64, last Seque
 }
 
 func (r *streamReader) sendRecords(ctx context.Context, records []SequencedRecord) error {
-	if len(records) == 0 {
-		return nil
-	}
-
 	select {
 	case r.recordsCh <- records:
-	case <-r.closed:
-		return errSessionClosed
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 
 	return nil
+}
+
+func readBatchCaughtUp(batch *ReadBatch) bool {
+	if batch.Tail == nil {
+		return false
+	}
+	n := len(batch.Records)
+	return n == 0 || batch.Records[n-1].SeqNum+1 == batch.Tail.SeqNum
 }
 
 func (r *streamReader) limitsReached() bool {

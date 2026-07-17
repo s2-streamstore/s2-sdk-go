@@ -66,8 +66,7 @@ func (s *StreamClient) getHTTPClient() *http.Client {
 	return s.basinClient.client.streamingClient
 }
 
-// Check the tail of the stream.
-// Returns the next sequence number and timestamp to be assigned (tail).
+// CheckTail returns the current stream tail.
 func (s *StreamClient) CheckTail(ctx context.Context) (*TailResponse, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -362,7 +361,7 @@ func isRetryableReadError(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
-	if ctx.Err() != nil || errors.Is(err, errSessionClosed) {
+	if ctx.Err() != nil {
 		return false
 	}
 

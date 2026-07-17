@@ -202,7 +202,7 @@ func TestReadSessionMaxAttempts(t *testing.T) {
 	defer reader.Close()
 
 	select {
-	case err := <-reader.Errors():
+	case err := <-reader.errorCh:
 		if err == nil {
 			t.Fatalf("expected error after max attempts")
 		}

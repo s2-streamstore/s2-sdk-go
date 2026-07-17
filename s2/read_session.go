@@ -6,23 +6,18 @@ import (
 	"sync/atomic"
 )
 
-// ErrSessionEndedBeforeCaughtUp is an alias for ErrSessionClosed.
-// Deprecated: use ErrSessionClosed.
-var ErrSessionEndedBeforeCaughtUp = ErrSessionClosed
-
 type caughtUpResult struct {
 	done chan struct{}
 	tail StreamPosition
 	err  error
 }
 
-// caughtUpState stores the latest server report and completes one-shot waits.
+// caughtUpState stores the current tail state and pending futures.
 type caughtUpState struct {
-	mu      sync.Mutex
-	tail    *StreamPosition
-	ended   bool
-	endErr  error
-	pending []*caughtUpResult
+	mu          sync.Mutex
+	tail        *StreamPosition
+	terminalErr error
+	pending     []*caughtUpResult
 }
 
 func (c *caughtUpState) isCaughtUp() bool {
@@ -34,7 +29,7 @@ func (c *caughtUpState) isCaughtUp() bool {
 func (c *caughtUpState) setCaughtUp(tail StreamPosition) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.ended {
+	if c.terminalErr != nil {
 		return
 	}
 	c.tail = &tail
@@ -48,26 +43,25 @@ func (c *caughtUpState) setCaughtUp(tail StreamPosition) {
 func (c *caughtUpState) setBehind() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.ended {
+	if c.terminalErr != nil {
 		return
 	}
 	c.tail = nil
 }
 
-// end marks the session done. A normal end preserves an already-observed tail.
+// end settles pending futures. A clean end keeps an observed tail.
 func (c *caughtUpState) end(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.ended {
+	if c.terminalErr != nil {
 		return
 	}
-	c.ended = true
 	if err == nil {
 		err = ErrSessionClosed
 	} else {
 		c.tail = nil
 	}
-	c.endErr = err
+	c.terminalErr = err
 	for _, result := range c.pending {
 		result.err = err
 		close(result.done)
@@ -75,22 +69,23 @@ func (c *caughtUpState) end(err error) {
 	c.pending = nil
 }
 
-func (c *caughtUpState) newResult() *caughtUpResult {
+func (c *caughtUpState) newFuture() *CaughtUpFuture {
 	result := &caughtUpResult{done: make(chan struct{})}
+	future := &CaughtUpFuture{result: result}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.tail != nil {
 		result.tail = *c.tail
 		close(result.done)
-		return result
+		return future
 	}
-	if c.ended {
-		result.err = c.endErr
+	if c.terminalErr != nil {
+		result.err = c.terminalErr
 		close(result.done)
-		return result
+		return future
 	}
 	c.pending = append(c.pending, result)
-	return result
+	return future
 }
 
 type ReadSession struct {
@@ -101,8 +96,8 @@ type ReadSession struct {
 	closed  atomic.Bool
 }
 
-// Opens a streaming read session.
-// Call Close when done consuming records.
+// ReadSession opens a streaming read session.
+// The caller must close the returned session.
 func (s *StreamClient) ReadSession(ctx context.Context, opts *ReadOptions) (*ReadSession, error) {
 	reader, err := s.newStreamReader(ctx, opts)
 	if err != nil {
@@ -111,9 +106,9 @@ func (s *StreamClient) ReadSession(ctx context.Context, opts *ReadOptions) (*Rea
 	return &ReadSession{reader: reader}, nil
 }
 
-// Blocks until a record is available, the context is done, or the
-// session encounters a fatal error. When it returns true, Record() yields
-// the fetched record. When it returns false, call Err().
+// Next advances to the next record.
+// It blocks until a record is available or the session ends.
+// Call Err after Next returns false.
 func (s *ReadSession) Next() bool {
 	if s == nil || s.reader == nil || s.err != nil || s.closed.Load() {
 		return false
@@ -125,11 +120,11 @@ func (s *ReadSession) Next() bool {
 
 	for {
 		select {
-		case records, ok := <-s.reader.Records():
+		case records, ok := <-s.reader.recordsCh:
 			if !ok {
-				// Records closed - drain any pending error before exiting
+				// Read an error sent before the channels closed.
 				select {
-				case err := <-s.reader.Errors():
+				case err := <-s.reader.errorCh:
 					if err != nil {
 						s.err = err
 					}
@@ -143,10 +138,10 @@ func (s *ReadSession) Next() bool {
 				return true
 			}
 
-		case err, ok := <-s.reader.Errors():
+		case err, ok := <-s.reader.errorCh:
 			if !ok {
 				select {
-				case records, ok := <-s.reader.Records():
+				case records, ok := <-s.reader.recordsCh:
 					if !ok {
 						s.Close()
 						return false
@@ -174,22 +169,23 @@ func (s *ReadSession) yieldPending() bool {
 		return false
 	}
 	s.current = s.pending[0]
-	s.pending[0] = SequencedRecord{} // release references so consumed records can be collected
+	s.pending[0] = SequencedRecord{} // Release references held by the pending slice.
 	s.pending = s.pending[1:]
 	return true
 }
 
-// Returns the most recent record fetched by Next.
+// Record returns the record selected by the last call to Next.
 func (s *ReadSession) Record() SequencedRecord {
 	return s.current
 }
 
-// Reports the terminal error (if any) that caused Next to stop.
+// Err returns the error that stopped the session.
+// It returns nil after a normal end or Close.
 func (s *ReadSession) Err() error {
 	return s.err
 }
 
-// Stops the session.
+// Close stops the session and releases its resources.
 func (s *ReadSession) Close() error {
 	if s == nil || s.reader == nil {
 		return nil
@@ -200,40 +196,36 @@ func (s *ReadSession) Close() error {
 	return s.reader.Close()
 }
 
-// IsCaughtUp reports whether the session has reached the tail in the latest
-// server update. Ignored command records still advance the read position.
-//
-// A heartbeat reports caught up. A record batch reports caught up only when
-// its last record ends at the reported tail. A batch without a tail, or a
-// reconnect, reports behind. New records may arrive after any report; use
-// CheckTail to fetch the stream's current tail.
+// IsCaughtUp reports whether the session has fetched through its latest reported tail.
+// It becomes false after a gap, a batch without a tail, or a reconnect.
+// Ignored command records count toward progress.
+// Use [StreamClient.CheckTail] for the current stream tail.
 func (s *ReadSession) IsCaughtUp() bool {
-	if s == nil || s.reader == nil || s.reader.caughtUp == nil {
+	if s == nil || s.reader == nil {
 		return false
 	}
 	return s.reader.caughtUp.isCaughtUp()
 }
 
-// CaughtUp returns a one-shot future for the next caught-up state. If the
-// session is already caught up, the future contains the currently reported
-// tail. A pending future stays pending across reconnects. Call CaughtUp again
-// after the session falls behind.
+// CaughtUp returns a future for the next caught-up state.
+// It is ready immediately if the session is already caught up.
+// It remains pending across reconnects.
+// Call CaughtUp again after the session falls behind.
 func (s *ReadSession) CaughtUp() *CaughtUpFuture {
-	if s == nil || s.reader == nil || s.reader.caughtUp == nil {
+	if s == nil || s.reader == nil {
 		return &CaughtUpFuture{}
 	}
-	return &CaughtUpFuture{result: s.reader.caughtUp.newResult()}
+	return s.reader.caughtUp.newFuture()
 }
 
-// CaughtUpFuture lets callers wait for a read session to reach a reported tail.
+// CaughtUpFuture represents one caught-up state.
 type CaughtUpFuture struct {
 	result *caughtUpResult
 }
 
-// Wait blocks until the session reaches a tail reported by the server and
-// returns that tail. If the session ends first, Wait returns the read error or
-// ErrSessionClosed. A canceled context only stops that call to Wait; the future
-// keeps its one-shot result for a later call.
+// Wait returns the tail captured by the future.
+// It returns the read error or ErrSessionClosed if the session ends first.
+// Canceling ctx stops this call. The future can be waited on again.
 func (f *CaughtUpFuture) Wait(ctx context.Context) (StreamPosition, error) {
 	if f == nil || f.result == nil {
 		return StreamPosition{}, ErrSessionClosed
@@ -254,8 +246,8 @@ func (f *CaughtUpFuture) Wait(ctx context.Context) (StreamPosition, error) {
 	}
 }
 
-// Returns the next read position, if known. Ignored command records are
-// included in this position.
+// NextReadPosition returns the next position for resuming the read.
+// It includes ignored command records.
 func (s *ReadSession) NextReadPosition() *StreamPosition {
 	if s == nil || s.reader == nil {
 		return nil
@@ -263,7 +255,8 @@ func (s *ReadSession) NextReadPosition() *StreamPosition {
 	return s.reader.NextReadPosition()
 }
 
-// Returns the last observed tail position, if known.
+// LastObservedTail returns the most recent tail reported to the session.
+// Use [StreamClient.CheckTail] for the current stream tail.
 func (s *ReadSession) LastObservedTail() *StreamPosition {
 	if s == nil || s.reader == nil {
 		return nil

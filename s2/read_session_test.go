@@ -17,11 +17,7 @@ import (
 
 func buildReadBatchFrame(t *testing.T, records []*pb.SequencedRecord) []byte {
 	t.Helper()
-	data, err := proto.Marshal(&pb.ReadBatch{Records: records})
-	if err != nil {
-		t.Fatalf("marshal read batch: %v", err)
-	}
-	return internalframing.CreateFrame(data, false, internalframing.CompressionNone)
+	return buildReadBatchFrameWithTail(t, records, nil)
 }
 
 func newFrameServedStreamClient(rt http.RoundTripper) *StreamClient {
@@ -111,38 +107,6 @@ func TestReadSessionIgnoreCommandRecordsSkipsDelivery(t *testing.T) {
 	}
 }
 
-func TestReadSessionNextReadPositionCountsFilteredRecords(t *testing.T) {
-	var body bytes.Buffer
-	body.Write(buildReadBatchFrame(t, []*pb.SequencedRecord{
-		{SeqNum: 0, Body: []byte("a")},
-		{SeqNum: 1, Body: []byte("token"), Headers: []*pb.Header{{Name: nil, Value: []byte("fence")}}},
-	}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
-
-	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
-	streamClient := newFrameServedStreamClient(rt)
-
-	session, err := streamClient.ReadSession(context.Background(), &ReadOptions{IgnoreCommandRecords: true})
-	if err != nil {
-		t.Fatalf("failed to open read session: %v", err)
-	}
-	defer session.Close()
-
-	for session.Next() {
-	}
-	if err := session.Err(); err != nil {
-		t.Fatalf("unexpected session error: %v", err)
-	}
-
-	pos := session.NextReadPosition()
-	if pos == nil {
-		t.Fatalf("expected next read position, got nil")
-	}
-	if pos.SeqNum != 2 {
-		t.Errorf("expected next read position seq_num 2, got %d", pos.SeqNum)
-	}
-}
-
 func buildReadBatchFrameWithTail(t *testing.T, records []*pb.SequencedRecord, tail *pb.StreamPosition) []byte {
 	t.Helper()
 	data, err := proto.Marshal(&pb.ReadBatch{Records: records, Tail: tail})
@@ -152,60 +116,22 @@ func buildReadBatchFrameWithTail(t *testing.T, records []*pb.SequencedRecord, ta
 	return internalframing.CreateFrame(data, false, internalframing.CompressionNone)
 }
 
-type gatedBody struct {
-	first     *bytes.Reader
-	second    *bytes.Reader
-	release   <-chan struct{}
-	closed    chan struct{}
-	closeOnce sync.Once
-	released  bool
-}
-
-func newGatedBody(first, second []byte, release <-chan struct{}) *gatedBody {
-	return &gatedBody{
-		first:   bytes.NewReader(first),
-		second:  bytes.NewReader(second),
-		release: release,
-		closed:  make(chan struct{}),
-	}
-}
-
-func (b *gatedBody) Read(p []byte) (int, error) {
-	if b.first.Len() > 0 {
-		return b.first.Read(p)
-	}
-	if !b.released {
-		select {
-		case <-b.release:
-			b.released = true
-		case <-b.closed:
-			return 0, io.ErrClosedPipe
-		}
-	}
-	return b.second.Read(p)
-}
-
-func (b *gatedBody) Close() error {
-	b.closeOnce.Do(func() { close(b.closed) })
-	return nil
-}
-
-type failAfterGateBody struct {
+type failingReadBody struct {
 	data      *bytes.Reader
 	fail      <-chan struct{}
 	closed    chan struct{}
 	closeOnce sync.Once
 }
 
-func newFailAfterGateBody(data []byte, fail <-chan struct{}) *failAfterGateBody {
-	return &failAfterGateBody{
+func newFailingReadBody(data []byte, fail <-chan struct{}) *failingReadBody {
+	return &failingReadBody{
 		data:   bytes.NewReader(data),
 		fail:   fail,
 		closed: make(chan struct{}),
 	}
 }
 
-func (b *failAfterGateBody) Read(p []byte) (int, error) {
+func (b *failingReadBody) Read(p []byte) (int, error) {
 	if b.data.Len() > 0 {
 		return b.data.Read(p)
 	}
@@ -217,26 +143,12 @@ func (b *failAfterGateBody) Read(p []byte) (int, error) {
 	}
 }
 
-func (b *failAfterGateBody) Close() error {
+func (b *failingReadBody) Close() error {
 	b.closeOnce.Do(func() { close(b.closed) })
 	return nil
 }
 
-type bodyRoundTripper struct {
-	body io.ReadCloser
-}
-
-func (r *bodyRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       r.body,
-		Header:     make(http.Header),
-		Request:    req,
-	}, nil
-}
-
-type retryCaughtUpRoundTripper struct {
-	mu            sync.Mutex
+type retryReadRoundTripper struct {
 	firstBody     io.ReadCloser
 	secondBody    []byte
 	secondStarted chan struct{}
@@ -244,11 +156,9 @@ type retryCaughtUpRoundTripper struct {
 	calls         int
 }
 
-func (r *retryCaughtUpRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	r.mu.Lock()
+func (r *retryReadRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.calls++
 	call := r.calls
-	r.mu.Unlock()
 
 	if call == 1 {
 		return &http.Response{
@@ -276,98 +186,141 @@ func (r *retryCaughtUpRoundTripper) RoundTrip(req *http.Request) (*http.Response
 	}, nil
 }
 
-func TestCaughtUpFutureCapturesTransitionBeforeWait(t *testing.T) {
-	state := &caughtUpState{}
-	session := &ReadSession{reader: &streamReader{caughtUp: state}}
-	future := session.CaughtUp()
-	want := StreamPosition{SeqNum: 10, Timestamp: 20}
-	state.setCaughtUp(want)
-	state.setBehind()
+type retryRead struct {
+	session       *ReadSession
+	failFirst     chan struct{}
+	secondStarted chan struct{}
+	releaseSecond chan struct{}
+}
 
-	got, err := future.Wait(context.Background())
+func newRetryRead(t *testing.T, first, second []byte) *retryRead {
+	t.Helper()
+
+	r := &retryRead{
+		failFirst:     make(chan struct{}),
+		secondStarted: make(chan struct{}),
+		releaseSecond: make(chan struct{}),
+	}
+	rt := &retryReadRoundTripper{
+		firstBody:     newFailingReadBody(first, r.failFirst),
+		secondBody:    second,
+		secondStarted: r.secondStarted,
+		releaseSecond: r.releaseSecond,
+	}
+	var err error
+	r.session, err = newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
 	if err != nil {
-		t.Fatalf("unexpected wait error: %v", err)
+		t.Fatalf("open read session: %v", err)
 	}
-	if got != want {
-		t.Fatalf("expected tail %+v, got %+v", want, got)
-	}
-	if session.IsCaughtUp() {
-		t.Fatal("expected current state to be behind")
+	t.Cleanup(func() { _ = r.session.Close() })
+	return r
+}
+
+func (r *retryRead) startRetry(t *testing.T, ctx context.Context) {
+	t.Helper()
+	close(r.failFirst)
+	select {
+	case <-r.secondStarted:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for retry")
 	}
 }
 
-func TestCaughtUpFutureKeepsTailFromCreation(t *testing.T) {
-	var state caughtUpState
-	want := StreamPosition{SeqNum: 10, Timestamp: 20}
-	state.setCaughtUp(want)
-	future := &CaughtUpFuture{result: state.newResult()}
-	state.setBehind()
-
-	got, err := future.Wait(context.Background())
+func waitCaughtUp(t *testing.T, future *CaughtUpFuture) StreamPosition {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	tail, err := future.Wait(ctx)
 	if err != nil {
-		t.Fatalf("unexpected wait error: %v", err)
+		t.Fatalf("wait for caught up: %v", err)
 	}
-	if got != want {
-		t.Fatalf("expected tail %+v, got %+v", want, got)
-	}
+	return tail
 }
 
-func TestCaughtUpStateCleanEndKeepsTail(t *testing.T) {
-	var state caughtUpState
+func TestCaughtUpFuturePinsTail(t *testing.T) {
 	want := StreamPosition{SeqNum: 10, Timestamp: 20}
-	state.setCaughtUp(want)
-	state.end(nil)
 
-	state.setBehind()
-	state.setCaughtUp(StreamPosition{SeqNum: 11, Timestamp: 21})
+	t.Run("created before catch-up", func(t *testing.T) {
+		session := &ReadSession{reader: &streamReader{}}
+		future := *session.CaughtUp()
+		session.reader.caughtUp.setCaughtUp(want)
+		session.reader.caughtUp.setBehind()
 
-	if !state.isCaughtUp() {
-		t.Fatal("expected clean end to keep the caught-up state")
-	}
-	got, err := (&CaughtUpFuture{result: state.newResult()}).Wait(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected wait error: %v", err)
-	}
-	if got != want {
-		t.Fatalf("expected tail %+v, got %+v", want, got)
-	}
-}
+		if got := waitCaughtUp(t, &future); got != want {
+			t.Fatalf("expected tail %+v, got %+v", want, got)
+		}
+		if session.IsCaughtUp() {
+			t.Fatal("expected current state to be behind")
+		}
+	})
 
-func TestCaughtUpFutureReturnsFatalError(t *testing.T) {
-	var state caughtUpState
-	future := &CaughtUpFuture{result: state.newResult()}
-	wantErr := errors.New("fatal read")
-	state.end(wantErr)
+	t.Run("created while caught up", func(t *testing.T) {
+		session := &ReadSession{reader: &streamReader{}}
+		session.reader.caughtUp.setCaughtUp(want)
+		future := session.CaughtUp()
+		session.reader.caughtUp.setBehind()
 
-	if _, err := future.Wait(context.Background()); !errors.Is(err, wantErr) {
-		t.Fatalf("expected fatal read error, got %v", err)
-	}
+		if got := waitCaughtUp(t, future); got != want {
+			t.Fatalf("expected tail %+v, got %+v", want, got)
+		}
+	})
 }
 
 func TestCaughtUpFutureReturnsSessionClosedOnClose(t *testing.T) {
-	body := newFailAfterGateBody(nil, make(chan struct{}))
-	session, err := newFrameServedStreamClient(&bodyRoundTripper{body: body}).ReadSession(context.Background(), nil)
+	started := make(chan struct{})
+	body := newFailingReadBody(nil, make(chan struct{}))
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		close(started)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       body,
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
 	if err != nil {
-		t.Fatalf("failed to open read session: %v", err)
+		t.Fatalf("open read session: %v", err)
 	}
 	future := session.CaughtUp()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("read did not start")
+	}
+
 	if err := session.Close(); err != nil {
-		t.Fatalf("failed to close session: %v", err)
+		t.Fatalf("close read session: %v", err)
 	}
 	session.reader.caughtUp.setCaughtUp(StreamPosition{SeqNum: 1})
 	if session.IsCaughtUp() {
-		t.Fatal("closed session accepted a late caught-up update")
+		t.Fatal("closed session accepted a late update")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if _, err := future.Wait(ctx); !errors.Is(err, ErrSessionClosed) {
+	if _, err := future.Wait(context.Background()); !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("expected ErrSessionClosed, got %v", err)
+	}
+	if session.Next() {
+		t.Fatal("closed session returned a record")
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("close returned a read error: %v", err)
+	}
+	select {
+	case _, ok := <-session.reader.recordsCh:
+		if ok {
+			t.Fatal("reader returned records after close")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reader did not stop after close")
+	}
+	if err, ok := <-session.reader.errorCh; ok {
+		t.Fatalf("reader returned an error after close: %v", err)
 	}
 }
 
 func TestCaughtUpFutureSurvivesCanceledWait(t *testing.T) {
-	var state caughtUpState
-	future := &CaughtUpFuture{result: state.newResult()}
+	session := &ReadSession{reader: &streamReader{}}
+	future := session.CaughtUp()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := future.Wait(ctx); !errors.Is(err, context.Canceled) {
@@ -375,34 +328,50 @@ func TestCaughtUpFutureSurvivesCanceledWait(t *testing.T) {
 	}
 
 	want := StreamPosition{SeqNum: 10, Timestamp: 20}
-	state.setCaughtUp(want)
-	got, err := future.Wait(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected second wait error: %v", err)
-	}
-	if got != want {
+	session.reader.caughtUp.setCaughtUp(want)
+	if got := waitCaughtUp(t, future); got != want {
 		t.Fatalf("expected tail %+v, got %+v", want, got)
 	}
 }
 
-func TestCaughtUpFutureStaysPendingWhileBehind(t *testing.T) {
-	var state caughtUpState
-	result := state.newResult()
-	state.setBehind()
-	select {
-	case <-result.done:
-		t.Fatal("expected future to stay pending while behind")
-	default:
+func TestReadBatchCaughtUp(t *testing.T) {
+	tests := []struct {
+		name  string
+		batch ReadBatch
+		want  bool
+	}{
+		{
+			name:  "heartbeat",
+			batch: ReadBatch{Tail: &StreamPosition{SeqNum: 5}},
+			want:  true,
+		},
+		{
+			name: "last record reaches tail",
+			batch: ReadBatch{
+				Records: []SequencedRecord{{SeqNum: 3}, {SeqNum: 4}},
+				Tail:    &StreamPosition{SeqNum: 5},
+			},
+			want: true,
+		},
+		{
+			name: "gap remains",
+			batch: ReadBatch{
+				Records: []SequencedRecord{{SeqNum: 1}},
+				Tail:    &StreamPosition{SeqNum: 5},
+			},
+		},
+		{
+			name:  "tail omitted",
+			batch: ReadBatch{Records: []SequencedRecord{{SeqNum: 4}}},
+		},
 	}
 
-	want := StreamPosition{SeqNum: 10, Timestamp: 20}
-	state.setCaughtUp(want)
-	got, err := (&CaughtUpFuture{result: result}).Wait(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected wait error: %v", err)
-	}
-	if got != want {
-		t.Fatalf("expected tail %+v, got %+v", want, got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := readBatchCaughtUp(&tt.batch); got != tt.want {
+				t.Fatalf("expected %t, got %t", tt.want, got)
+			}
+		})
 	}
 }
 
@@ -421,12 +390,7 @@ func TestReadSessionCaughtUpWithoutCallingNext(t *testing.T) {
 	}
 	defer session.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	tail, err := session.CaughtUp().Wait(ctx)
-	if err != nil {
-		t.Fatalf("unexpected CaughtUp Wait error: %v", err)
-	}
+	tail := waitCaughtUp(t, session.CaughtUp())
 	if tail.SeqNum != 2 || tail.Timestamp != 42 {
 		t.Errorf("expected tail seq_num 2 timestamp 42, got %+v", tail)
 	}
@@ -456,16 +420,13 @@ func TestReadSessionDoesNotCatchUpBeforeRecordsAreQueued(t *testing.T) {
 
 	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
 	ctx, cancel := context.WithCancel(context.Background())
-	state := &caughtUpState{}
 	reader := &streamReader{
 		streamClient: newFrameServedStreamClient(rt),
 		recordsCh:    make(chan []SequencedRecord, 1),
-		closed:       make(chan struct{}),
-		caughtUp:     state,
 		ctx:          ctx,
 	}
 	reader.recordsCh <- []SequencedRecord{{SeqNum: 99}}
-	future := &CaughtUpFuture{result: state.newResult()}
+	future := reader.caughtUp.newFuture()
 	runErr := make(chan error, 1)
 	go func() { runErr <- reader.runOnce(ctx, nil) }()
 
@@ -494,7 +455,7 @@ func TestReadSessionDoesNotCatchUpBeforeRecordsAreQueued(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out canceling blocked record handoff")
 	}
-	state.end(nil)
+	reader.caughtUp.end(nil)
 	if _, err := future.Wait(context.Background()); !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("expected ErrSessionClosed, got %v", err)
 	}
@@ -516,6 +477,25 @@ func TestReadSessionCleanEndClosesCaughtUpFutureWithoutNext(t *testing.T) {
 	}
 }
 
+func TestReadSessionFallsBehindOnGap(t *testing.T) {
+	var body bytes.Buffer
+	body.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{{SeqNum: 1}}, &pb.StreamPosition{SeqNum: 5}))
+	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
+
+	reader := &streamReader{
+		streamClient: newFrameServedStreamClient(&staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}),
+		recordsCh:    make(chan []SequencedRecord, 1),
+	}
+	reader.caughtUp.setCaughtUp(StreamPosition{SeqNum: 1})
+
+	if err := reader.runOnce(context.Background(), nil); err != nil {
+		t.Fatalf("read batch: %v", err)
+	}
+	if reader.caughtUp.isCaughtUp() {
+		t.Fatal("expected a gap before the reported tail to mark the session behind")
+	}
+}
+
 func TestReadSessionFatalErrorRejectsCaughtUpFutureWithoutNext(t *testing.T) {
 	body := internalframing.CreateFrameWithStatus(
 		[]byte(`{"message":"bad read","code":"BAD_READ"}`),
@@ -524,12 +504,10 @@ func TestReadSessionFatalErrorRejectsCaughtUpFutureWithoutNext(t *testing.T) {
 		http.StatusBadRequest,
 	)
 	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body}
-	sessionCtx, stopSession := context.WithCancel(context.Background())
-	session, err := newFrameServedStreamClient(rt).ReadSession(sessionCtx, nil)
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("failed to open read session: %v", err)
 	}
-	defer stopSession()
 	defer session.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -543,7 +521,6 @@ func TestReadSessionFatalErrorRejectsCaughtUpFutureWithoutNext(t *testing.T) {
 		t.Fatalf("unexpected fatal error: %+v", s2Err)
 	}
 
-	stopSession()
 	for session.Next() {
 	}
 	var sessionErr *S2Error
@@ -564,16 +541,10 @@ func TestReadSessionHeartbeatMarksCaughtUpWithoutRecords(t *testing.T) {
 	}
 	defer session.Close()
 
-	tailCh := make(chan StreamPosition, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		tail, err := session.CaughtUp().Wait(context.Background())
-		if err != nil {
-			errCh <- err
-			return
-		}
-		tailCh <- tail
-	}()
+	tail := waitCaughtUp(t, session.CaughtUp())
+	if tail.SeqNum != 5 || tail.Timestamp != 99 {
+		t.Errorf("expected tail seq_num 5 timestamp 99, got %+v", tail)
+	}
 
 	for session.Next() {
 		t.Errorf("expected no records, got seq_num %d", session.Record().SeqNum)
@@ -582,74 +553,12 @@ func TestReadSessionHeartbeatMarksCaughtUpWithoutRecords(t *testing.T) {
 		t.Fatalf("unexpected session error: %v", err)
 	}
 
-	select {
-	case tail := <-tailCh:
-		if tail.SeqNum != 5 || tail.Timestamp != 99 {
-			t.Errorf("expected tail seq_num 5 timestamp 99, got %+v", tail)
-		}
-	case err := <-errCh:
-		t.Fatalf("unexpected CaughtUp Wait error: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for caught-up signal")
-	}
-
 	if !session.IsCaughtUp() {
 		t.Error("expected session to remain caught up after a clean end at the tail")
 	}
 	last := session.LastObservedTail()
 	if last == nil || last.SeqNum != 5 || last.Timestamp != 99 {
 		t.Errorf("expected last observed tail 5/99, got %v", last)
-	}
-}
-
-func TestReadSessionCaughtUpWaitErrsWhenSessionEndsBehind(t *testing.T) {
-	var body bytes.Buffer
-	body.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
-		{SeqNum: 0, Body: []byte("a")},
-	}, &pb.StreamPosition{SeqNum: 5}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
-
-	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
-	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("failed to open read session: %v", err)
-	}
-	defer session.Close()
-
-	for session.Next() {
-	}
-	if err := session.Err(); err != nil {
-		t.Fatalf("unexpected session error: %v", err)
-	}
-
-	if session.IsCaughtUp() {
-		t.Error("expected session to be behind with a tail its last record does not abut")
-	}
-	if _, err := session.CaughtUp().Wait(context.Background()); !errors.Is(err, ErrSessionClosed) {
-		t.Fatalf("expected ErrSessionClosed, got %v", err)
-	}
-}
-
-func TestReadSessionCaughtUpCountsFilteredCommandRecordAtTail(t *testing.T) {
-	var body bytes.Buffer
-	body.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
-		{SeqNum: 0, Body: []byte("a")},
-		{SeqNum: 1, Body: []byte("token"), Headers: []*pb.Header{{Name: nil, Value: []byte("fence")}}},
-	}, &pb.StreamPosition{SeqNum: 2}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
-
-	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
-	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), &ReadOptions{IgnoreCommandRecords: true})
-	if err != nil {
-		t.Fatalf("failed to open read session: %v", err)
-	}
-	defer session.Close()
-
-	if !session.Next() {
-		t.Fatalf("expected a record, session error: %v", session.Err())
-	}
-	if !session.IsCaughtUp() {
-		t.Error("expected session to be caught up after the filtered record at the tail")
 	}
 }
 
@@ -693,63 +602,9 @@ func TestReadSessionCaughtUpTailAdvancesAfterFilteredBatch(t *testing.T) {
 	if last == nil || *last != want {
 		t.Fatalf("expected last observed tail %+v, got %v", want, last)
 	}
-}
-
-func TestReadSessionFallsBehindAfterCaughtUp(t *testing.T) {
-	first := buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
-		{SeqNum: 0, Body: []byte("a")},
-	}, &pb.StreamPosition{SeqNum: 1})
-	tests := []struct {
-		name  string
-		frame []byte
-	}{
-		{
-			name: "tail does not abut records",
-			frame: buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
-				{SeqNum: 1, Body: []byte("b")},
-				{SeqNum: 2, Body: []byte("c")},
-			}, &pb.StreamPosition{SeqNum: 5}),
-		},
-		{
-			name: "tail is absent",
-			frame: buildReadBatchFrame(t, []*pb.SequencedRecord{
-				{SeqNum: 1, Body: []byte("b")},
-			}),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			second := append([]byte(nil), tt.frame...)
-			second = append(second, internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK)...)
-			release := make(chan struct{})
-			rt := &bodyRoundTripper{body: newGatedBody(first, second, release)}
-			session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
-			if err != nil {
-				t.Fatalf("failed to open read session: %v", err)
-			}
-			defer session.Close()
-
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			if _, err := session.CaughtUp().Wait(ctx); err != nil {
-				t.Fatalf("failed to reach first tail: %v", err)
-			}
-			if !session.IsCaughtUp() {
-				t.Fatal("expected session to be caught up after the first batch")
-			}
-			if !session.Next() || session.Record().SeqNum != 0 {
-				t.Fatalf("expected first record, got error %v", session.Err())
-			}
-
-			close(release)
-			if !session.Next() || session.Record().SeqNum != 1 {
-				t.Fatalf("expected second-batch record, got error %v", session.Err())
-			}
-			if session.IsCaughtUp() {
-				t.Fatal("expected session to fall behind after the second batch")
-			}
-		})
+	position := session.NextReadPosition()
+	if position == nil || position.SeqNum != 2 {
+		t.Fatalf("expected next read position 2, got %v", position)
 	}
 }
 
@@ -761,43 +616,22 @@ func TestReadSessionRetryMarksBehindBeforeNextAttempt(t *testing.T) {
 	second.Write(buildReadBatchFrameWithTail(t, nil, &pb.StreamPosition{SeqNum: 2, Timestamp: 20}))
 	second.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
-	failFirst := make(chan struct{})
-	secondStarted := make(chan struct{})
-	releaseSecond := make(chan struct{})
-	rt := &retryCaughtUpRoundTripper{
-		firstBody:     newFailAfterGateBody(first, failFirst),
-		secondBody:    second.Bytes(),
-		secondStarted: secondStarted,
-		releaseSecond: releaseSecond,
-	}
-	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("failed to open read session: %v", err)
-	}
-	defer session.Close()
+	read := newRetryRead(t, first, second.Bytes())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	firstTail, err := session.CaughtUp().Wait(ctx)
-	if err != nil {
-		t.Fatalf("failed to reach first tail: %v", err)
-	}
+	firstTail := waitCaughtUp(t, read.session.CaughtUp())
 	if firstTail.SeqNum != 1 {
 		t.Fatalf("expected first tail 1, got %+v", firstTail)
 	}
 
-	close(failFirst)
-	select {
-	case <-secondStarted:
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for retry")
-	}
-	if session.IsCaughtUp() {
+	read.startRetry(t, ctx)
+	if read.session.IsCaughtUp() {
 		t.Fatal("expected retry to mark the session behind without calling Next")
 	}
 
-	future := session.CaughtUp()
-	close(releaseSecond)
+	future := read.session.CaughtUp()
+	close(read.releaseSecond)
 	secondTail, err := future.Wait(ctx)
 	if err != nil {
 		t.Fatalf("failed to reach second tail: %v", err)
@@ -816,37 +650,18 @@ func TestReadSessionCaughtUpFutureStaysPendingAcrossRetry(t *testing.T) {
 	second.Write(buildReadBatchFrameWithTail(t, nil, &pb.StreamPosition{SeqNum: 1, Timestamp: 20}))
 	second.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
-	failFirst := make(chan struct{})
-	secondStarted := make(chan struct{})
-	releaseSecond := make(chan struct{})
-	rt := &retryCaughtUpRoundTripper{
-		firstBody:     newFailAfterGateBody(first, failFirst),
-		secondBody:    second.Bytes(),
-		secondStarted: secondStarted,
-		releaseSecond: releaseSecond,
-	}
-	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("failed to open read session: %v", err)
-	}
-	defer session.Close()
-
-	future := session.CaughtUp()
-	close(failFirst)
+	read := newRetryRead(t, first, second.Bytes())
+	future := read.session.CaughtUp()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	select {
-	case <-secondStarted:
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for retry")
-	}
+	read.startRetry(t, ctx)
 	select {
 	case <-future.result.done:
 		t.Fatal("expected future to stay pending across retry")
 	default:
 	}
 
-	close(releaseSecond)
+	close(read.releaseSecond)
 	tail, err := future.Wait(ctx)
 	if err != nil {
 		t.Fatalf("failed to catch up after retry: %v", err)
