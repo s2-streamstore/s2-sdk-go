@@ -131,30 +131,14 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 	return batch, nil
 }
 
-// A unit of delivery from the reader goroutine to the consuming session.
-// Ordering on the channel mirrors the order of server reports, so the
-// caught-up signal stays consistent with record consumption.
-type readDelivery struct {
-	records []SequencedRecord
-	// Non-nil when this delivery brings the session up to the stream's tail:
-	// the batch it was derived from carried a tail that its last record abuts
-	// (or it was a heartbeat / an all-command-records batch at the tail, in
-	// which case records is empty).
-	caughtUpTail *StreamPosition
-}
-
 type streamReader struct {
 	streamClient *StreamClient
 
-	recordsCh chan readDelivery
+	recordsCh chan []SequencedRecord
 	errorCh   chan error
 	closed    chan struct{}
 	closeOnce sync.Once
-
-	// Whether the last delivery sent on recordsCh had caughtUpTail set.
-	// Used to suppress redundant zero-record deliveries. Only accessed from
-	// the run goroutine.
-	lastSentCaughtUp bool
+	caughtUp  *caughtUpState
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -194,9 +178,10 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 
 	session := &streamReader{
 		streamClient: s,
-		recordsCh:    make(chan readDelivery, readSessionBatchesBuffer),
+		recordsCh:    make(chan []SequencedRecord, readSessionBatchesBuffer),
 		errorCh:      make(chan error, 1),
 		closed:       make(chan struct{}),
+		caughtUp:     &caughtUpState{},
 		ctx:          sessionCtx,
 		cancel:       sessionCancel,
 		baseOpts:     cloneReadSessionOptions(opts),
@@ -210,8 +195,18 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 }
 
 func (r *streamReader) run() {
-	defer close(r.recordsCh)
-	defer close(r.errorCh)
+	var terminalErr error
+	defer func() {
+		if r.caughtUp != nil {
+			r.caughtUp.end(terminalErr)
+		}
+		if terminalErr != nil {
+			logError(r.logger, "s2 read session error forwarded", "stream", string(r.streamClient.name), "error", terminalErr)
+			r.errorCh <- terminalErr
+		}
+		close(r.recordsCh)
+		close(r.errorCh)
+	}()
 
 	logInfo(r.logger, "s2 read session start", "stream", string(r.streamClient.name))
 
@@ -258,6 +253,10 @@ func (r *streamReader) run() {
 
 		if !isRetryableReadError(r.ctx, err) || consecutiveFailures >= maxAttempts {
 			if r.ctx.Err() == nil && !errors.Is(err, errSessionClosed) {
+				terminalErr = err
+				if r.caughtUp != nil {
+					r.caughtUp.end(err)
+				}
 				if consecutiveFailures >= maxAttempts {
 					logError(r.logger, "s2 read session max attempts exhausted",
 						"stream", string(r.streamClient.name),
@@ -268,16 +267,13 @@ func (r *streamReader) run() {
 						"stream", string(r.streamClient.name),
 						"error", err)
 				}
-				r.sendError(err)
 			}
 			return
 		}
 
-		// An internal retry resets the caught-up signal to behind until the
-		// new connection re-signals. No-op unless the last delivery reported
-		// caught up.
-		if err := r.sendDelivery(r.ctx, readDelivery{}); err != nil {
-			return
+		// A new connection must report the tail again before it is caught up.
+		if r.caughtUp != nil {
+			r.caughtUp.setBehind()
 		}
 
 		// consecutiveFailures is a 0-based count; convert to 1-based attempt number
@@ -299,13 +295,13 @@ func (r *streamReader) run() {
 		default:
 		}
 
-		if delay > 0 {
-			time.Sleep(delay)
+		if err := waitForRetryBackoff(r.ctx, delay); err != nil {
+			return
 		}
 	}
 }
 
-func (r *streamReader) Records() <-chan readDelivery {
+func (r *streamReader) Records() <-chan []SequencedRecord {
 	return r.recordsCh
 }
 
@@ -315,8 +311,13 @@ func (r *streamReader) Errors() <-chan error {
 
 func (r *streamReader) Close() error {
 	r.closeOnce.Do(func() {
+		if r.caughtUp != nil {
+			r.caughtUp.end(nil)
+		}
 		close(r.closed)
-		r.cancel()
+		if r.cancel != nil {
+			r.cancel()
+		}
 	})
 	return nil
 }
@@ -572,37 +573,39 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.stateMu.Unlock()
 		}
 
-		// Determined before command-record filtering, so a filtered record at
-		// the tail still counts toward being caught up. A heartbeat (empty
-		// batch carrying the tail) marks the session as caught up; a batch
-		// carrying the tail does so iff its last record abuts the tail.
-		var caughtUpTail *StreamPosition
+		caughtUp := false
 		if batch.Tail != nil {
-			if n := len(batch.Records); n == 0 || batch.Records[n-1].SeqNum+1 == batch.Tail.SeqNum {
-				caughtUpTail = batch.Tail
-			}
+			n := len(batch.Records)
+			caughtUp = n == 0 || batch.Records[n-1].SeqNum+1 == batch.Tail.SeqNum
 		}
 
 		if len(batch.Records) > 0 {
-			// Snapshot full-batch accounting before filtering: limits and the
-			// resume position must reflect every record read, including command
-			// records that are filtered out of delivery.
+			// Count every record when tracking limits and the next read position.
 			recordCount := uint64(len(batch.Records))
 			var meteredBytes uint64
 			for _, record := range batch.Records {
 				meteredBytes += MeteredSequencedRecordBytes(record)
 			}
 			last := batch.Records[len(batch.Records)-1]
+			r.advanceState(recordCount, meteredBytes, last)
 
 			if r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords {
 				batch.filterCommandRecords()
 			}
-			if err := r.sendDelivery(ctx, readDelivery{records: batch.Records, caughtUpTail: caughtUpTail}); err != nil {
+		}
+
+		hasRecords := len(batch.Records) > 0
+		if r.caughtUp != nil && (!caughtUp || hasRecords) {
+			r.caughtUp.setBehind()
+		}
+
+		if hasRecords {
+			if err := r.sendRecords(ctx, batch.Records); err != nil {
 				return err
 			}
-			r.advanceState(recordCount, meteredBytes, last)
-		} else if err := r.sendDelivery(ctx, readDelivery{caughtUpTail: caughtUpTail}); err != nil {
-			return err
+		}
+		if r.caughtUp != nil && caughtUp {
+			r.caughtUp.setCaughtUp(*batch.Tail)
 		}
 
 		tailTimer.Reset(tailWatchdogTimeout)
@@ -619,17 +622,13 @@ func (r *streamReader) advanceState(recordCount, meteredBytes uint64, last Seque
 	r.stateMu.Unlock()
 }
 
-func (r *streamReader) sendDelivery(ctx context.Context, delivery readDelivery) error {
-	caughtUp := delivery.caughtUpTail != nil
-	// A delivery without records exists only to flip the caught-up signal;
-	// skip it when it would not change the last signal sent.
-	if len(delivery.records) == 0 && caughtUp == r.lastSentCaughtUp {
+func (r *streamReader) sendRecords(ctx context.Context, records []SequencedRecord) error {
+	if len(records) == 0 {
 		return nil
 	}
 
 	select {
-	case r.recordsCh <- delivery:
-		r.lastSentCaughtUp = caughtUp
+	case r.recordsCh <- records:
 	case <-r.closed:
 		return errSessionClosed
 	case <-ctx.Done():
@@ -650,13 +649,4 @@ func (r *streamReader) limitsReached() bool {
 		return true
 	}
 	return false
-}
-
-func (r *streamReader) sendError(err error) {
-	logError(r.logger, "s2 read session error forwarded", "stream", string(r.streamClient.name), "error", err)
-	select {
-	case r.errorCh <- err:
-	case <-r.closed:
-	case <-r.ctx.Done():
-	}
 }
