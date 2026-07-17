@@ -375,7 +375,7 @@ func TestReadBatchCaughtUp(t *testing.T) {
 	}
 }
 
-func TestReadSessionCaughtUpWithoutCallingNext(t *testing.T) {
+func TestReadSessionCaughtUpAfterFinalRecord(t *testing.T) {
 	var body bytes.Buffer
 	body.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
 		{SeqNum: 0, Body: []byte("a")},
@@ -390,74 +390,52 @@ func TestReadSessionCaughtUpWithoutCallingNext(t *testing.T) {
 	}
 	defer session.Close()
 
-	tail := waitCaughtUp(t, session.CaughtUp())
-	if tail.SeqNum != 2 || tail.Timestamp != 42 {
-		t.Errorf("expected tail seq_num 2 timestamp 42, got %+v", tail)
+	future := session.CaughtUp()
+	deadline := time.Now().Add(time.Second)
+	for session.NextReadPosition() == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
 	position := session.NextReadPosition()
 	if position == nil || position.SeqNum != 2 {
-		t.Fatalf("expected next read position 2 before catch-up resolved, got %v", position)
-	}
-
-	var records []uint64
-	for session.Next() {
-		records = append(records, session.Record().SeqNum)
-	}
-	if err := session.Err(); err != nil {
-		t.Fatalf("unexpected session error: %v", err)
-	}
-	if len(records) != 2 || records[0] != 0 || records[1] != 1 {
-		t.Fatalf("expected records [0 1], got %v", records)
-	}
-}
-
-func TestReadSessionDoesNotCatchUpBeforeRecordsAreQueued(t *testing.T) {
-	var body bytes.Buffer
-	body.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
-		{SeqNum: 0, Body: []byte("a")},
-	}, &pb.StreamPosition{SeqNum: 1, Timestamp: 10}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
-
-	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
-	ctx, cancel := context.WithCancel(context.Background())
-	reader := &streamReader{
-		streamClient: newFrameServedStreamClient(rt),
-		recordsCh:    make(chan []SequencedRecord, 1),
-		ctx:          ctx,
-	}
-	reader.recordsCh <- []SequencedRecord{{SeqNum: 99}}
-	future := reader.caughtUp.newFuture()
-	runErr := make(chan error, 1)
-	go func() { runErr <- reader.runOnce(ctx, nil) }()
-
-	deadline := time.Now().Add(time.Second)
-	for reader.NextReadPosition() == nil && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	position := reader.NextReadPosition()
-	if position == nil || position.SeqNum != 1 {
-		cancel()
-		t.Fatalf("reader did not process the tail batch: %v", position)
+		t.Fatalf("expected next read position 2, got %v", position)
 	}
 	select {
 	case <-future.result.done:
-		cancel()
-		t.Fatal("caught-up future resolved before the record batch entered the session queue")
+		t.Fatal("caught up before Next returned any records")
 	default:
 	}
-
-	cancel()
-	select {
-	case err := <-runErr:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected canceled handoff, got %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out canceling blocked record handoff")
+	if session.IsCaughtUp() {
+		t.Fatal("caught up before Next returned any records")
 	}
-	reader.caughtUp.end(nil)
-	if _, err := future.Wait(context.Background()); !errors.Is(err, ErrSessionClosed) {
-		t.Fatalf("expected ErrSessionClosed, got %v", err)
+
+	if !session.Next() || session.Record().SeqNum != 0 {
+		t.Fatal("expected record 0")
+	}
+	select {
+	case <-future.result.done:
+		t.Fatal("caught up before Next returned the final record")
+	default:
+	}
+	if session.IsCaughtUp() {
+		t.Fatal("caught up before Next returned the final record")
+	}
+
+	if !session.Next() || session.Record().SeqNum != 1 {
+		t.Fatal("expected record 1")
+	}
+	want := StreamPosition{SeqNum: 2, Timestamp: 42}
+	if tail := waitCaughtUp(t, future); tail != want {
+		t.Fatalf("expected tail %+v, got %+v", want, tail)
+	}
+	if !session.IsCaughtUp() {
+		t.Fatal("expected caught up after the final record")
+	}
+
+	if session.Next() {
+		t.Fatal("expected the session to end")
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("unexpected session error: %v", err)
 	}
 }
 
@@ -484,7 +462,7 @@ func TestReadSessionFallsBehindOnGap(t *testing.T) {
 
 	reader := &streamReader{
 		streamClient: newFrameServedStreamClient(&staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}),
-		recordsCh:    make(chan []SequencedRecord, 1),
+		recordsCh:    make(chan readDelivery, 1),
 	}
 	reader.caughtUp.setCaughtUp(StreamPosition{SeqNum: 1})
 
@@ -541,13 +519,13 @@ func TestReadSessionHeartbeatMarksCaughtUpWithoutRecords(t *testing.T) {
 	}
 	defer session.Close()
 
-	tail := waitCaughtUp(t, session.CaughtUp())
+	future := session.CaughtUp()
+	if session.Next() {
+		t.Fatalf("expected no records, got seq_num %d", session.Record().SeqNum)
+	}
+	tail := waitCaughtUp(t, future)
 	if tail.SeqNum != 5 || tail.Timestamp != 99 {
 		t.Errorf("expected tail seq_num 5 timestamp 99, got %+v", tail)
-	}
-
-	for session.Next() {
-		t.Errorf("expected no records, got seq_num %d", session.Record().SeqNum)
 	}
 	if err := session.Err(); err != nil {
 		t.Fatalf("unexpected session error: %v", err)
@@ -566,7 +544,7 @@ func TestReadSessionCaughtUpTailAdvancesAfterFilteredBatch(t *testing.T) {
 	var body bytes.Buffer
 	body.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
 		{SeqNum: 0, Body: []byte("a")},
-	}, &pb.StreamPosition{SeqNum: 1, Timestamp: 10}))
+	}, nil))
 	body.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
 		{SeqNum: 1, Body: []byte("token"), Headers: []*pb.Header{{Name: nil, Value: []byte("fence")}}},
 	}, &pb.StreamPosition{SeqNum: 2, Timestamp: 20}))
@@ -579,19 +557,24 @@ func TestReadSessionCaughtUpTailAdvancesAfterFilteredBatch(t *testing.T) {
 	}
 	defer session.Close()
 
-	var records []uint64
-	for session.Next() {
-		records = append(records, session.Record().SeqNum)
+	future := session.CaughtUp()
+	if !session.Next() || session.Record().SeqNum != 0 {
+		t.Fatal("expected record 0")
+	}
+	select {
+	case <-future.result.done:
+		t.Fatal("caught up while a later filtered batch was still pending")
+	default:
+	}
+	if session.Next() {
+		t.Fatalf("expected no more records, got %d", session.Record().SeqNum)
 	}
 	if err := session.Err(); err != nil {
 		t.Fatalf("unexpected session error: %v", err)
 	}
-	if len(records) != 1 || records[0] != 0 {
-		t.Fatalf("expected only record 0, got %v", records)
-	}
 
 	want := StreamPosition{SeqNum: 2, Timestamp: 20}
-	tail, err := session.CaughtUp().Wait(context.Background())
+	tail, err := future.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected wait error: %v", err)
 	}
@@ -620,7 +603,11 @@ func TestReadSessionRetryMarksBehindBeforeNextAttempt(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	firstTail := waitCaughtUp(t, read.session.CaughtUp())
+	firstFuture := read.session.CaughtUp()
+	if !read.session.Next() || read.session.Record().SeqNum != 0 {
+		t.Fatal("expected record 0")
+	}
+	firstTail := waitCaughtUp(t, firstFuture)
 	if firstTail.SeqNum != 1 {
 		t.Fatalf("expected first tail 1, got %+v", firstTail)
 	}
@@ -632,6 +619,9 @@ func TestReadSessionRetryMarksBehindBeforeNextAttempt(t *testing.T) {
 
 	future := read.session.CaughtUp()
 	close(read.releaseSecond)
+	if read.session.Next() {
+		t.Fatalf("expected no more records, got %d", read.session.Record().SeqNum)
+	}
 	secondTail, err := future.Wait(ctx)
 	if err != nil {
 		t.Fatalf("failed to reach second tail: %v", err)
@@ -660,8 +650,19 @@ func TestReadSessionCaughtUpFutureStaysPendingAcrossRetry(t *testing.T) {
 		t.Fatal("expected future to stay pending across retry")
 	default:
 	}
+	if !read.session.Next() || read.session.Record().SeqNum != 0 {
+		t.Fatal("expected record 0")
+	}
+	select {
+	case <-future.result.done:
+		t.Fatal("expected future to stay pending after the gap batch")
+	default:
+	}
 
 	close(read.releaseSecond)
+	if read.session.Next() {
+		t.Fatalf("expected no more records, got %d", read.session.Record().SeqNum)
+	}
 	tail, err := future.Wait(ctx)
 	if err != nil {
 		t.Fatalf("failed to catch up after retry: %v", err)

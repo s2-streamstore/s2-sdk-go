@@ -89,11 +89,13 @@ func (c *caughtUpState) newFuture() *CaughtUpFuture {
 }
 
 type ReadSession struct {
-	reader  *streamReader
-	pending []SequencedRecord
-	current SequencedRecord
-	err     error
-	closed  atomic.Bool
+	reader              *streamReader
+	pending             []SequencedRecord
+	pendingCaughtUpTail *StreamPosition
+	pendingConsumed     chan struct{}
+	current             SequencedRecord
+	err                 error
+	closed              atomic.Bool
 }
 
 // Opens a streaming read session.
@@ -120,7 +122,7 @@ func (s *ReadSession) Next() bool {
 
 	for {
 		select {
-		case records, ok := <-s.reader.recordsCh:
+		case delivery, ok := <-s.reader.recordsCh:
 			if !ok {
 				// Records closed - drain any pending error before exiting
 				select {
@@ -133,7 +135,7 @@ func (s *ReadSession) Next() bool {
 				s.Close()
 				return false
 			}
-			s.pending = records
+			s.stashDelivery(delivery)
 			if s.yieldPending() {
 				return true
 			}
@@ -141,12 +143,12 @@ func (s *ReadSession) Next() bool {
 		case err, ok := <-s.reader.errorCh:
 			if !ok {
 				select {
-				case records, ok := <-s.reader.recordsCh:
+				case delivery, ok := <-s.reader.recordsCh:
 					if !ok {
 						s.Close()
 						return false
 					}
-					s.pending = records
+					s.stashDelivery(delivery)
 					if s.yieldPending() {
 						return true
 					}
@@ -164,6 +166,15 @@ func (s *ReadSession) Next() bool {
 	}
 }
 
+func (s *ReadSession) stashDelivery(delivery readDelivery) {
+	s.pending = delivery.records
+	s.pendingCaughtUpTail = delivery.caughtUpTail
+	s.pendingConsumed = delivery.consumed
+	if len(s.pending) == 0 {
+		s.finishDelivery()
+	}
+}
+
 func (s *ReadSession) yieldPending() bool {
 	if len(s.pending) == 0 {
 		return false
@@ -171,7 +182,21 @@ func (s *ReadSession) yieldPending() bool {
 	s.current = s.pending[0]
 	s.pending[0] = SequencedRecord{} // release references so consumed records can be collected
 	s.pending = s.pending[1:]
+	if len(s.pending) == 0 {
+		s.finishDelivery()
+	}
 	return true
+}
+
+func (s *ReadSession) finishDelivery() {
+	if s.pendingCaughtUpTail != nil {
+		s.reader.caughtUp.setCaughtUp(*s.pendingCaughtUpTail)
+		s.pendingCaughtUpTail = nil
+	}
+	if s.pendingConsumed != nil {
+		close(s.pendingConsumed)
+		s.pendingConsumed = nil
+	}
 }
 
 // Returns the most recent record fetched by Next.

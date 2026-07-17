@@ -128,10 +128,16 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 	return batch, nil
 }
 
+type readDelivery struct {
+	records      []SequencedRecord
+	caughtUpTail *StreamPosition
+	consumed     chan struct{}
+}
+
 type streamReader struct {
 	streamClient *StreamClient
 
-	recordsCh chan []SequencedRecord
+	recordsCh chan readDelivery
 	errorCh   chan error
 	caughtUp  caughtUpState
 
@@ -173,7 +179,7 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 
 	session := &streamReader{
 		streamClient: s,
-		recordsCh:    make(chan []SequencedRecord, readSessionBatchesBuffer),
+		recordsCh:    make(chan readDelivery, readSessionBatchesBuffer),
 		errorCh:      make(chan error, 1),
 		ctx:          sessionCtx,
 		cancel:       sessionCancel,
@@ -561,13 +567,15 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.caughtUp.setBehind()
 		}
 
-		if hasRecords {
-			if err := r.sendRecords(ctx, batch.Records); err != nil {
+		if hasRecords || caughtUp {
+			delivery := readDelivery{records: batch.Records}
+			if caughtUp {
+				delivery.caughtUpTail = batch.Tail
+				delivery.consumed = make(chan struct{})
+			}
+			if err := r.sendDelivery(ctx, delivery); err != nil {
 				return err
 			}
-		}
-		if caughtUp {
-			r.caughtUp.setCaughtUp(*batch.Tail)
 		}
 
 		tailTimer.Reset(tailWatchdogTimeout)
@@ -584,11 +592,18 @@ func (r *streamReader) advanceState(recordCount, meteredBytes uint64, last Seque
 	r.stateMu.Unlock()
 }
 
-func (r *streamReader) sendRecords(ctx context.Context, records []SequencedRecord) error {
+func (r *streamReader) sendDelivery(ctx context.Context, delivery readDelivery) error {
 	select {
-	case r.recordsCh <- records:
+	case r.recordsCh <- delivery:
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+	if delivery.consumed != nil {
+		select {
+		case <-delivery.consumed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	return nil
