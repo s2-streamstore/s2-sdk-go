@@ -362,7 +362,7 @@ func isRetryableReadError(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
-	if ctx.Err() != nil || errors.Is(err, errSessionClosed) {
+	if ctx.Err() != nil {
 		return false
 	}
 

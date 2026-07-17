@@ -2,7 +2,6 @@ package s2
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,8 +19,6 @@ const (
 	tailWatchdogTimeout      = 20 * time.Second
 	readSessionBatchesBuffer = 10
 )
-
-var errSessionClosed = errors.New("read session closed")
 
 type ReadOptions struct {
 	// Start from a sequence number.
@@ -131,13 +128,18 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 	return batch, nil
 }
 
+type readDelivery struct {
+	records      []SequencedRecord
+	caughtUpTail *StreamPosition
+	consumed     chan struct{}
+}
+
 type streamReader struct {
 	streamClient *StreamClient
 
-	recordsCh chan []SequencedRecord
+	recordsCh chan readDelivery
 	errorCh   chan error
-	closed    chan struct{}
-	closeOnce sync.Once
+	caughtUp  caughtUpState
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -177,9 +179,8 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 
 	session := &streamReader{
 		streamClient: s,
-		recordsCh:    make(chan []SequencedRecord, readSessionBatchesBuffer),
+		recordsCh:    make(chan readDelivery, readSessionBatchesBuffer),
 		errorCh:      make(chan error, 1),
-		closed:       make(chan struct{}),
 		ctx:          sessionCtx,
 		cancel:       sessionCancel,
 		baseOpts:     cloneReadSessionOptions(opts),
@@ -193,8 +194,16 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 }
 
 func (r *streamReader) run() {
-	defer close(r.recordsCh)
-	defer close(r.errorCh)
+	var terminalErr error
+	defer func() {
+		r.caughtUp.end(terminalErr)
+		if terminalErr != nil {
+			logError(r.logger, "s2 read session error forwarded", "stream", string(r.streamClient.name), "error", terminalErr)
+			r.errorCh <- terminalErr
+		}
+		close(r.recordsCh)
+		close(r.errorCh)
+	}()
 
 	logInfo(r.logger, "s2 read session start", "stream", string(r.streamClient.name))
 
@@ -225,7 +234,7 @@ func (r *streamReader) run() {
 		err := r.runOnce(tailCtx, opts)
 		tailCancel()
 
-		if err == nil || errors.Is(err, errSessionClosed) {
+		if err == nil {
 			return
 		}
 		if ctxErr := r.ctx.Err(); ctxErr != nil {
@@ -240,7 +249,9 @@ func (r *streamReader) run() {
 		}
 
 		if !isRetryableReadError(r.ctx, err) || consecutiveFailures >= maxAttempts {
-			if r.ctx.Err() == nil && !errors.Is(err, errSessionClosed) {
+			if r.ctx.Err() == nil {
+				terminalErr = err
+				r.caughtUp.end(err)
 				if consecutiveFailures >= maxAttempts {
 					logError(r.logger, "s2 read session max attempts exhausted",
 						"stream", string(r.streamClient.name),
@@ -251,10 +262,12 @@ func (r *streamReader) run() {
 						"stream", string(r.streamClient.name),
 						"error", err)
 				}
-				r.sendError(err)
 			}
 			return
 		}
+
+		// A new connection must report a tail before the session is caught up.
+		r.caughtUp.setBehind()
 
 		// consecutiveFailures is a 0-based count; convert to 1-based attempt number
 		delay := calculateRetryBackoff(cfg, consecutiveFailures+1)
@@ -267,33 +280,17 @@ func (r *streamReader) run() {
 			"delay", delay,
 			"error", err)
 
-		select {
-		case <-r.ctx.Done():
+		if err := waitForRetryBackoff(r.ctx, delay); err != nil {
 			return
-		case <-r.closed:
-			return
-		default:
-		}
-
-		if delay > 0 {
-			time.Sleep(delay)
 		}
 	}
 }
 
-func (r *streamReader) Records() <-chan []SequencedRecord {
-	return r.recordsCh
-}
-
-func (r *streamReader) Errors() <-chan error {
-	return r.errorCh
-}
-
 func (r *streamReader) Close() error {
-	r.closeOnce.Do(func() {
-		close(r.closed)
+	r.caughtUp.end(nil)
+	if r.cancel != nil {
 		r.cancel()
-	})
+	}
 	return nil
 }
 
@@ -493,8 +490,6 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-r.closed:
-			return errSessionClosed
 		case <-tailTimer.C:
 			return &S2Error{
 				Message: fmt.Sprintf("no batch received for %.0f seconds", tailWatchdogTimeout.Seconds()),
@@ -548,6 +543,8 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.stateMu.Unlock()
 		}
 
+		caughtUp := readBatchCaughtUp(batch)
+
 		if len(batch.Records) > 0 {
 			// Snapshot full-batch accounting before filtering: limits and the
 			// resume position must reflect every record read, including command
@@ -558,16 +555,27 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 				meteredBytes += MeteredSequencedRecordBytes(record)
 			}
 			last := batch.Records[len(batch.Records)-1]
+			r.advanceState(recordCount, meteredBytes, last)
 
 			if r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords {
 				batch.filterCommandRecords()
 			}
-			if len(batch.Records) > 0 {
-				if err := r.sendBatch(ctx, batch.Records); err != nil {
-					return err
-				}
+		}
+
+		hasRecords := len(batch.Records) > 0
+		if !caughtUp || hasRecords {
+			r.caughtUp.setBehind()
+		}
+
+		if hasRecords || caughtUp {
+			delivery := readDelivery{records: batch.Records}
+			if caughtUp {
+				delivery.caughtUpTail = batch.Tail
+				delivery.consumed = make(chan struct{})
 			}
-			r.advanceState(recordCount, meteredBytes, last)
+			if err := r.sendDelivery(ctx, delivery); err != nil {
+				return err
+			}
 		}
 
 		tailTimer.Reset(tailWatchdogTimeout)
@@ -584,16 +592,29 @@ func (r *streamReader) advanceState(recordCount, meteredBytes uint64, last Seque
 	r.stateMu.Unlock()
 }
 
-func (r *streamReader) sendBatch(ctx context.Context, records []SequencedRecord) error {
+func (r *streamReader) sendDelivery(ctx context.Context, delivery readDelivery) error {
 	select {
-	case r.recordsCh <- records:
-	case <-r.closed:
-		return errSessionClosed
+	case r.recordsCh <- delivery:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+	if delivery.consumed != nil {
+		select {
+		case <-delivery.consumed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 
 	return nil
+}
+
+func readBatchCaughtUp(batch *ReadBatch) bool {
+	if batch.Tail == nil {
+		return false
+	}
+	n := len(batch.Records)
+	return n == 0 || batch.Records[n-1].SeqNum+1 == batch.Tail.SeqNum
 }
 
 func (r *streamReader) limitsReached() bool {
@@ -607,13 +628,4 @@ func (r *streamReader) limitsReached() bool {
 		return true
 	}
 	return false
-}
-
-func (r *streamReader) sendError(err error) {
-	logError(r.logger, "s2 read session error forwarded", "stream", string(r.streamClient.name), "error", err)
-	select {
-	case r.errorCh <- err:
-	case <-r.closed:
-	case <-r.ctx.Done():
-	}
 }
