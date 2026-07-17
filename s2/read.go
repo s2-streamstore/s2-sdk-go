@@ -131,13 +131,30 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 	return batch, nil
 }
 
+// A unit of delivery from the reader goroutine to the consuming session.
+// Ordering on the channel mirrors the order of server reports, so the
+// caught-up signal stays consistent with record consumption.
+type readDelivery struct {
+	records []SequencedRecord
+	// Non-nil when this delivery brings the session up to the stream's tail:
+	// the batch it was derived from carried a tail that its last record abuts
+	// (or it was a heartbeat / an all-command-records batch at the tail, in
+	// which case records is empty).
+	caughtUpTail *StreamPosition
+}
+
 type streamReader struct {
 	streamClient *StreamClient
 
-	recordsCh chan []SequencedRecord
+	recordsCh chan readDelivery
 	errorCh   chan error
 	closed    chan struct{}
 	closeOnce sync.Once
+
+	// Whether the last delivery sent on recordsCh had caughtUpTail set.
+	// Used to suppress redundant zero-record deliveries. Only accessed from
+	// the run goroutine.
+	lastSentCaughtUp bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -177,7 +194,7 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 
 	session := &streamReader{
 		streamClient: s,
-		recordsCh:    make(chan []SequencedRecord, readSessionBatchesBuffer),
+		recordsCh:    make(chan readDelivery, readSessionBatchesBuffer),
 		errorCh:      make(chan error, 1),
 		closed:       make(chan struct{}),
 		ctx:          sessionCtx,
@@ -256,6 +273,13 @@ func (r *streamReader) run() {
 			return
 		}
 
+		// An internal retry resets the caught-up signal to behind until the
+		// new connection re-signals. No-op unless the last delivery reported
+		// caught up.
+		if err := r.sendDelivery(r.ctx, readDelivery{}); err != nil {
+			return
+		}
+
 		// consecutiveFailures is a 0-based count; convert to 1-based attempt number
 		delay := calculateRetryBackoff(cfg, consecutiveFailures+1)
 		opts = r.buildAttemptOptions(delay)
@@ -281,7 +305,7 @@ func (r *streamReader) run() {
 	}
 }
 
-func (r *streamReader) Records() <-chan []SequencedRecord {
+func (r *streamReader) Records() <-chan readDelivery {
 	return r.recordsCh
 }
 
@@ -548,6 +572,17 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.stateMu.Unlock()
 		}
 
+		// Determined before command-record filtering, so a filtered record at
+		// the tail still counts toward being caught up. A heartbeat (empty
+		// batch carrying the tail) marks the session as caught up; a batch
+		// carrying the tail does so iff its last record abuts the tail.
+		var caughtUpTail *StreamPosition
+		if batch.Tail != nil {
+			if n := len(batch.Records); n == 0 || batch.Records[n-1].SeqNum+1 == batch.Tail.SeqNum {
+				caughtUpTail = batch.Tail
+			}
+		}
+
 		if len(batch.Records) > 0 {
 			// Snapshot full-batch accounting before filtering: limits and the
 			// resume position must reflect every record read, including command
@@ -562,12 +597,12 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			if r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords {
 				batch.filterCommandRecords()
 			}
-			if len(batch.Records) > 0 {
-				if err := r.sendBatch(ctx, batch.Records); err != nil {
-					return err
-				}
+			if err := r.sendDelivery(ctx, readDelivery{records: batch.Records, caughtUpTail: caughtUpTail}); err != nil {
+				return err
 			}
 			r.advanceState(recordCount, meteredBytes, last)
+		} else if err := r.sendDelivery(ctx, readDelivery{caughtUpTail: caughtUpTail}); err != nil {
+			return err
 		}
 
 		tailTimer.Reset(tailWatchdogTimeout)
@@ -584,9 +619,17 @@ func (r *streamReader) advanceState(recordCount, meteredBytes uint64, last Seque
 	r.stateMu.Unlock()
 }
 
-func (r *streamReader) sendBatch(ctx context.Context, records []SequencedRecord) error {
+func (r *streamReader) sendDelivery(ctx context.Context, delivery readDelivery) error {
+	caughtUp := delivery.caughtUpTail != nil
+	// A delivery without records exists only to flip the caught-up signal;
+	// skip it when it would not change the last signal sent.
+	if len(delivery.records) == 0 && caughtUp == r.lastSentCaughtUp {
+		return nil
+	}
+
 	select {
-	case r.recordsCh <- records:
+	case r.recordsCh <- delivery:
+		r.lastSentCaughtUp = caughtUp
 	case <-r.closed:
 		return errSessionClosed
 	case <-ctx.Done():
