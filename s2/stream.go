@@ -66,7 +66,8 @@ func (s *StreamClient) getHTTPClient() *http.Client {
 	return s.basinClient.client.streamingClient
 }
 
-// CheckTail returns the current stream tail.
+// Check the tail of the stream.
+// Returns the next sequence number and timestamp to be assigned (tail).
 func (s *StreamClient) CheckTail(ctx context.Context) (*TailResponse, error) {
 	if ctx == nil {
 		ctx = context.Background()

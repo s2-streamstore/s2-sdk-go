@@ -21,27 +21,31 @@ const (
 )
 
 type ReadOptions struct {
-	// SeqNum is the sequence number to start from.
+	// Start from a sequence number.
 	SeqNum *uint64 `json:"seq_num,omitempty"`
-	// Timestamp is the timestamp to start from.
+	// Start from a timestamp.
 	Timestamp *uint64 `json:"timestamp,omitempty"`
-	// TailOffset is the number of records before the tail to start from.
+	// Start from number of records before the next sequence number.
 	TailOffset *int64 `json:"tail_offset,omitempty"`
-	// Count limits the number of records returned. Unary reads default to 1000.
+	// Record count limit.
+	// Non-streaming reads are capped by the default limit of 1000 records.
 	Count *uint64 `json:"count,omitempty"`
-	// Bytes limits metered bytes returned. Unary reads default to 1 MiB.
+	// Metered bytes limit.
+	// Non-streaming reads are capped by the default limit of 1 MiB.
 	Bytes *uint64 `json:"bytes,omitempty"`
-	// Wait is the maximum number of seconds to wait for new records.
-	// It defaults to zero when Count, Bytes, or Until is set, and is otherwise unbounded.
-	// For streaming reads, it applies between records. Unary reads allow up to 60 seconds.
+	// Duration in seconds to wait for new records.
+	// The default duration is 0 if there is a bound on `count`, `bytes`, or `until`, and otherwise infinite.
+	// Non-streaming reads are always bounded on `count` and `bytes`, so you can achieve long poll semantics by specifying a non-zero duration up to 60 seconds.
+	// In the context of an SSE or S2S streaming read, the duration will bound how much time can elapse between records throughout the lifetime of the session.
 	Wait *int32 `json:"wait,omitempty"`
-	// Until is an exclusive timestamp bound.
+	// Exclusive timestamp to read until.
 	Until *uint64 `json:"until,omitempty"`
-	// Clamp starts from the tail when the requested position is beyond it.
-	// Without Clamp, the server returns 416 Range Not Satisfiable.
+	// Start reading from the tail if the requested position is beyond it.
+	// Otherwise, a `416 Range Not Satisfiable` response is returned.
 	Clamp *bool `json:"clamp,omitempty"`
-	// IgnoreCommandRecords filters command records from returned data.
-	// Filtering is client-side.
+	// Whether to filter out command records from read results.
+	// Filtering is performed client-side.
+	// Defaults to false.
 	IgnoreCommandRecords bool `json:"-"`
 }
 
@@ -259,7 +263,7 @@ func (r *streamReader) run() {
 		// A new connection must report a tail before the session is caught up.
 		r.caughtUp.setBehind()
 
-		// Backoff uses the next attempt number.
+		// consecutiveFailures is a 0-based count; convert to 1-based attempt number
 		delay := calculateRetryBackoff(cfg, consecutiveFailures+1)
 		opts = r.buildAttemptOptions(delay)
 
@@ -362,7 +366,11 @@ func (r *streamReader) buildAttemptOptions(plannedDelay time.Duration) *ReadOpti
 			}
 			opts.Bytes = Uint64(remaining)
 		}
-		// Reduce the wait budget by time spent tailing and backing off.
+		// Remaining wait budget for retry:
+		// During catchup (tail not yet observed), the full wait is sent.
+		// Once tailing, the wait budget is depleted based on time since
+		// the last batch with tail info, which approximates how long the
+		// server has been in its long polling state.
 		if r.baseOpts.Wait != nil {
 			waitSecs := *r.baseOpts.Wait
 			if !lastTailAt.IsZero() {
@@ -483,7 +491,11 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 				Code:    "TIMEOUT",
 			}
 		case fr = <-frameCh:
-			// Only time spent waiting for the next frame counts toward the watchdog.
+			// Network wait satisfied: stop the watchdog so consumer-delivery
+			// time (handleRecord can block on the records channel) does not
+			// count toward it. The timer is reset at the end of the loop body
+			// when the next network wait begins. Mirrors the Rust SDK's
+			// `timeout(20s, batches.next())` scope, which excludes yield.
 			stopTailTimer()
 		}
 
@@ -528,7 +540,9 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		caughtUp := readBatchCaughtUp(batch)
 
 		if len(batch.Records) > 0 {
-			// Track all records, including filtered command records.
+			// Snapshot full-batch accounting before filtering: limits and the
+			// resume position must reflect every record read, including command
+			// records that are filtered out of delivery.
 			recordCount := uint64(len(batch.Records))
 			var meteredBytes uint64
 			for _, record := range batch.Records {
