@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.20.0] - 2026-07-22
+
+### Features
+
+- Expose caught-up-to-tail signal on read sessions ([#346](https://github.com/s2-streamstore/s2-sdk-go/issues/346))
+
+### Performance
+
+- Improve unary HTTP connection reuse ([#342](https://github.com/s2-streamstore/s2-sdk-go/issues/342))
+
+### Miscellaneous Tasks
+
+- Update s2-specs to 973e0d9 ([#347](https://github.com/s2-streamstore/s2-sdk-go/issues/347))
+
 ## [v0.19.1] - 2026-07-09
 
 ### Performance
@@ -12,6 +26,10 @@ All notable changes to this project will be documented in this file.
 - Deliver read session records to consumers one batch at a time ([#338](https://github.com/s2-streamstore/s2-sdk-go/issues/338))
 - Read frames directly into the parser buffer and consume via offset ([#339](https://github.com/s2-streamstore/s2-sdk-go/issues/339))
 - Single-allocation CreateFrame and no double clone on the Producer path ([#340](https://github.com/s2-streamstore/s2-sdk-go/issues/340))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.19.1 ([#341](https://github.com/s2-streamstore/s2-sdk-go/issues/341))
 
 ## [v0.19.0] - 2026-07-07
 
