@@ -18,6 +18,7 @@ type Batcher struct {
 	timer           *time.Timer
 	timerSeq        uint64
 	closed          bool
+	closeErr        error
 	nextMatchSeqNum *uint64
 
 	batchesCh chan *BatchOutput
@@ -30,6 +31,7 @@ type BatchOutput struct {
 	// Input contains the records to append.
 	Input      *AppendInput
 	recordMeta []recordMeta
+	barrier    chan<- error
 }
 
 type recordMeta struct {
@@ -126,9 +128,9 @@ func (b *Batcher) Add(record AppendRecord, resultCh chan *producerOutcome) error
 	return nil
 }
 
-func (b *Batcher) flushLocked() {
+func (b *Batcher) flushLocked() error {
 	if len(b.buffer) == 0 {
-		return
+		return nil
 	}
 
 	records := make([]AppendRecord, len(b.buffer))
@@ -161,8 +163,12 @@ func (b *Batcher) flushLocked() {
 		if b.nextMatchSeqNum != nil {
 			*b.nextMatchSeqNum += uint64(len(records))
 		}
+		return nil
 	case <-b.ctx.Done():
 		err := b.ctx.Err()
+		if b.closeErr == nil {
+			b.closeErr = err
+		}
 		for _, m := range meta {
 			select {
 			case m.resultCh <- &producerOutcome{err: err}:
@@ -170,6 +176,32 @@ func (b *Batcher) flushLocked() {
 			default:
 			}
 		}
+		return err
+	}
+}
+
+// flushBarrier atomically emits the current partial batch and orders a
+// producer barrier after it. Holding mu across both sends prevents a
+// concurrent Add from landing between the batch and its barrier.
+func (b *Batcher) flushBarrier(barrier chan<- error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.closed {
+		return ErrSessionClosed
+	}
+	if err := b.flushLocked(); err != nil {
+		return err
+	}
+	if err := b.ctx.Err(); err != nil {
+		return err
+	}
+
+	select {
+	case b.batchesCh <- &BatchOutput{barrier: barrier}:
+		return nil
+	case <-b.ctx.Done():
+		return b.ctx.Err()
 	}
 }
 
@@ -191,28 +223,36 @@ func (b *Batcher) Batches() <-chan *BatchOutput {
 	return b.batchesCh
 }
 
-// Flush forces the current batch to be emitted immediately.
+// Flush forces the current batch to be emitted immediately. It does not wait
+// for the batch to become durable; use [Producer.Flush] for a durable barrier.
 func (b *Batcher) Flush() {
 	b.mu.Lock()
 	b.flushLocked()
 	b.mu.Unlock()
 }
 
-// Flushes any remaining records and closes the batcher.
-func (b *Batcher) Close() {
+func (b *Batcher) close() error {
 	b.mu.Lock()
 	if b.closed {
+		err := b.closeErr
 		b.mu.Unlock()
-		return
+		return err
 	}
 	b.closed = true
-	b.flushLocked()
+	_ = b.flushLocked()
 	if b.timer != nil {
 		b.timer.Stop()
 		b.timer = nil
 	}
+	err := b.closeErr
 	b.mu.Unlock()
 
 	b.cancel()
 	close(b.batchesCh)
+	return err
+}
+
+// Flushes any remaining records and closes the batcher.
+func (b *Batcher) Close() {
+	_ = b.close()
 }
