@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.21.0] - 2026-08-17
+
+### Features
+
+- Add durable producer flush ([#349](https://github.com/s2-streamstore/s2-sdk-go/issues/349))
+
 ## [v0.20.0] - 2026-07-22
 
 ### Features
@@ -15,6 +21,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Update s2-specs to 973e0d9 ([#347](https://github.com/s2-streamstore/s2-sdk-go/issues/347))
+- *(release)* V0.20.0 ([#348](https://github.com/s2-streamstore/s2-sdk-go/issues/348))
 
 ## [v0.19.1] - 2026-07-09
 
