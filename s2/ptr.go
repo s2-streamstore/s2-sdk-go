@@ -18,17 +18,7 @@ func Int32(v int32) *int32 {
 }
 
 // Returns a pointer to v.
-func Uint32(v uint32) *uint32 {
-	return &v
-}
-
-// Returns a pointer to v.
 func String(v string) *string {
-	return &v
-}
-
-// Returns a pointer to v.
-func Bool(v bool) *bool {
 	return &v
 }
 
