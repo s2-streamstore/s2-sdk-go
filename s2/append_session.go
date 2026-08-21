@@ -440,10 +440,21 @@ func (r *AppendSession) submitInflightBatches() {
 }
 
 func (r *AppendSession) readAcks(session *transportAppendSession) {
+	// Both channels are closed when the response ends, and select picks a
+	// ready case at random, so either one can win. Reconnect from a single
+	// exit point rather than from whichever branch happens to observe it.
+	endedCleanly := false
+	defer func() {
+		if endedCleanly && session.ReconnectAdvised() {
+			r.handleReconnectAdvice(session)
+		}
+	}()
+
 	for {
 		select {
 		case ack, ok := <-session.acksCh:
 			if !ok {
+				endedCleanly = true
 				return
 			}
 			r.handleAck(session, ack)
@@ -456,14 +467,12 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 
 		case err, ok := <-session.errorsCh:
 			if !ok {
-				// errorsCh closes before acksCh (defer order), so
-				// drain any buffered ACKs before returning.
+				// A closed channel yields buffered values first, so this
+				// only fires once every ack has been handled.
 				for ack := range session.acksCh {
 					r.handleAck(session, ack)
 				}
-				if session.ReconnectAdvised() {
-					r.handleReconnectAdvice(session)
-				}
+				endedCleanly = true
 				return
 			}
 			r.handleSessionError(session, err)

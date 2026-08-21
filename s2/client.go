@@ -202,6 +202,23 @@ func (t *schemeAwareTransport) CloseIdleConnections() {
 }
 
 func createStreamingClient(connectionTimeout time.Duration) *http.Client {
+	// Each call builds an independent transport, so the pool can spread
+	// sessions over several connections rather than multiplexing them all
+	// onto one.
+	newTransport := func() http.RoundTripper {
+		return newStreamingTransport(connectionTimeout)
+	}
+
+	return &http.Client{
+		Transport: userAgentRoundTripper{
+			base:      newSpreadTransport(newTransport),
+			userAgent: defaultUserAgent(),
+		},
+		Timeout: 0, // No timeout for streaming
+	}
+}
+
+func newStreamingTransport(connectionTimeout time.Duration) http.RoundTripper {
 	dialer := &net.Dialer{
 		Timeout: connectionTimeout,
 	}
@@ -241,13 +258,7 @@ func createStreamingClient(connectionTimeout time.Duration) *http.Client {
 		},
 	}
 
-	return &http.Client{
-		Transport: userAgentRoundTripper{
-			base:      &schemeAwareTransport{https: httpsTransport, h2c: h2cTransport},
-			userAgent: defaultUserAgent(),
-		},
-		Timeout: 0, // No timeout for streaming
-	}
+	return &schemeAwareTransport{https: httpsTransport, h2c: h2cTransport}
 }
 
 // Create a client using configuration from environment variables.
