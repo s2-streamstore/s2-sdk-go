@@ -224,7 +224,7 @@ func (r *streamReader) run() {
 
 	opts := r.buildAttemptOptions(0)
 	consecutiveFailures := 0
-	var streak adviceStreak
+	var advised advisedReconnects
 
 	for {
 		if r.limitsReached() {
@@ -252,12 +252,14 @@ func (r *streamReader) run() {
 				logInfo(r.logger, "s2 read session limits reached on server advice")
 				return
 			}
-			// A pooled connection would land the next attempt back on the
-			// draining server, so drop it before reconnecting.
+			// A pooled connection would land back on the draining server.
 			r.streamClient.rotateTransport()
 			r.caughtUp.setBehind()
 
-			delay := streak.record(time.Now())
+			// A drain keeps serving batches, so pace on how quickly advice
+			// returns rather than on progress.
+
+			delay := advised.record(time.Now())
 			logInfo(r.logger, "s2 read session reconnecting on server advice",
 				"stream", string(r.streamClient.name),
 				"delay", delay)

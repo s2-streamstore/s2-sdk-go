@@ -44,10 +44,10 @@ type AppendSession struct {
 	lastAckedPosition *AppendAck
 	stateMu           sync.RWMutex
 
-	wakeup         chan struct{}
-	currentAttempt int
-	retryAt        time.Time
-	adviceStreak   adviceStreak
+	wakeup            chan struct{}
+	currentAttempt    int
+	retryAt           time.Time
+	advisedReconnects advisedReconnects
 }
 
 // Creates an append session that guarantees ordering of submissions.
@@ -596,15 +596,14 @@ func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
 	r.sessionMu.Unlock()
 	r.closeSessionIfUnused(session)
 
-	// A pooled connection would land the next session back on the draining
-	// server, so drop it before reconnecting.
+	// A pooled connection could land back on the draining server.
 	r.streamClient.rotateTransport()
 
-	// An outgoing session and its replacement can both be advised, so the
-	// streak is shared state.
+	// Throttle by how rapidly reconnect advice repeats. An outgoing session
+	// and its replacement can both be advised, so the count is shared state.
 	now := time.Now()
 	r.stateMu.Lock()
-	delay := r.adviceStreak.record(now)
+	delay := r.advisedReconnects.record(now)
 	if delay > 0 {
 		r.retryAt = now.Add(delay)
 	}
