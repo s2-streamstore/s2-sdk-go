@@ -258,7 +258,6 @@ func (r *streamReader) run() {
 
 			// A drain keeps serving batches, so pace on how quickly advice
 			// returns rather than on progress.
-
 			delay := advised.record(time.Now())
 			logInfo(r.logger, "s2 read session reconnecting on server advice",
 				"stream", string(r.streamClient.name),
