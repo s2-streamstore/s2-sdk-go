@@ -280,15 +280,6 @@ func CreateFrame(data []byte, terminal bool, compression CompressionType) []byte
 	return CreateFrameWithStatus(data, terminal, compression, 0)
 }
 
-// CreateRegularFrameReconnectAdvised builds a regular frame carrying the
-// reconnect-advised flag. Only a server emits this; it is exported so tests
-// can drive the client's handover path.
-func CreateRegularFrameReconnectAdvised(data []byte, compression CompressionType) []byte {
-	frame := CreateFrame(data, false, compression)
-	frame[3] |= flagReconnectAdvised
-	return frame
-}
-
 func CreateFrameWithStatus(data []byte, terminal bool, compression CompressionType, statusCode int) []byte {
 	compressedData := data
 	actualCompression := CompressionNone
