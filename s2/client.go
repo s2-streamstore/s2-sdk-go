@@ -196,6 +196,11 @@ func (t *schemeAwareTransport) RoundTrip(req *http.Request) (*http.Response, err
 	return t.https.RoundTrip(req)
 }
 
+func (t *schemeAwareTransport) CloseIdleConnections() {
+	t.https.CloseIdleConnections()
+	t.h2c.CloseIdleConnections()
+}
+
 func createStreamingClient(connectionTimeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: connectionTimeout,

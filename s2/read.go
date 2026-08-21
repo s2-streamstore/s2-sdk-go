@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -128,6 +129,10 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 	return batch, nil
 }
 
+// errReconnectAdvised ends an attempt because the server asked the session to
+// move to a new connection. It is a planned handover, not a failure.
+var errReconnectAdvised = errors.New("reconnect advised")
+
 type readDelivery struct {
 	records      []SequencedRecord
 	caughtUpTail *StreamPosition
@@ -219,6 +224,7 @@ func (r *streamReader) run() {
 
 	opts := r.buildAttemptOptions(0)
 	consecutiveFailures := 0
+	var streak adviceStreak
 
 	for {
 		if r.limitsReached() {
@@ -239,6 +245,30 @@ func (r *streamReader) run() {
 		}
 		if ctxErr := r.ctx.Err(); ctxErr != nil {
 			return
+		}
+
+		if errors.Is(err, errReconnectAdvised) {
+			if r.limitsReached() {
+				logInfo(r.logger, "s2 read session limits reached on server advice")
+				return
+			}
+			// A pooled connection would land the next attempt back on the
+			// draining server, so drop it before reconnecting.
+			r.streamClient.rotateTransport()
+			r.caughtUp.setBehind()
+
+			delay := streak.record(time.Now())
+			logInfo(r.logger, "s2 read session reconnecting on server advice",
+				"stream", string(r.streamClient.name),
+				"delay", delay)
+
+			opts = r.buildAttemptOptions(delay)
+			if delay > 0 {
+				if err := waitForRetryBackoff(r.ctx, delay); err != nil {
+					return
+				}
+			}
+			continue
 		}
 
 		madeProgress := r.recordsRead > recordsBefore
@@ -576,6 +606,12 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			if err := r.sendDelivery(ctx, delivery); err != nil {
 				return err
 			}
+		}
+
+		// Checked after delivery so the resume position already accounts for
+		// this batch.
+		if fr.frame.ReconnectAdvised {
+			return errReconnectAdvised
 		}
 
 		tailTimer.Reset(tailWatchdogTimeout)

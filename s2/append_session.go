@@ -47,6 +47,7 @@ type AppendSession struct {
 	wakeup         chan struct{}
 	currentAttempt int
 	retryAt        time.Time
+	adviceStreak   adviceStreak
 }
 
 // Creates an append session that guarantees ordering of submissions.
@@ -403,6 +404,12 @@ func (r *AppendSession) submitInflightBatches() {
 		return
 	}
 
+	// The request body is already ending on an advised session; hold new
+	// entries back for the connection that replaces it.
+	if session.ReconnectAdvised() {
+		return
+	}
+
 	r.inflightMu.Lock()
 	entries := make([]*inflightEntry, len(r.inflightQueue))
 	copy(entries, r.inflightQueue)
@@ -440,6 +447,12 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 				return
 			}
 			r.handleAck(session, ack)
+			if session.ReconnectAdvised() {
+				// Stop feeding a draining server. Ending the request body
+				// makes it acknowledge what it already took and then close
+				// the response, so the handover loses nothing.
+				session.halfClose()
+			}
 
 		case err, ok := <-session.errorsCh:
 			if !ok {
@@ -447,6 +460,9 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 				// drain any buffered ACKs before returning.
 				for ack := range session.acksCh {
 					r.handleAck(session, ack)
+				}
+				if session.ReconnectAdvised() {
+					r.handleReconnectAdvice(session)
 				}
 				return
 			}
@@ -549,6 +565,73 @@ func (r *AppendSession) validateAckLocked(entry *inflightEntry, ack *AppendAck) 
 	}
 
 	return nil
+}
+
+// handleReconnectAdvice moves the session to a fresh connection after the
+// server asked it to leave. Advice is a planned handover rather than a
+// failure, so it does not consume the retry budget.
+func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
+	r.closedMu.RLock()
+	closed := r.closed
+	r.closedMu.RUnlock()
+	if closed {
+		return
+	}
+
+	// Every input reaches the server ahead of the request's end, so a clean
+	// end with entries still unacknowledged is a truncated response. Those
+	// entries may have landed, so let the error path apply the retry policy.
+	if r.hasUnackedOnSession(session) {
+		r.handleSessionError(session, fmt.Errorf("append session ended before acknowledging all appends"))
+		return
+	}
+
+	r.sessionMu.Lock()
+	if r.currentSession != session {
+		r.sessionMu.Unlock()
+		r.closeSessionIfUnused(session)
+		return
+	}
+	r.currentSession = nil
+	r.sessionMu.Unlock()
+	r.closeSessionIfUnused(session)
+
+	// A pooled connection would land the next session back on the draining
+	// server, so drop it before reconnecting.
+	r.streamClient.rotateTransport()
+
+	// An outgoing session and its replacement can both be advised, so the
+	// streak is shared state.
+	now := time.Now()
+	r.stateMu.Lock()
+	delay := r.adviceStreak.record(now)
+	if delay > 0 {
+		r.retryAt = now.Add(delay)
+	}
+	r.stateMu.Unlock()
+
+	logInfo(r.streamClient.logger, "append session reconnecting on server advice",
+		"stream", string(r.streamClient.name),
+		"delay", delay)
+
+	r.wakeupPump()
+}
+
+// hasUnackedOnSession reports whether any entry was written to the session but
+// never acknowledged.
+func (r *AppendSession) hasUnackedOnSession(session *transportAppendSession) bool {
+	r.inflightMu.RLock()
+	defer r.inflightMu.RUnlock()
+
+	for _, entry := range r.inflightQueue {
+		if atomic.LoadInt32(&entry.completed) != 0 {
+			continue
+		}
+		if entry.wasSentOnSessionLocked(session) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *AppendSession) handleSessionError(failedSession *transportAppendSession, err error) {

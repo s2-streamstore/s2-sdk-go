@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 
 	pb "github.com/s2-streamstore/s2-sdk-go/generated"
 	framing "github.com/s2-streamstore/s2-sdk-go/internal/framing"
@@ -82,6 +83,9 @@ type transportAppendSession struct {
 	requestWriter io.WriteCloser
 	pendingWrites int
 	terminalErr   error
+	// Set once the server flags a frame as reconnect-advised.
+	reconnectAdvised atomic.Bool
+	halfCloseOnce    sync.Once
 }
 
 func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppendSession, error) {
@@ -267,6 +271,28 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 	return nil
 }
 
+// ReconnectAdvised reports whether the server asked for this session to move
+// to a new connection.
+func (p *transportAppendSession) ReconnectAdvised() bool {
+	return p.reconnectAdvised.Load()
+}
+
+// halfClose ends the request body so the server acknowledges everything it
+// accepted and then closes the response cleanly. The session stays readable
+// until that end arrives.
+func (p *transportAppendSession) halfClose() {
+	p.halfCloseOnce.Do(func() {
+		p.mu.Lock()
+		requestWriter := p.requestWriter
+		p.requestWriter = nil
+		p.mu.Unlock()
+
+		if requestWriter != nil {
+			requestWriter.Close()
+		}
+	})
+}
+
 func (p *transportAppendSession) markWriteSignalled() {
 	p.mu.Lock()
 	p.pendingWrites++
@@ -353,6 +379,10 @@ func (p *transportAppendSession) handleFrame(frame *framing.S2SFrame) error {
 			return decodeAPIError(*frame.StatusCode, body)
 		}
 		return nil
+	}
+
+	if frame.ReconnectAdvised {
+		p.reconnectAdvised.Store(true)
 	}
 
 	var pbAck pb.AppendAck
