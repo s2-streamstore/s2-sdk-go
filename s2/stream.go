@@ -66,18 +66,6 @@ func (s *StreamClient) getHTTPClient() *http.Client {
 	return s.basinClient.client.streamingClient
 }
 
-// rotateTransport drops idle pooled connections so the next session dials
-// afresh instead of reusing one pinned to a draining server. Connections still
-// carrying streams are left alone and close once those finish.
-func (s *StreamClient) rotateTransport() {
-	if s.basinClient == nil || s.basinClient.client == nil {
-		return
-	}
-	if client := s.basinClient.client.streamingClient; client != nil {
-		client.CloseIdleConnections()
-	}
-}
-
 // Check the tail of the stream.
 // Returns the next sequence number and timestamp to be assigned (tail).
 func (s *StreamClient) CheckTail(ctx context.Context) (*TailResponse, error) {

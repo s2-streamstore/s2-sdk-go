@@ -85,7 +85,9 @@ type transportAppendSession struct {
 	terminalErr   error
 	// Set once the server flags a frame as reconnect-advised.
 	reconnectAdvised atomic.Bool
-	halfCloseOnce    sync.Once
+	// Poisons the pooled entry this session's connection came from.
+	poisonCapture *poisonCapture
+	halfCloseOnce sync.Once
 }
 
 func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppendSession, error) {
@@ -120,6 +122,9 @@ func (p *transportAppendSession) start(ctx context.Context) error {
 	reqURL := p.streamClient.basinClient.baseURL + path
 
 	pipeReader, pipeWriter := io.Pipe()
+
+	ctx, capture := capturePoisonHandle(ctx)
+	p.poisonCapture = capture
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, pipeReader)
 	if err != nil {
@@ -381,8 +386,11 @@ func (p *transportAppendSession) handleFrame(frame *framing.S2SFrame) error {
 		return nil
 	}
 
-	if frame.ReconnectAdvised {
-		p.reconnectAdvised.Store(true)
+	if frame.ReconnectAdvised && !p.reconnectAdvised.Swap(true) {
+		// The first advice poisons the pooled entry immediately, so no new
+		// session reuses a connection pinned to the draining server, whatever
+		// this session goes on to do.
+		p.poisonCapture.poison()
 	}
 
 	var pbAck pb.AppendAck

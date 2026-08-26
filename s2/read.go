@@ -252,8 +252,8 @@ func (r *streamReader) run() {
 				logInfo(r.logger, "s2 read session limits reached on server advice")
 				return
 			}
-			// A pooled connection would land back on the draining server.
-			r.streamClient.rotateTransport()
+			// The advised connection's pooled entry was already poisoned when
+			// the advice was decoded, so reconnecting dials afresh.
 			r.caughtUp.setBehind()
 
 			// A drain keeps serving batches, so pace on how quickly advice
@@ -447,6 +447,8 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 	}
 	reqURL := r.streamClient.basinClient.baseURL + path
 
+	ctx, capture := capturePoisonHandle(ctx)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -610,8 +612,10 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		}
 
 		// Checked after delivery so the resume position already accounts for
-		// this batch.
+		// this batch. Poisoning here rather than on reconnect keeps the pool
+		// clean whatever the session goes on to do.
 		if fr.frame.ReconnectAdvised {
+			capture.poison()
 			return errReconnectAdvised
 		}
 

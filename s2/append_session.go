@@ -605,8 +605,8 @@ func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
 	r.sessionMu.Unlock()
 	r.closeSessionIfUnused(session)
 
-	// A pooled connection could land back on the draining server.
-	r.streamClient.rotateTransport()
+	// The advised connection's pooled entry was already poisoned when the
+	// advice was decoded, so reconnecting dials afresh.
 
 	// Throttle by how rapidly reconnect advice repeats. An outgoing session
 	// and its replacement can both be advised, so the count is shared state.
