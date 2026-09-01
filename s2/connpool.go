@@ -9,16 +9,9 @@ import (
 )
 
 // Sessions allowed to share one connection before another is opened.
-//
-// HTTP/2 would happily carry every session of a client on a single
-// connection, which pins them all to one server: a rollout or a failure there
-// disrupts the client's entire workload at once, and they all reconnect in the
-// same instant. Spreading them bounds that blast radius.
 const maxSessionsPerConnection = 4
 
-// spreadTransport hands streaming requests to one of several transports per
-// host, each of which keeps its own connections, so long-lived sessions do not
-// all pile onto the same one.
+// spreadTransport spreads streaming requests across transports per host.
 type spreadTransport struct {
 	newTransport func() http.RoundTripper
 
@@ -38,8 +31,6 @@ func newSpreadTransport(newTransport func() http.RoundTripper) *spreadTransport 
 	}
 }
 
-// checkout returns the host's first transport with room, adding one if they
-// are all at capacity.
 func (t *spreadTransport) checkout(host string) *spreadEntry {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -56,10 +47,7 @@ func (t *spreadTransport) checkout(host string) *spreadEntry {
 	return entry
 }
 
-// poison drops the entry from the host's pool so no new session reuses its
-// connections, which are pinned to a draining server. Entries for servers that
-// are not going away stay pooled, sessions already on the entry keep their
-// connections, and poisoning the same entry again is a no-op.
+// poison removes the target from the pool while existing sessions keep it alive.
 func (t *spreadTransport) poison(host string, target *spreadEntry) {
 	t.mu.Lock()
 	entries := t.hosts[host]
@@ -118,8 +106,7 @@ func closeIdleConnections(rt http.RoundTripper) {
 	}
 }
 
-// poisonHandle grants its holder the ability to poison the pooled entry a
-// streaming response was served on.
+// poisonHandle identifies the pooled entry that served a streaming response.
 type poisonHandle struct {
 	pool  *spreadTransport
 	host  string
@@ -128,23 +115,15 @@ type poisonHandle struct {
 
 type poisonCaptureKey struct{}
 
-// capturePoisonHandle returns a context that captures, for the streaming
-// request made with it, the handle for poisoning the pooled entry the response
-// is served on.
 func capturePoisonHandle(ctx context.Context) (context.Context, *poisonCapture) {
 	capture := &poisonCapture{}
 	return context.WithValue(ctx, poisonCaptureKey{}, capture), capture
 }
 
-// poisonCapture receives a [poisonHandle] once the transport serves the
-// request it was captured with.
 type poisonCapture struct {
 	handle atomic.Pointer[poisonHandle]
 }
 
-// poison drops the captured pooled entry, if one was captured, so the next
-// session dials afresh instead of reusing a connection pinned to a draining
-// server.
 func (c *poisonCapture) poison() {
 	if c == nil {
 		return
@@ -154,7 +133,6 @@ func (c *poisonCapture) poison() {
 	}
 }
 
-// releaseOnClose frees the transport slot once the caller is done reading.
 type releaseOnClose struct {
 	io.ReadCloser
 	entry *spreadEntry

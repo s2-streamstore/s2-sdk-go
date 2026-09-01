@@ -73,22 +73,20 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 }
 
 type transportAppendSession struct {
-	streamClient  *StreamClient
-	acksCh        chan *AppendAck
-	errorsCh      chan error
-	closed        chan struct{}
-	closeOnce     sync.Once
-	mu            sync.Mutex
-	conn          *http.Response
-	requestWriter io.WriteCloser
-	pendingWrites int
-	terminalErr   error
-	// Set once the server flags a frame as reconnect-advised.
+	streamClient      *StreamClient
+	acksCh            chan *AppendAck
+	errorsCh          chan error
+	closed            chan struct{}
+	closeOnce         sync.Once
+	mu                sync.Mutex
+	conn              *http.Response
+	requestWriter     io.WriteCloser
+	pendingWrites     int
+	terminalErr       error
 	reconnectAdvised  atomic.Bool
 	reconnectDeclined atomic.Bool
-	// Poisons the pooled entry this session's connection came from.
-	poisonCapture *poisonCapture
-	halfCloseOnce sync.Once
+	poisonCapture     *poisonCapture
+	halfCloseOnce     sync.Once
 }
 
 func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppendSession, error) {
@@ -280,8 +278,6 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 	return nil
 }
 
-// ReconnectAdvised reports whether the server asked for this session to move
-// to a new connection.
 func (p *transportAppendSession) ReconnectAdvised() bool {
 	return p.reconnectAdvised.Load()
 }
@@ -294,9 +290,7 @@ func (p *transportAppendSession) declineReconnect() {
 	p.reconnectDeclined.Store(true)
 }
 
-// halfClose ends the request body so the server acknowledges everything it
-// accepted and then closes the response cleanly. The session stays readable
-// until that end arrives.
+// halfClose ends input while acknowledgements remain readable.
 func (p *transportAppendSession) halfClose() {
 	p.halfCloseOnce.Do(func() {
 		p.mu.Lock()
@@ -403,9 +397,6 @@ func (p *transportAppendSession) handleFrame(frame *framing.S2SFrame) error {
 	}
 
 	if frame.ReconnectAdvised && !p.reconnectAdvised.Swap(true) {
-		// The first advice poisons the pooled entry immediately, so no new
-		// session reuses a connection pinned to the draining server, whatever
-		// this session goes on to do.
 		p.poisonCapture.poison()
 	}
 

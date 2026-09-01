@@ -58,8 +58,7 @@ type S2SFrame struct {
 	Compression CompressionType
 	StatusCode  *int // Only for terminal frames
 	Body        []byte
-	// ReconnectAdvised is set when the server asks the client to move this
-	// session to a new connection. Regular frames only.
+	// ReconnectAdvised asks the client to move this session to a new connection.
 	ReconnectAdvised bool
 }
 

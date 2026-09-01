@@ -7,14 +7,14 @@ import (
 )
 
 const (
-	// Advised reconnects to attempt before staying on the connection.
+	// Advised reconnects to attempt before staying on.
 	maxAdvisedReconnects = 1
 
-	// If no reconnect advice arrives for this long, the consecutive count resets.
+	// Gap after which the attempt count resets.
 	advisedReconnectIdle = 60 * time.Second
 )
 
-// advisedReconnects counts recent reconnects driven by server advice.
+// advisedReconnects tracks advised reconnects attempted lately.
 type advisedReconnects struct {
 	count int
 	last  time.Time
@@ -28,8 +28,7 @@ func (a *advisedReconnects) record(now time.Time) {
 	a.count++
 }
 
-// shouldReconnect reports whether to act on advice or stay until the server
-// ends the connection.
+// shouldReconnect reports whether to act on advice or stay until the server ends the connection.
 func (a *advisedReconnects) shouldReconnect(now time.Time) bool {
 	return !a.isRecent(now) || a.count < maxAdvisedReconnects
 }

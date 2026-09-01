@@ -404,8 +404,6 @@ func (r *AppendSession) submitInflightBatches() {
 		return
 	}
 
-	// The request body is already ending on an advised session; hold new
-	// entries back for the connection that replaces it.
 	if session.holdInputsForReconnect() {
 		return
 	}
@@ -464,9 +462,8 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 				adviceHandled = true
 				if r.shouldReconnectOnAdvice() {
 					reconnectAccepted = true
-					// Stop feeding a draining server. Ending the request body
-					// makes it acknowledge what it already took and then close
-					// the response, so the handover loses nothing.
+					// Half-close so the server acknowledges accepted appends
+					// and then ends the response.
 					session.halfClose()
 				} else {
 					session.declineReconnect()
@@ -591,9 +588,7 @@ func (r *AppendSession) validateAckLocked(entry *inflightEntry, ack *AppendAck) 
 	return nil
 }
 
-// handleReconnectAdvice moves the session to a fresh connection after the
-// server asked it to leave. Advice is a planned handover rather than a
-// failure, so it does not consume the retry budget.
+// handleReconnectAdvice reconnects without consuming the retry budget.
 func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
 	r.closedMu.RLock()
 	closed := r.closed
@@ -602,9 +597,8 @@ func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
 		return
 	}
 
-	// Every input reaches the server ahead of the request's end, so a clean
-	// end with entries still unacknowledged is a truncated response. Those
-	// entries may have landed, so let the error path apply the retry policy.
+	// A clean end with unacknowledged appends is a truncated response, so the
+	// ordinary retry policy decides whether to resend them.
 	if r.hasUnackedOnSession(session) {
 		r.handleSessionError(session, fmt.Errorf("append session ended before acknowledging all appends"))
 		return
@@ -620,6 +614,8 @@ func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
 	r.sessionMu.Unlock()
 	r.closeSessionIfUnused(session)
 
+	// The advised connection was already poisoned when the advice was first
+	// decoded, so reconnecting dials a fresh one.
 	r.stateMu.Lock()
 	r.advisedReconnects.record(time.Now())
 	advisedReconnects := r.advisedReconnects.count
@@ -632,8 +628,6 @@ func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
 	r.wakeupPump()
 }
 
-// hasUnackedOnSession reports whether any entry was written to the session but
-// never acknowledged.
 func (r *AppendSession) hasUnackedOnSession(session *transportAppendSession) bool {
 	r.inflightMu.RLock()
 	defer r.inflightMu.RUnlock()

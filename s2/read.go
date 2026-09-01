@@ -129,8 +129,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 	return batch, nil
 }
 
-// errReconnectAdvised ends an attempt because the server asked the session to
-// move to a new connection. It is a planned handover, not a failure.
+// errReconnectAdvised is a planned handover, not a failure.
 var errReconnectAdvised = errors.New("reconnect advised")
 
 type readDelivery struct {
@@ -627,9 +626,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			}
 		}
 
-		// Checked after delivery so the resume position already accounts for
-		// this batch. Poisoning here rather than on reconnect keeps the pool
-		// clean whatever the session goes on to do.
+		// Check after delivery so the resume position accounts for this batch.
 		if fr.frame.ReconnectAdvised && !declinedAdvice {
 			capture.poison()
 			if r.advisedReconnects.shouldReconnect(time.Now()) {
