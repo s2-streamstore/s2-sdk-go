@@ -113,6 +113,10 @@ func (r *AppendSession) submitOwned(input *AppendInput) (*SubmitFuture, error) {
 	return r.createSubmitFuture(input, size), nil
 }
 
+func (r *AppendSession) producerMaxInflightBytes() int64 {
+	return r.capacity.maxBytes
+}
+
 func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *SubmitFuture {
 	ticketCh := make(chan *BatchSubmitTicket, 1)
 	errCh := make(chan error, 1)
@@ -535,6 +539,7 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 
 	session.markAckReceived()
 
+	r.inflightQueue[0] = nil
 	r.inflightQueue = r.inflightQueue[1:]
 	sessionsToClose := r.releaseEntrySessionsLocked(entry)
 

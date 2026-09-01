@@ -10,15 +10,19 @@ import (
 
 // Producer provides per-record append semantics on top of a batched AppendSession.
 //   - submit(record) returns a [RecordSubmitFuture] that resolves once the record
-//     has been accepted (written to the batcher). Backpressure is applied
-//     automatically via the batcher when the [AppendSession] is at capacity.
+//     has been accepted (written to the batcher). Each Producer applies the
+//     AppendSession byte limit before batching and holds it until acknowledgment.
 //   - ticket.Ack() returns an IndexedAppendAck that resolves once the record is durable.
 //   - Flush() establishes a reusable durability boundary without closing the producer.
 type Producer struct {
 	batcher      *Batcher
 	session      appendSessionAPI
+	capacity     *capacityTracker
 	ctx          context.Context
 	cancel       context.CancelFunc
+	submitCtx    context.Context
+	cancelSubmit context.CancelCauseFunc
+	submitMu     sync.Mutex
 	ackWG        sync.WaitGroup
 	consumerDone chan struct{}
 	errMu        sync.RWMutex
@@ -34,7 +38,65 @@ type appendSessionAPI interface {
 	Close() error
 }
 
-// Create a new [Producer].
+type producerCapacityProvider interface {
+	producerMaxInflightBytes() int64
+}
+
+type producerPermit struct {
+	capacity *capacityTracker
+	bytes    atomic.Int64
+}
+
+func newProducerPermit(capacity *capacityTracker, bytes int64) *producerPermit {
+	permit := &producerPermit{capacity: capacity}
+	permit.bytes.Store(bytes)
+	return permit
+}
+
+func (p *producerPermit) take() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.bytes.Swap(0)
+}
+
+func (p *producerPermit) release() {
+	if bytes := p.take(); bytes > 0 {
+		p.capacity.release(bytes)
+	}
+}
+
+func releaseProducerPermits(meta []recordMeta) {
+	// A batch can contain up to 1,000 records. Return its capacity with one
+	// tracker wakeup instead of broadcasting once per record.
+	var capacity *capacityTracker
+	var bytes int64
+	release := func() {
+		if capacity != nil && bytes > 0 {
+			capacity.release(bytes)
+		}
+	}
+
+	for _, record := range meta {
+		if record.permit == nil {
+			continue
+		}
+		reserved := record.permit.take()
+		if reserved == 0 {
+			continue
+		}
+		if capacity != nil && capacity != record.permit.capacity {
+			release()
+			bytes = 0
+		}
+		capacity = record.permit.capacity
+		bytes += reserved
+	}
+	release()
+}
+
+// Create a new [Producer]. Each Producer independently limits unacknowledged
+// payload to the supplied session's configured MaxInflightBytes.
 func NewProducer(ctx context.Context, batcher *Batcher, session *AppendSession) *Producer {
 	return newProducerWithSession(ctx, batcher, session)
 }
@@ -44,15 +106,35 @@ func newProducerWithSession(ctx context.Context, batcher *Batcher, session appen
 		ctx = context.Background()
 	}
 	prodCtx, cancel := context.WithCancel(ctx)
+	submitCtx, cancelSubmit := context.WithCancelCause(prodCtx)
+	maxInflightBytes := int64(defaultMaxInflightBytes)
+	if provider, ok := session.(producerCapacityProvider); ok {
+		maxInflightBytes = provider.producerMaxInflightBytes()
+	}
 
 	p := &Producer{
 		batcher:      batcher,
 		session:      session,
+		capacity:     newCapacityTracker(maxInflightBytes, 0),
 		ctx:          prodCtx,
 		cancel:       cancel,
+		submitCtx:    submitCtx,
+		cancelSubmit: cancelSubmit,
 		consumerDone: make(chan struct{}),
 		closeDone:    make(chan struct{}),
 	}
+	context.AfterFunc(batcher.ctx, func() {
+		cause := batcher.shutdownCause()
+		cancelSubmit(cause)
+		if !errors.Is(cause, ErrSessionClosed) {
+			p.recordTerminalError(cause)
+		}
+	})
+	context.AfterFunc(prodCtx, func() {
+		if !p.closing.Load() {
+			p.recordTerminalError(prodCtx.Err())
+		}
+	})
 
 	go p.consumeBatches()
 
@@ -73,10 +155,48 @@ func (p *Producer) Submit(record AppendRecord) (*RecordSubmitFuture, error) {
 		return nil, p.recordTerminalError(err)
 	}
 
+	recordBytes := MeteredPayloadBytes(record)
+	if recordBytes > p.batcher.opts.MaxMeteredBytes {
+		return nil, &S2Error{Message: "record exceeds max batch bytes"}
+	}
+
+	p.submitMu.Lock()
+	defer p.submitMu.Unlock()
+
+	reserved, err := p.capacity.tryReserve(p.submitCtx, int64(recordBytes))
+	if err != nil {
+		return nil, p.mapSubmitError(err)
+	}
+	if !reserved {
+		// Capacity can be held by the current partial batch. Flush it before
+		// waiting so those records can reach the session and free their permits.
+		if err := p.batcher.flushForBackpressure(); err != nil {
+			return nil, p.mapSubmitError(err)
+		}
+		if err := p.capacity.reserve(p.submitCtx, int64(recordBytes)); err != nil {
+			return nil, p.mapSubmitError(err)
+		}
+	}
+	permit := newProducerPermit(p.capacity, int64(recordBytes))
+
+	if err := p.terminalError(); err != nil {
+		permit.release()
+		return nil, err
+	}
+	if p.closing.Load() {
+		permit.release()
+		return nil, ErrSessionClosed
+	}
+	if err := p.ctx.Err(); err != nil {
+		permit.release()
+		return nil, p.recordTerminalError(err)
+	}
+
 	ticketCh := make(chan *RecordSubmitTicket, 1)
 	resultCh := make(chan *producerOutcome, 1)
 
-	if err := p.batcher.Add(record, resultCh); err != nil {
+	if err := p.batcher.addWithPermit(record, resultCh, permit); err != nil {
+		permit.release()
 		if errors.Is(err, ErrSessionClosed) {
 			if terminalErr := p.terminalError(); terminalErr != nil {
 				return nil, terminalErr
@@ -87,6 +207,22 @@ func (p *Producer) Submit(record AppendRecord) (*RecordSubmitFuture, error) {
 	ticketCh <- &RecordSubmitTicket{ackCh: resultCh}
 
 	return &RecordSubmitFuture{ticketCh: ticketCh}, nil
+}
+
+func (p *Producer) mapSubmitError(err error) error {
+	if terminalErr := p.terminalError(); terminalErr != nil {
+		return terminalErr
+	}
+	if p.closing.Load() {
+		return ErrSessionClosed
+	}
+	if cause := context.Cause(p.submitCtx); cause != nil {
+		if errors.Is(cause, ErrSessionClosed) {
+			return ErrSessionClosed
+		}
+		return p.recordTerminalError(cause)
+	}
+	return err
 }
 
 // Flush forces buffered records to be emitted and waits until every record
@@ -260,16 +396,13 @@ func (p *Producer) waitForBatchAck(ticket *BatchSubmitTicket) (*AppendAck, error
 }
 
 func (p *Producer) resolveBatchAck(meta []recordMeta, ack *AppendAck) {
+	releaseProducerPermits(meta)
 	for _, m := range meta {
 		indexedAck := &IndexedAppendAck{
 			batchAck: ack,
 			index:    uint64(m.index),
 		}
-		select {
-		case m.resultCh <- &producerOutcome{indexedAck: indexedAck}:
-			close(m.resultCh)
-		default:
-		}
+		m.resolve(&producerOutcome{indexedAck: indexedAck})
 	}
 }
 
@@ -283,12 +416,9 @@ func (p *Producer) resolveSynchronousBatchError(meta []recordMeta, err error) {
 }
 
 func (p *Producer) dispatchBatchError(meta []recordMeta, err error) {
+	releaseProducerPermits(meta)
 	for _, m := range meta {
-		select {
-		case m.resultCh <- &producerOutcome{err: err}:
-			close(m.resultCh)
-		default:
-		}
+		m.resolve(&producerOutcome{err: err})
 	}
 }
 
@@ -316,6 +446,8 @@ func (p *Producer) recordTerminalError(err error) error {
 		// makes later submissions fail. Canceling the producer context also
 		// releases every outstanding ticket wait so they receive this same cause.
 		p.closing.Store(true)
+		p.cancelSubmit(err)
+		p.capacity.Close()
 		p.cancel()
 		// This must be asynchronous because the consumer may need to drain a
 		// bounded batch channel for the batcher close to finish.
@@ -341,6 +473,8 @@ func (p *Producer) waitForTerminalDrain(ctx context.Context, terminalErr error) 
 func (p *Producer) Close() error {
 	p.closeOnce.Do(func() {
 		p.closing.Store(true)
+		p.cancelSubmit(ErrSessionClosed)
+		p.capacity.Close()
 		if err := p.batcher.close(); err != nil {
 			p.recordTerminalError(err)
 		}

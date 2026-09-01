@@ -37,6 +37,42 @@ type BatchOutput struct {
 type recordMeta struct {
 	index    int
 	resultCh chan *producerOutcome
+	permit   *producerPermit
+}
+
+func (m recordMeta) resolve(outcome *producerOutcome) {
+	if m.resultCh == nil {
+		return
+	}
+	select {
+	case m.resultCh <- outcome:
+		close(m.resultCh)
+	default:
+	}
+}
+
+func (b *Batcher) flushForBackpressure() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return ErrSessionClosed
+	}
+	return b.flushLocked()
+}
+
+func (b *Batcher) shutdownCause() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closeErr != nil {
+		return b.closeErr
+	}
+	if b.closed {
+		return ErrSessionClosed
+	}
+	if err := b.ctx.Err(); err != nil {
+		return err
+	}
+	return ErrSessionClosed
 }
 
 func applyBatchingDefaults(opts *BatchingOptions) *BatchingOptions {
@@ -88,6 +124,10 @@ func NewBatcher(ctx context.Context, opts *BatchingOptions) *Batcher {
 
 // Adds a record to the current batch.
 func (b *Batcher) Add(record AppendRecord, resultCh chan *producerOutcome) error {
+	return b.addWithPermit(record, resultCh, nil)
+}
+
+func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutcome, permit *producerPermit) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -112,7 +152,7 @@ func (b *Batcher) Add(record AppendRecord, resultCh chan *producerOutcome) error
 	b.bufferBytes += recordBytes
 
 	if resultCh != nil {
-		b.recordMeta = append(b.recordMeta, recordMeta{index: index, resultCh: resultCh})
+		b.recordMeta = append(b.recordMeta, recordMeta{index: index, resultCh: resultCh, permit: permit})
 	}
 
 	if len(b.buffer) >= b.opts.MaxRecords || b.bufferBytes >= b.opts.MaxMeteredBytes {
@@ -135,6 +175,7 @@ func (b *Batcher) flushLocked() error {
 
 	records := make([]AppendRecord, len(b.buffer))
 	copy(records, b.buffer)
+	clear(b.buffer)
 	b.buffer = b.buffer[:0]
 	b.bufferBytes = 0
 
@@ -169,12 +210,9 @@ func (b *Batcher) flushLocked() error {
 		if b.closeErr == nil {
 			b.closeErr = err
 		}
+		releaseProducerPermits(meta)
 		for _, m := range meta {
-			select {
-			case m.resultCh <- &producerOutcome{err: err}:
-				close(m.resultCh)
-			default:
-			}
+			m.resolve(&producerOutcome{err: err})
 		}
 		return err
 	}

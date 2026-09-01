@@ -32,27 +32,34 @@ func (c *capacityTracker) reserve(ctx context.Context, bytes int64) error {
 		ctx = context.Background()
 	}
 
-	if c.maxBytes > 0 && bytes > c.maxBytes {
-		return fmt.Errorf("batch size %d exceeds max inflight bytes %d", bytes, c.maxBytes)
+	reserved, err := c.tryReserve(ctx, bytes)
+	if err != nil || reserved {
+		return err
 	}
-	if c.maxItems != 0 && c.maxItems < 1 {
-		return fmt.Errorf("max inflight batches must be at least 1, got %d", c.maxItems)
-	}
-
-	waitDone := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			c.mu.Lock()
-			c.cond.Broadcast()
-			c.mu.Unlock()
-		case <-waitDone:
-		}
-	}()
-	defer close(waitDone)
 
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return ErrSessionClosed
+	}
+	if err := ctx.Err(); err != nil {
+		c.mu.Unlock()
+		return err
+	}
+	if c.hasCapacity(bytes) {
+		c.reserveLocked(bytes)
+		c.mu.Unlock()
+		return nil
+	}
+
+	stopCancellationWakeup := context.AfterFunc(ctx, func() {
+		c.mu.Lock()
+		c.cond.Broadcast()
+		c.mu.Unlock()
+	})
+	defer stopCancellationWakeup()
 	defer c.mu.Unlock()
+
 	for {
 		if c.closed {
 			return ErrSessionClosed
@@ -62,13 +69,45 @@ func (c *capacityTracker) reserve(ctx context.Context, bytes int64) error {
 		}
 
 		if c.hasCapacity(bytes) {
-			c.curBytes += bytes
-			if c.maxItems > 0 {
-				c.curItems++
-			}
+			c.reserveLocked(bytes)
 			return nil
 		}
 		c.cond.Wait()
+	}
+}
+
+// tryReserve reserves immediately when capacity is available and reports
+// false without waiting otherwise.
+func (c *capacityTracker) tryReserve(ctx context.Context, bytes int64) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if c.maxBytes > 0 && bytes > c.maxBytes {
+		return false, fmt.Errorf("batch size %d exceeds max inflight bytes %d", bytes, c.maxBytes)
+	}
+	if c.maxItems != 0 && c.maxItems < 1 {
+		return false, fmt.Errorf("max inflight batches must be at least 1, got %d", c.maxItems)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return false, ErrSessionClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !c.hasCapacity(bytes) {
+		return false, nil
+	}
+	c.reserveLocked(bytes)
+	return true, nil
+}
+
+func (c *capacityTracker) reserveLocked(bytes int64) {
+	c.curBytes += bytes
+	if c.maxItems > 0 {
+		c.curItems++
 	}
 }
 

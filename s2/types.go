@@ -596,7 +596,7 @@ type BatchingOptions struct {
 	MatchSeqNum *uint64
 	// Optional fencing token to enforce (remains static across batches)
 	FencingToken *string
-	// Buffer size for the internal batches channel (default: 16)
+	// Buffer size for the internal batches channel (default: 100)
 	ChannelBuffer int
 }
 
