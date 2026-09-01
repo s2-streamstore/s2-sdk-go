@@ -164,6 +164,8 @@ type streamReader struct {
 	bytesRead   uint64
 	retryConfig *RetryConfig
 	logger      *slog.Logger
+
+	advisedReconnects advisedReconnects
 }
 
 func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (*streamReader, error) {
@@ -224,7 +226,6 @@ func (r *streamReader) run() {
 
 	opts := r.buildAttemptOptions(0)
 	consecutiveFailures := 0
-	var advised advisedReconnects
 
 	for {
 		if r.limitsReached() {
@@ -256,19 +257,25 @@ func (r *streamReader) run() {
 			// the advice was decoded, so reconnecting dials afresh.
 			r.caughtUp.setBehind()
 
-			// A drain keeps serving batches, so pace on how quickly advice
-			// returns rather than on progress.
-			delay := advised.record(time.Now())
+			r.advisedReconnects.record(time.Now())
 			logInfo(r.logger, "s2 read session reconnecting on server advice",
 				"stream", string(r.streamClient.name),
-				"delay", delay)
+				"advised_reconnects", r.advisedReconnects.count)
 
-			opts = r.buildAttemptOptions(delay)
-			if delay > 0 {
-				if err := waitForRetryBackoff(r.ctx, delay); err != nil {
-					return
-				}
+			opts = r.buildAttemptOptions(0)
+			continue
+		}
+
+		if isServerDraining(err) {
+			if r.limitsReached() {
+				return
 			}
+			r.advisedReconnects.record(time.Now())
+			r.caughtUp.setBehind()
+			logInfo(r.logger, "s2 read session reconnecting while server drains",
+				"stream", string(r.streamClient.name),
+				"advised_reconnects", r.advisedReconnects.count)
+			opts = r.buildAttemptOptions(0)
 			continue
 		}
 
@@ -477,7 +484,11 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 	}
 	if resp.StatusCode >= 400 {
 		logError(r.logger, "s2 read session http status", "stream", string(r.streamClient.name), "status", resp.StatusCode)
-		return parseHTTPError(resp)
+		err := parseHTTPError(resp)
+		if isServerDraining(err) {
+			capture.poison()
+		}
+		return err
 	}
 
 	r.bodyMu.Lock()
@@ -488,6 +499,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 	frameReader := internalframing.NewFrameReader(resp.Body)
 	tailTimer := time.NewTimer(tailWatchdogTimeout)
 	defer tailTimer.Stop()
+	declinedAdvice := false
 
 	stopTailTimer := func() {
 		if !tailTimer.Stop() {
@@ -555,7 +567,11 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		if fr.frame.Terminal {
 			if fr.frame.StatusCode != nil && *fr.frame.StatusCode >= 400 {
 				logError(r.logger, "s2 read session terminal error", "stream", string(r.streamClient.name), "status", *fr.frame.StatusCode)
-				return decodeAPIError(*fr.frame.StatusCode, body)
+				err := decodeAPIError(*fr.frame.StatusCode, body)
+				if isServerDraining(err) {
+					capture.poison()
+				}
+				return err
 			}
 			logInfo(r.logger, "s2 read session terminal ok", "stream", string(r.streamClient.name), "status", fr.frame.StatusCode)
 			return nil
@@ -614,9 +630,12 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		// Checked after delivery so the resume position already accounts for
 		// this batch. Poisoning here rather than on reconnect keeps the pool
 		// clean whatever the session goes on to do.
-		if fr.frame.ReconnectAdvised {
+		if fr.frame.ReconnectAdvised && !declinedAdvice {
 			capture.poison()
-			return errReconnectAdvised
+			if r.advisedReconnects.shouldReconnect(time.Now()) {
+				return errReconnectAdvised
+			}
+			declinedAdvice = true
 		}
 
 		tailTimer.Reset(tailWatchdogTimeout)

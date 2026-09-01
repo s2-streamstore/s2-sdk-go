@@ -84,7 +84,8 @@ type transportAppendSession struct {
 	pendingWrites int
 	terminalErr   error
 	// Set once the server flags a frame as reconnect-advised.
-	reconnectAdvised atomic.Bool
+	reconnectAdvised  atomic.Bool
+	reconnectDeclined atomic.Bool
 	// Poisons the pooled entry this session's connection came from.
 	poisonCapture *poisonCapture
 	halfCloseOnce sync.Once
@@ -176,6 +177,9 @@ func (p *transportAppendSession) connectAndRead(req *http.Request, pipeWriter *i
 			apiErr = newBodyReadError(resp.StatusCode, body, readErr)
 		} else {
 			apiErr = decodeAPIError(resp.StatusCode, body)
+		}
+		if isServerDraining(apiErr) {
+			p.poisonCapture.poison()
 		}
 		pipeWriter.CloseWithError(apiErr)
 		p.reportError(apiErr)
@@ -282,6 +286,14 @@ func (p *transportAppendSession) ReconnectAdvised() bool {
 	return p.reconnectAdvised.Load()
 }
 
+func (p *transportAppendSession) holdInputsForReconnect() bool {
+	return p.ReconnectAdvised() && !p.reconnectDeclined.Load()
+}
+
+func (p *transportAppendSession) declineReconnect() {
+	p.reconnectDeclined.Store(true)
+}
+
 // halfClose ends the request body so the server acknowledges everything it
 // accepted and then closes the response cleanly. The session stays readable
 // until that end arrives.
@@ -381,7 +393,11 @@ func (p *transportAppendSession) handleFrame(frame *framing.S2SFrame) error {
 
 	if frame.Terminal {
 		if frame.StatusCode != nil && *frame.StatusCode >= 400 {
-			return decodeAPIError(*frame.StatusCode, body)
+			err := decodeAPIError(*frame.StatusCode, body)
+			if isServerDraining(err) {
+				p.poisonCapture.poison()
+			}
+			return err
 		}
 		return nil
 	}

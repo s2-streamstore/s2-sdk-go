@@ -406,7 +406,7 @@ func (r *AppendSession) submitInflightBatches() {
 
 	// The request body is already ending on an advised session; hold new
 	// entries back for the connection that replaces it.
-	if session.ReconnectAdvised() {
+	if session.holdInputsForReconnect() {
 		return
 	}
 
@@ -444,11 +444,13 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 	// ready case at random, so either one can win. Reconnect from a single
 	// exit point rather than from whichever branch happens to observe it.
 	endedCleanly := false
+	reconnectAccepted := false
 	defer func() {
-		if endedCleanly && session.ReconnectAdvised() {
+		if endedCleanly && reconnectAccepted {
 			r.handleReconnectAdvice(session)
 		}
 	}()
+	adviceHandled := false
 
 	for {
 		select {
@@ -458,11 +460,18 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 				return
 			}
 			r.handleAck(session, ack)
-			if session.ReconnectAdvised() {
-				// Stop feeding a draining server. Ending the request body
-				// makes it acknowledge what it already took and then close
-				// the response, so the handover loses nothing.
-				session.halfClose()
+			if session.ReconnectAdvised() && !adviceHandled {
+				adviceHandled = true
+				if r.shouldReconnectOnAdvice() {
+					reconnectAccepted = true
+					// Stop feeding a draining server. Ending the request body
+					// makes it acknowledge what it already took and then close
+					// the response, so the handover loses nothing.
+					session.halfClose()
+				} else {
+					session.declineReconnect()
+					r.wakeupPump()
+				}
 			}
 
 		case err, ok := <-session.errorsCh:
@@ -482,6 +491,12 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 			return
 		}
 	}
+}
+
+func (r *AppendSession) shouldReconnectOnAdvice() bool {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return r.advisedReconnects.shouldReconnect(time.Now())
 }
 
 func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAck) {
@@ -605,22 +620,14 @@ func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
 	r.sessionMu.Unlock()
 	r.closeSessionIfUnused(session)
 
-	// The advised connection's pooled entry was already poisoned when the
-	// advice was decoded, so reconnecting dials afresh.
-
-	// Throttle by how rapidly reconnect advice repeats. An outgoing session
-	// and its replacement can both be advised, so the count is shared state.
-	now := time.Now()
 	r.stateMu.Lock()
-	delay := r.advisedReconnects.record(now)
-	if delay > 0 {
-		r.retryAt = now.Add(delay)
-	}
+	r.advisedReconnects.record(time.Now())
+	advisedReconnects := r.advisedReconnects.count
 	r.stateMu.Unlock()
 
 	logInfo(r.streamClient.logger, "append session reconnecting on server advice",
 		"stream", string(r.streamClient.name),
-		"delay", delay)
+		"advised_reconnects", advisedReconnects)
 
 	r.wakeupPump()
 }
@@ -672,6 +679,19 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		r.sessionMu.Unlock()
 	}
 
+	if isServerDraining(err) {
+		r.stateMu.Lock()
+		r.advisedReconnects.record(time.Now())
+		advisedReconnects := r.advisedReconnects.count
+		r.stateMu.Unlock()
+		r.resetInflightAttemptStarts()
+		logInfo(r.streamClient.logger, "append session reconnecting while server drains",
+			"stream", string(r.streamClient.name),
+			"advised_reconnects", advisedReconnects)
+		r.wakeupPump()
+		return
+	}
+
 	logError(r.streamClient.logger, "append session transport error",
 		"stream", string(r.streamClient.name),
 		"error", err)
@@ -720,13 +740,17 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 	r.currentAttempt++
 	r.stateMu.Unlock()
 
+	r.resetInflightAttemptStarts()
+
+	r.scheduleRetry()
+}
+
+func (r *AppendSession) resetInflightAttemptStarts() {
 	r.inflightMu.Lock()
 	for _, entry := range r.inflightQueue {
 		entry.attemptStart = time.Time{}
 	}
 	r.inflightMu.Unlock()
-
-	r.scheduleRetry()
 }
 
 func (r *AppendSession) failAllInflight(err error) {

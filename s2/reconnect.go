@@ -1,36 +1,46 @@
 package s2
 
-import "time"
-
-const (
-	// Max consecutive advised reconnects before delaying the next one.
-	maxImmediateAdvisedReconnects = 3
-
-	// Delay applied past maxImmediateAdvisedReconnects.
-	advisedReconnectDelay = 100 * time.Millisecond
-
-	// If no reconnect advice arrives for this long, the consecutive count resets.
-	advisedReconnectIdle = 10 * time.Second
+import (
+	"errors"
+	"net/http"
+	"time"
 )
 
-// advisedReconnects counts consecutive reconnects driven by server advice. A
-// draining server keeps acknowledging work, so progress cannot tell a storm
-// from an ordinary handover; how rapidly advice repeats can.
+const (
+	// Advised reconnects to attempt before staying on the connection.
+	maxAdvisedReconnects = 1
+
+	// If no reconnect advice arrives for this long, the consecutive count resets.
+	advisedReconnectIdle = 60 * time.Second
+)
+
+// advisedReconnects counts recent reconnects driven by server advice.
 type advisedReconnects struct {
 	count int
 	last  time.Time
 }
 
-// record registers an advised reconnect and reports how long to wait before
-// opening the next connection.
-func (a *advisedReconnects) record(now time.Time) time.Duration {
-	if !a.last.IsZero() && now.Sub(a.last) > advisedReconnectIdle {
+func (a *advisedReconnects) record(now time.Time) {
+	if !a.isRecent(now) {
 		a.count = 0
 	}
 	a.last = now
 	a.count++
-	if a.count > maxImmediateAdvisedReconnects {
-		return advisedReconnectDelay
-	}
-	return 0
+}
+
+// shouldReconnect reports whether to act on advice or stay until the server
+// ends the connection.
+func (a *advisedReconnects) shouldReconnect(now time.Time) bool {
+	return !a.isRecent(now) || a.count < maxAdvisedReconnects
+}
+
+func (a *advisedReconnects) isRecent(now time.Time) bool {
+	return !a.last.IsZero() && now.Sub(a.last) <= advisedReconnectIdle
+}
+
+func isServerDraining(err error) bool {
+	var s2Err *S2Error
+	return errors.As(err, &s2Err) &&
+		s2Err.Status == http.StatusServiceUnavailable &&
+		s2Err.Code == "server_draining"
 }
