@@ -43,12 +43,13 @@ const (
 	// Flag byte layout:
 	//   ┌───┬───┬───┬───┬───┬───┬───┬───┐
 	//   │ 7 │ 6 │ 5 │ 4 │ 3 │ 2 │ 1 │ 0 │
-	//   ├───┼───┴───┼───┴───┴───┴───┴───┤
-	//   │ T │  C C  │   Reserved (0s)   │
-	//   └───┴───────┴───────────────────┘
+	//   ├───┼───┴───┼───┼───┴───┴───┴───┤
+	//   │ T │  C C  │ R │ Reserved (0s) │
+	//   └───┴───────┴───┴───────────────┘
 	flagTerminal         = 0x80 // bit 7
 	flagCompressionMask  = 0x60 // bits 6-5
 	flagCompressionShift = 5
+	flagReconnectAdvised = 0x10 // bit 4, regular frames only
 )
 
 // S2SFrame represents a parsed S2S protocol frame.
@@ -57,6 +58,8 @@ type S2SFrame struct {
 	Compression CompressionType
 	StatusCode  *int // Only for terminal frames
 	Body        []byte
+	// ReconnectAdvised asks the client to move this session to a new connection.
+	ReconnectAdvised bool
 }
 
 type S2SFrameParser struct {
@@ -210,10 +213,11 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 	}
 
 	return &S2SFrame{
-		Terminal:    terminal,
-		Compression: compression,
-		StatusCode:  statusCode,
-		Body:        body,
+		Terminal:         terminal,
+		Compression:      compression,
+		StatusCode:       statusCode,
+		Body:             body,
+		ReconnectAdvised: !terminal && flag&flagReconnectAdvised != 0,
 	}, nil
 }
 

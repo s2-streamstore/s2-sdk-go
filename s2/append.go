@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 
 	pb "github.com/s2-streamstore/s2-sdk-go/generated"
 	framing "github.com/s2-streamstore/s2-sdk-go/internal/framing"
@@ -72,16 +73,20 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 }
 
 type transportAppendSession struct {
-	streamClient  *StreamClient
-	acksCh        chan *AppendAck
-	errorsCh      chan error
-	closed        chan struct{}
-	closeOnce     sync.Once
-	mu            sync.Mutex
-	conn          *http.Response
-	requestWriter io.WriteCloser
-	pendingWrites int
-	terminalErr   error
+	streamClient      *StreamClient
+	acksCh            chan *AppendAck
+	errorsCh          chan error
+	closed            chan struct{}
+	closeOnce         sync.Once
+	mu                sync.Mutex
+	conn              *http.Response
+	requestWriter     io.WriteCloser
+	pendingWrites     int
+	terminalErr       error
+	reconnectAdvised  atomic.Bool
+	reconnectDeclined atomic.Bool
+	poisonCapture     *poisonCapture
+	halfCloseOnce     sync.Once
 }
 
 func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppendSession, error) {
@@ -116,6 +121,9 @@ func (p *transportAppendSession) start(ctx context.Context) error {
 	reqURL := p.streamClient.basinClient.baseURL + path
 
 	pipeReader, pipeWriter := io.Pipe()
+
+	ctx, capture := capturePoisonHandle(ctx)
+	p.poisonCapture = capture
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, pipeReader)
 	if err != nil {
@@ -167,6 +175,9 @@ func (p *transportAppendSession) connectAndRead(req *http.Request, pipeWriter *i
 			apiErr = newBodyReadError(resp.StatusCode, body, readErr)
 		} else {
 			apiErr = decodeAPIError(resp.StatusCode, body)
+		}
+		if isServerDraining(apiErr) {
+			p.poisonCapture.poison()
 		}
 		pipeWriter.CloseWithError(apiErr)
 		p.reportError(apiErr)
@@ -267,6 +278,32 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 	return nil
 }
 
+func (p *transportAppendSession) ReconnectAdvised() bool {
+	return p.reconnectAdvised.Load()
+}
+
+func (p *transportAppendSession) holdInputsForReconnect() bool {
+	return p.ReconnectAdvised() && !p.reconnectDeclined.Load()
+}
+
+func (p *transportAppendSession) declineReconnect() {
+	p.reconnectDeclined.Store(true)
+}
+
+// halfClose ends input while acknowledgements remain readable.
+func (p *transportAppendSession) halfClose() {
+	p.halfCloseOnce.Do(func() {
+		p.mu.Lock()
+		requestWriter := p.requestWriter
+		p.requestWriter = nil
+		p.mu.Unlock()
+
+		if requestWriter != nil {
+			requestWriter.Close()
+		}
+	})
+}
+
 func (p *transportAppendSession) markWriteSignalled() {
 	p.mu.Lock()
 	p.pendingWrites++
@@ -350,9 +387,17 @@ func (p *transportAppendSession) handleFrame(frame *framing.S2SFrame) error {
 
 	if frame.Terminal {
 		if frame.StatusCode != nil && *frame.StatusCode >= 400 {
-			return decodeAPIError(*frame.StatusCode, body)
+			err := decodeAPIError(*frame.StatusCode, body)
+			if isServerDraining(err) {
+				p.poisonCapture.poison()
+			}
+			return err
 		}
 		return nil
+	}
+
+	if frame.ReconnectAdvised && !p.reconnectAdvised.Swap(true) {
+		p.poisonCapture.poison()
 	}
 
 	var pbAck pb.AppendAck

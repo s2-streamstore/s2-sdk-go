@@ -196,7 +196,26 @@ func (t *schemeAwareTransport) RoundTrip(req *http.Request) (*http.Response, err
 	return t.https.RoundTrip(req)
 }
 
+func (t *schemeAwareTransport) CloseIdleConnections() {
+	t.https.CloseIdleConnections()
+	t.h2c.CloseIdleConnections()
+}
+
 func createStreamingClient(connectionTimeout time.Duration) *http.Client {
+	newTransport := func() http.RoundTripper {
+		return newStreamingTransport(connectionTimeout)
+	}
+
+	return &http.Client{
+		Transport: userAgentRoundTripper{
+			base:      newSpreadTransport(newTransport),
+			userAgent: defaultUserAgent(),
+		},
+		Timeout: 0, // No timeout for streaming
+	}
+}
+
+func newStreamingTransport(connectionTimeout time.Duration) http.RoundTripper {
 	dialer := &net.Dialer{
 		Timeout: connectionTimeout,
 	}
@@ -236,13 +255,7 @@ func createStreamingClient(connectionTimeout time.Duration) *http.Client {
 		},
 	}
 
-	return &http.Client{
-		Transport: userAgentRoundTripper{
-			base:      &schemeAwareTransport{https: httpsTransport, h2c: h2cTransport},
-			userAgent: defaultUserAgent(),
-		},
-		Timeout: 0, // No timeout for streaming
-	}
+	return &schemeAwareTransport{https: httpsTransport, h2c: h2cTransport}
 }
 
 // Create a client using configuration from environment variables.

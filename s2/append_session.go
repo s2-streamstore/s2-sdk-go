@@ -44,9 +44,10 @@ type AppendSession struct {
 	lastAckedPosition *AppendAck
 	stateMu           sync.RWMutex
 
-	wakeup         chan struct{}
-	currentAttempt int
-	retryAt        time.Time
+	wakeup            chan struct{}
+	currentAttempt    int
+	retryAt           time.Time
+	advisedReconnects advisedReconnects
 }
 
 // Creates an append session that guarantees ordering of submissions.
@@ -403,6 +404,10 @@ func (r *AppendSession) submitInflightBatches() {
 		return
 	}
 
+	if session.holdInputsForReconnect() {
+		return
+	}
+
 	r.inflightMu.Lock()
 	entries := make([]*inflightEntry, len(r.inflightQueue))
 	copy(entries, r.inflightQueue)
@@ -433,21 +438,47 @@ func (r *AppendSession) submitInflightBatches() {
 }
 
 func (r *AppendSession) readAcks(session *transportAppendSession) {
+	// Both channels are closed when the response ends, and select picks a
+	// ready case at random, so either one can win. Reconnect from a single
+	// exit point rather than from whichever branch happens to observe it.
+	endedCleanly := false
+	reconnectAccepted := false
+	defer func() {
+		if endedCleanly && reconnectAccepted {
+			r.handleReconnectAdvice(session)
+		}
+	}()
+	adviceHandled := false
+
 	for {
 		select {
 		case ack, ok := <-session.acksCh:
 			if !ok {
+				endedCleanly = true
 				return
 			}
 			r.handleAck(session, ack)
+			if session.ReconnectAdvised() && !adviceHandled {
+				adviceHandled = true
+				if r.shouldReconnectOnAdvice() {
+					reconnectAccepted = true
+					// Half-close so the server acknowledges accepted appends
+					// and then ends the response.
+					session.halfClose()
+				} else {
+					session.declineReconnect()
+					r.wakeupPump()
+				}
+			}
 
 		case err, ok := <-session.errorsCh:
 			if !ok {
-				// errorsCh closes before acksCh (defer order), so
-				// drain any buffered ACKs before returning.
+				// A closed channel yields buffered values first, so this
+				// only fires once every ack has been handled.
 				for ack := range session.acksCh {
 					r.handleAck(session, ack)
 				}
+				endedCleanly = true
 				return
 			}
 			r.handleSessionError(session, err)
@@ -457,6 +488,12 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 			return
 		}
 	}
+}
+
+func (r *AppendSession) shouldReconnectOnAdvice() bool {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return r.advisedReconnects.shouldReconnect(time.Now())
 }
 
 func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAck) {
@@ -551,6 +588,61 @@ func (r *AppendSession) validateAckLocked(entry *inflightEntry, ack *AppendAck) 
 	return nil
 }
 
+// handleReconnectAdvice reconnects without consuming the retry budget.
+func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
+	r.closedMu.RLock()
+	closed := r.closed
+	r.closedMu.RUnlock()
+	if closed {
+		return
+	}
+
+	// A clean end with unacknowledged appends is a truncated response, so the
+	// ordinary retry policy decides whether to resend them.
+	if r.hasUnackedOnSession(session) {
+		r.handleSessionError(session, fmt.Errorf("append session ended before acknowledging all appends"))
+		return
+	}
+
+	r.sessionMu.Lock()
+	if r.currentSession != session {
+		r.sessionMu.Unlock()
+		r.closeSessionIfUnused(session)
+		return
+	}
+	r.currentSession = nil
+	r.sessionMu.Unlock()
+	r.closeSessionIfUnused(session)
+
+	// The advised connection was already poisoned when the advice was first
+	// decoded, so reconnecting dials a fresh one.
+	r.stateMu.Lock()
+	r.advisedReconnects.record(time.Now())
+	advisedReconnects := r.advisedReconnects.count
+	r.stateMu.Unlock()
+
+	logInfo(r.streamClient.logger, "append session reconnecting on server advice",
+		"stream", string(r.streamClient.name),
+		"advised_reconnects", advisedReconnects)
+
+	r.wakeupPump()
+}
+
+func (r *AppendSession) hasUnackedOnSession(session *transportAppendSession) bool {
+	r.inflightMu.RLock()
+	defer r.inflightMu.RUnlock()
+
+	for _, entry := range r.inflightQueue {
+		if atomic.LoadInt32(&entry.completed) != 0 {
+			continue
+		}
+		if entry.wasSentOnSessionLocked(session) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *AppendSession) handleSessionError(failedSession *transportAppendSession, err error) {
 	r.closedMu.RLock()
 	closed := r.closed
@@ -579,6 +671,19 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		r.sessionMu.Lock()
 		r.currentSession = nil
 		r.sessionMu.Unlock()
+	}
+
+	if isServerDraining(err) {
+		r.stateMu.Lock()
+		r.advisedReconnects.record(time.Now())
+		advisedReconnects := r.advisedReconnects.count
+		r.stateMu.Unlock()
+		r.resetInflightAttemptStarts()
+		logInfo(r.streamClient.logger, "append session reconnecting while server drains",
+			"stream", string(r.streamClient.name),
+			"advised_reconnects", advisedReconnects)
+		r.wakeupPump()
+		return
 	}
 
 	logError(r.streamClient.logger, "append session transport error",
@@ -629,13 +734,17 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 	r.currentAttempt++
 	r.stateMu.Unlock()
 
+	r.resetInflightAttemptStarts()
+
+	r.scheduleRetry()
+}
+
+func (r *AppendSession) resetInflightAttemptStarts() {
 	r.inflightMu.Lock()
 	for _, entry := range r.inflightQueue {
 		entry.attemptStart = time.Time{}
 	}
 	r.inflightMu.Unlock()
-
-	r.scheduleRetry()
 }
 
 func (r *AppendSession) failAllInflight(err error) {
