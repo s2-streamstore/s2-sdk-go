@@ -2,11 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.22.0] - 2026-09-02
+
+### Features
+
+- *(sdk)* Act on s2s reconnect advice in append and read sessions ([#352](https://github.com/s2-streamstore/s2-sdk-go/issues/352))
+
+### Bug Fixes
+
+- Bound producer payload before batching ([#355](https://github.com/s2-streamstore/s2-sdk-go/issues/355))
+
+### Performance
+
+- Make append pump deadline-driven ([#356](https://github.com/s2-streamstore/s2-sdk-go/issues/356))
+
 ## [v0.21.0] - 2026-08-17
 
 ### Features
 
 - Add durable producer flush ([#349](https://github.com/s2-streamstore/s2-sdk-go/issues/349))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.21.0 ([#350](https://github.com/s2-streamstore/s2-sdk-go/issues/350))
 
 ## [v0.20.0] - 2026-07-22
 
