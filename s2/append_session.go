@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	appendPumpTickInterval = 10 * time.Millisecond
 	appendAckChannelBuffer = 20
 )
 
@@ -228,28 +227,71 @@ func (r *AppendSession) enqueueReservedEntry(input *AppendInput, size int64) (*i
 func (r *AppendSession) runPump() {
 	defer close(r.pumpDone)
 
-	ticker := time.NewTicker(appendPumpTickInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(time.Hour)
+	stopAppendPumpTimer(timer)
+	defer stopAppendPumpTimer(timer)
 
 	for {
+		timerCh := resetAppendPumpTimer(timer, r.nextPumpDeadline())
+
 		select {
 		case <-r.pumpCtx.Done():
 			r.failAllInflight(ErrSessionClosed)
 			return
 
 		case <-r.wakeup:
-			r.processInflightQueue()
-			if r.shouldStopPump() {
-				return
-			}
 
-		case <-ticker.C:
-			r.processInflightQueue()
-			r.checkTimeouts()
-			if r.shouldStopPump() {
-				return
+		case <-timerCh:
+		}
+
+		r.processInflightQueue()
+		r.checkTimeouts()
+		if r.shouldStopPump() {
+			return
+		}
+	}
+}
+
+func (r *AppendSession) nextPumpDeadline() time.Time {
+	r.stateMu.RLock()
+	deadline := r.retryAt
+	r.stateMu.RUnlock()
+
+	r.inflightMu.RLock()
+	if len(r.inflightQueue) > 0 {
+		head := r.inflightQueue[0]
+		if head.requestTimeout > 0 && !head.attemptStart.IsZero() {
+			timeoutAt := head.attemptStart.Add(head.requestTimeout)
+			if deadline.IsZero() || timeoutAt.Before(deadline) {
+				deadline = timeoutAt
 			}
 		}
+	}
+	r.inflightMu.RUnlock()
+
+	return deadline
+}
+
+func resetAppendPumpTimer(timer *time.Timer, deadline time.Time) <-chan time.Time {
+	stopAppendPumpTimer(timer)
+	if deadline.IsZero() {
+		return nil
+	}
+	delay := time.Until(deadline)
+	if delay < 0 {
+		delay = 0
+	}
+	timer.Reset(delay)
+	return timer.C
+}
+
+func stopAppendPumpTimer(timer *time.Timer) {
+	if timer == nil || timer.Stop() {
+		return
+	}
+	select {
+	case <-timer.C:
+	default:
 	}
 }
 
@@ -558,6 +600,7 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 	}
 
 	r.closeStaleSessions(sessionsToClose)
+	r.wakeupPump()
 }
 
 func (r *AppendSession) validateAckLocked(entry *inflightEntry, ack *AppendAck) error {
@@ -822,6 +865,7 @@ func (r *AppendSession) scheduleRetry() {
 		}
 		r.stateMu.Unlock()
 	}
+	r.wakeupPump()
 }
 
 func (r *AppendSession) checkTimeouts() {
@@ -831,6 +875,7 @@ func (r *AppendSession) checkTimeouts() {
 	default:
 	}
 
+	now := time.Now()
 	r.inflightMu.RLock()
 	var timedOut bool
 	var attemptStart time.Time
@@ -839,12 +884,12 @@ func (r *AppendSession) checkTimeouts() {
 		head := r.inflightQueue[0]
 		attemptStart = head.attemptStart
 		requestTimeout = head.requestTimeout
-		timedOut = requestTimeout > 0 && !attemptStart.IsZero() && time.Since(attemptStart) > requestTimeout
+		timedOut = requestTimeout > 0 && !attemptStart.IsZero() && !now.Before(attemptStart.Add(requestTimeout))
 	}
 	r.inflightMu.RUnlock()
 
 	if timedOut {
-		elapsed := time.Since(attemptStart)
+		elapsed := now.Sub(attemptStart)
 		r.stateMu.RLock()
 		attempt := r.currentAttempt
 		r.stateMu.RUnlock()
