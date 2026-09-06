@@ -27,6 +27,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 
@@ -255,7 +256,7 @@ func (fr *FrameReader) ReadFrame() (*S2SFrame, error) {
 		}
 
 		if fr.pendingErr != nil {
-			return nil, fr.pendingErr
+			return nil, fr.translatePendingEOF()
 		}
 
 		n, err := fr.parser.readFrom(fr.reader)
@@ -267,9 +268,22 @@ func (fr *FrameReader) ReadFrame() (*S2SFrame, error) {
 				continue
 			}
 			fr.pendingErr = err
-			return nil, err
+			return nil, fr.translatePendingEOF()
 		}
 	}
+}
+
+// translatePendingEOF converts a clean io.EOF into io.ErrUnexpectedEOF when the
+// parser still holds a partial (incomplete) frame. Per the io contract, a
+// stream that ends mid-record was truncated, not cleanly terminated; io.EOF is
+// reserved for an end that falls exactly on a frame boundary. Any other error
+// (including io.ErrUnexpectedEOF surfaced by the transport on abrupt closes)
+// is forwarded unchanged.
+func (fr *FrameReader) translatePendingEOF() error {
+	if errors.Is(fr.pendingErr, io.EOF) && fr.parser.HasData() {
+		return io.ErrUnexpectedEOF
+	}
+	return fr.pendingErr
 }
 
 const (
