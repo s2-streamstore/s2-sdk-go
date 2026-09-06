@@ -716,9 +716,12 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		r.sessionMu.Unlock()
 		r.closeSessionIfUnused(failedSession)
 	} else {
-		r.sessionMu.Lock()
-		r.currentSession = nil
-		r.sessionMu.Unlock()
+		// A nil failedSession is reported by checkTimeouts when it
+		// observed currentSession already niled. That only happens in the
+		// race window of a concurrent non-nil handleSessionError, which
+		// has already claimed the failure and scheduled the retry. Bail
+		// to avoid consuming a second retry attempt for the same failure.
+		return
 	}
 
 	if isServerDraining(err) {
