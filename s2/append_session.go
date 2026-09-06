@@ -484,9 +484,12 @@ func (r *AppendSession) submitInflightBatches() {
 }
 
 func (r *AppendSession) readAcks(session *transportAppendSession) {
-	// Both channels are closed when the response ends, and select picks a
-	// ready case at random, so either one can win. Reconnect from a single
-	// exit point rather than from whichever branch happens to observe it.
+	// Both channels are closed when the response ends, and readAcksLoop
+	// closes errorsCh before acksCh (defer order is LIFO), so a buffered ack
+	// can still be pending when the errorsCh-closed case becomes ready.
+	// select picks a ready case at random, so either branch can observe the
+	// end. Reconnect from a single exit point rather than from whichever
+	// branch happens to observe it.
 	endedCleanly := false
 	reconnectAccepted := false
 	defer func() {
@@ -496,6 +499,27 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 	}()
 	adviceHandled := false
 
+	// applyReconnectAdvice runs the reconnect-advice bookkeeping for an ack
+	// that was just consumed. It is shared by the acksConsume branch and the
+	// errorsCh-close drain so an advice ack buffered at shutdown is acted on
+	// identically either way; without this, the drain calls handleAck only
+	// and reconnectAdvised stays latched on a dead transport, pinning
+	// holdInputsForReconnect forever.
+	applyReconnectAdvice := func() {
+		if session.ReconnectAdvised() && !adviceHandled {
+			adviceHandled = true
+			if r.shouldReconnectOnAdvice() {
+				reconnectAccepted = true
+				// Half-close so the server acknowledges accepted appends
+				// and then ends the response.
+				session.halfClose()
+			} else {
+				session.declineReconnect()
+				r.wakeupPump()
+			}
+		}
+	}
+
 	for {
 		select {
 		case ack, ok := <-session.acksCh:
@@ -504,25 +528,20 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 				return
 			}
 			r.handleAck(session, ack)
-			if session.ReconnectAdvised() && !adviceHandled {
-				adviceHandled = true
-				if r.shouldReconnectOnAdvice() {
-					reconnectAccepted = true
-					// Half-close so the server acknowledges accepted appends
-					// and then ends the response.
-					session.halfClose()
-				} else {
-					session.declineReconnect()
-					r.wakeupPump()
-				}
-			}
+			applyReconnectAdvice()
 
 		case err, ok := <-session.errorsCh:
 			if !ok {
-				// A closed channel yields buffered values first, so this
-				// only fires once every ack has been handled.
+				// errorsCh is closed before acksCh, so buffered acks may
+				// still be pending here. Drain them and apply the same
+				// reconnect-advice handling as the acksCh case: an advice
+				// ack drained at shutdown must still halfClose (or
+				// declineReconnect) and set reconnectAccepted so the defer
+				// runs handleReconnectAdvice, otherwise currentSession is
+				// never cleared and the pump pins to the dead transport.
 				for ack := range session.acksCh {
 					r.handleAck(session, ack)
+					applyReconnectAdvice()
 				}
 				endedCleanly = true
 				return
