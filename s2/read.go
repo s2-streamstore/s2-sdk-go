@@ -256,6 +256,16 @@ func (r *streamReader) run() {
 			// the advice was decoded, so reconnecting dials afresh.
 			r.caughtUp.setBehind()
 
+			// A planned handover can deliver records (advancing r.recordsRead)
+			// before the advice is acted on. Mirror the non-handover path:
+			// progress this iteration forgives the prior failure streak so
+			// the handover is not stricter than an ordinary progress-making
+			// retry, while a no-progress handover leaves the streak untouched
+			// (handovers must not consume the normal retry budget).
+			if r.recordsRead > recordsBefore {
+				consecutiveFailures = 0
+			}
+
 			r.advisedReconnects.record(time.Now())
 			logInfo(r.logger, "s2 read session reconnecting on server advice",
 				"stream", string(r.streamClient.name),
@@ -268,6 +278,14 @@ func (r *streamReader) run() {
 		if isServerDraining(err) {
 			if r.limitsReached() {
 				return
+			}
+			// The terminal-frame server_draining path can return after earlier
+			// batches in the same runOnce already advanced r.recordsRead. Apply
+			// the same progress-based streak reset as the reconnect-advised and
+			// non-handover paths so a record-carrying drain handover forgives
+			// the prior failure streak.
+			if r.recordsRead > recordsBefore {
+				consecutiveFailures = 0
 			}
 			r.advisedReconnects.record(time.Now())
 			r.caughtUp.setBehind()
