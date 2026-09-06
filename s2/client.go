@@ -28,6 +28,11 @@ const (
 	http2ReadIdleTimeout   = 30 * time.Second
 	http2PingTimeout       = 15 * time.Second
 	http2WriteByteTimeout  = 30 * time.Second
+	// http2IdleConnTimeout bounds the lifetime of an idle HTTP/2 connection,
+	// including orphans left unreachable from CloseIdleConnections. Set above
+	// ReadIdleTimeout so a healthy idle connection is not closed before a
+	// health-check PING can confirm it.
+	http2IdleConnTimeout = 90 * time.Second
 )
 
 type ClientOptions struct {
@@ -165,6 +170,27 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	return c
 }
 
+// Close releases idle HTTP connections pooled by the SDK's streaming and unary
+// transports, including orphans left unreachable after server reconnect advice
+// was acted on. Safe to call multiple times and concurrently with in-flight
+// requests; active streams are not interrupted.
+func (c *Client) Close() {
+	if c == nil {
+		return
+	}
+	closeIdleHTTPClient(c.streamingClient)
+	closeIdleHTTPClient(c.httpClient)
+}
+
+func closeIdleHTTPClient(hc *http.Client) {
+	if hc == nil {
+		return
+	}
+	if closer, ok := hc.Transport.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 func newUnaryHTTPTransport(base http.RoundTripper, connectionTimeout time.Duration) *http.Transport {
 	transport, ok := base.(*http.Transport)
 	if ok && transport != nil {
@@ -227,6 +253,7 @@ func newStreamingTransport(connectionTimeout time.Duration) http.RoundTripper {
 		ReadIdleTimeout:            http2ReadIdleTimeout,
 		PingTimeout:                http2PingTimeout,
 		WriteByteTimeout:           http2WriteByteTimeout,
+		IdleConnTimeout:            http2IdleConnTimeout,
 		StrictMaxConcurrentStreams: false,
 		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
 			return dialer.DialContext(ctx, network, addr)
@@ -240,6 +267,7 @@ func newStreamingTransport(connectionTimeout time.Duration) http.RoundTripper {
 		ReadIdleTimeout:            http2ReadIdleTimeout,
 		PingTimeout:                http2PingTimeout,
 		WriteByteTimeout:           http2WriteByteTimeout,
+		IdleConnTimeout:            http2IdleConnTimeout,
 		StrictMaxConcurrentStreams: false,
 		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 			conn, err := dialer.DialContext(ctx, network, addr)

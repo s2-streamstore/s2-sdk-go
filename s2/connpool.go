@@ -22,6 +22,11 @@ type spreadTransport struct {
 type spreadEntry struct {
 	rt       http.RoundTripper
 	sessions atomic.Int64
+	// poisoned is set when poison removes this entry from the pool while an
+	// in-flight stream keeps it (and its HTTP/2 connection) alive. The last
+	// session draining such an orphan reclaims it in releaseOnClose.Close;
+	// otherwise it would be unreachable from CloseIdleConnections.
+	poisoned atomic.Bool
 }
 
 func newSpreadTransport(newTransport func() http.RoundTripper) *spreadTransport {
@@ -64,6 +69,10 @@ func (t *spreadTransport) poison(host string, target *spreadEntry) {
 	t.mu.Unlock()
 
 	if removed {
+		// Poison runs while a stream is still active, so the sweep is a no-op
+		// on the live connection. Mark poisoned so the last session draining it
+		// reclaims the orphan in releaseOnClose.Close.
+		target.poisoned.Store(true)
 		closeIdleConnections(target.rt)
 	}
 }
@@ -140,6 +149,17 @@ type releaseOnClose struct {
 }
 
 func (r *releaseOnClose) Close() error {
-	r.once.Do(func() { r.entry.sessions.Add(-1) })
-	return r.ReadCloser.Close()
+	// Close the body first so the HTTP/2 stream is forgotten and the
+	// connection can become idle; closeIdleConnections is a no-op while
+	// streams are active (the original leak).
+	err := r.ReadCloser.Close()
+	r.once.Do(func() {
+		// The last session draining a poisoned (pool-removed) entry must
+		// reclaim the orphan itself; spreadTransport.CloseIdleConnections
+		// iterates t.hosts, which poison already removed this entry from.
+		if r.entry.sessions.Add(-1) == 0 && r.entry.poisoned.Load() {
+			closeIdleConnections(r.entry.rt)
+		}
+	})
+	return err
 }
