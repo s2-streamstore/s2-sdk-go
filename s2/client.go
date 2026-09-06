@@ -242,12 +242,14 @@ func newStreamingTransport(connectionTimeout time.Duration) http.RoundTripper {
 		WriteByteTimeout:           http2WriteByteTimeout,
 		StrictMaxConcurrentStreams: false,
 		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-			conn, err := dialer.DialContext(ctx, network, addr)
+			dctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+			defer cancel()
+			conn, err := dialer.DialContext(dctx, network, addr)
 			if err != nil {
 				return nil, err
 			}
 			tlsConn := tls.Client(conn, cfg)
-			if err := tlsConn.HandshakeContext(ctx); err != nil {
+			if err := tlsConn.HandshakeContext(dctx); err != nil {
 				conn.Close()
 				return nil, err
 			}
