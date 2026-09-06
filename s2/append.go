@@ -418,20 +418,30 @@ func convertAppendInputToProto(input *AppendInput) *pb.AppendInput {
 		return nil
 	}
 
+	headerCount := 0
+	for _, record := range input.Records {
+		headerCount += len(record.Headers)
+	}
+
+	recordValues := make([]pb.AppendRecord, len(input.Records))
 	pbRecords := make([]*pb.AppendRecord, len(input.Records))
+	headerValues := make([]pb.Header, headerCount)
+	headerPtrs := make([]*pb.Header, headerCount)
+	headerOffset := 0
 	for i, record := range input.Records {
-		pbRecord := &pb.AppendRecord{
-			Timestamp: record.Timestamp,
-		}
+		pbRecord := &recordValues[i]
+		pbRecord.Timestamp = record.Timestamp
 
 		if len(record.Headers) > 0 {
-			pbRecord.Headers = make([]*pb.Header, len(record.Headers))
+			end := headerOffset + len(record.Headers)
+			pbRecord.Headers = headerPtrs[headerOffset:end:end]
 			for j, header := range record.Headers {
-				pbRecord.Headers[j] = &pb.Header{
-					Name:  header.Name,
-					Value: header.Value,
-				}
+				pbHeader := &headerValues[headerOffset+j]
+				pbHeader.Name = header.Name
+				pbHeader.Value = header.Value
+				pbRecord.Headers[j] = pbHeader
 			}
+			headerOffset = end
 		}
 
 		if len(record.Body) > 0 {
