@@ -27,10 +27,18 @@ type Producer struct {
 	consumerDone chan struct{}
 	errMu        sync.RWMutex
 	terminalErr  error
-	closing      atomic.Bool
-	closeOnce    sync.Once
-	closeDone    chan struct{}
-	closeErr     error
+	// coveredErr tracks the first terminal error sourced from a covered
+	// append within the current barrier window. The barrier reports this
+	// error (or nil if every covered ack succeeded) instead of the producer's
+	// global sticky terminalErr, so Flush's return value stays consistent
+	// with the outcomes observed via ticket.Ack(). It is protected by
+	// coveredMu.
+	coveredMu  sync.Mutex
+	coveredErr error
+	closing    atomic.Bool
+	closeOnce  sync.Once
+	closeDone  chan struct{}
+	closeErr   error
 }
 
 type appendSessionAPI interface {
@@ -298,7 +306,12 @@ func (p *Producer) consumeBatches() {
 		}
 		if batch.barrier != nil {
 			p.ackWG.Wait()
-			batch.barrier <- p.terminalError()
+			// Report only a terminal error sourced from a covered append
+			// (or nil if every covered ack succeeded). The producer's global
+			// sticky terminalErr may have been set by a parent-context
+			// cancellation via AfterFunc(prodCtx, ...) independently of the
+			// covered appends, so it must not flow through the barrier.
+			batch.barrier <- p.swapCoveredError(nil)
 		}
 	}
 	p.ackWG.Wait()
@@ -416,6 +429,12 @@ func (p *Producer) resolveSynchronousBatchError(meta []recordMeta, err error) {
 }
 
 func (p *Producer) dispatchBatchError(meta []recordMeta, err error) {
+	// err is the terminal error dispatched to the covered tickets, so record
+	// it as the barrier's covered error when present. This keeps the barrier
+	// return value consistent with what ticket.Ack() observes.
+	if err != nil {
+		p.recordCoveredError(err)
+	}
 	releaseProducerPermits(meta)
 	for _, m := range meta {
 		m.resolve(&producerOutcome{err: err})
@@ -455,6 +474,33 @@ func (p *Producer) recordTerminalError(err error) error {
 	}
 
 	return terminalErr
+}
+
+// recordCoveredError records the first terminal error dispatched to a covered
+// ticket within the current barrier window. The barrier reports it (or nil if
+// every covered ack succeeded) so Flush's return value matches the outcomes
+// observed via ticket.Ack(). Callers must have already passed the error
+// through recordTerminalError so it matches what the covered tickets receive.
+func (p *Producer) recordCoveredError(err error) {
+	if err == nil {
+		return
+	}
+	p.coveredMu.Lock()
+	if p.coveredErr == nil {
+		p.coveredErr = err
+	}
+	p.coveredMu.Unlock()
+}
+
+// swapCoveredError atomically returns the current covered error and resets it
+// for the next barrier window. The barrier reports the returned error (or nil
+// if every covered ack succeeded).
+func (p *Producer) swapCoveredError(next error) error {
+	p.coveredMu.Lock()
+	old := p.coveredErr
+	p.coveredErr = next
+	p.coveredMu.Unlock()
+	return old
 }
 
 func (p *Producer) waitForTerminalDrain(ctx context.Context, terminalErr error) error {
