@@ -246,12 +246,10 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 
 	pbInput := convertAppendInputToProto(input)
 
-	data, err := proto.Marshal(pbInput)
+	frame, err := framing.MarshalProtoFrame(pbInput, p.streamClient.basinClient.compression)
 	if err != nil {
 		return fmt.Errorf("failed to marshal append input: %w", err)
 	}
-
-	frame := framing.CreateFrame(data, false, p.streamClient.basinClient.compression)
 
 	p.mu.Lock()
 	writer := p.requestWriter

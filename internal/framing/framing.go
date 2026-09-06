@@ -31,6 +31,7 @@ import (
 	"io"
 
 	"github.com/klauspost/compress/zstd"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -274,6 +275,33 @@ func (fr *FrameReader) ReadFrame() (*S2SFrame, error) {
 const (
 	compressionThreshold = 1024
 )
+
+// MarshalProtoFrame encodes a regular protobuf frame.
+func MarshalProtoFrame(message proto.Message, compression CompressionType) ([]byte, error) {
+	if compression != CompressionNone {
+		data, err := proto.Marshal(message)
+		if err != nil {
+			return nil, err
+		}
+		return CreateFrame(data, false, compression), nil
+	}
+
+	const headerLen = 4
+	opts := proto.MarshalOptions{}
+	size := opts.Size(message)
+	frame := make([]byte, headerLen, headerLen+size)
+	// The message is unchanged since Size, so its cached size is valid.
+	opts.UseCachedSize = true
+	frame, err := opts.MarshalAppend(frame, message)
+	if err != nil {
+		return nil, err
+	}
+	payloadLen := len(frame) - 3
+	frame[0] = byte(payloadLen >> 16)
+	frame[1] = byte(payloadLen >> 8)
+	frame[2] = byte(payloadLen)
+	return frame, nil
+}
 
 func CreateFrame(data []byte, terminal bool, compression CompressionType) []byte {
 	return CreateFrameWithStatus(data, terminal, compression, 0)
