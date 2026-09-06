@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.22.1] - 2026-09-06
+
+### Performance
+
+- Marshal appends directly into frames ([#359](https://github.com/s2-streamstore/s2-sdk-go/issues/359))
+- Flatten append protobuf allocations ([#360](https://github.com/s2-streamstore/s2-sdk-go/issues/360))
+
 ## [v0.22.0] - 2026-09-02
 
 ### Features
@@ -15,6 +22,10 @@ All notable changes to this project will be documented in this file.
 ### Performance
 
 - Make append pump deadline-driven ([#356](https://github.com/s2-streamstore/s2-sdk-go/issues/356))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.22.0 ([#357](https://github.com/s2-streamstore/s2-sdk-go/issues/357))
 
 ## [v0.21.0] - 2026-08-17
 
