@@ -46,6 +46,7 @@ type faultProxy struct {
 	wire        []string
 	ops         []faultPlan
 	readSeen    []chan struct{}
+	crash       func() error
 	corrupt     func(proto.Message)
 	fragment    int
 	compression s2.CompressionType
@@ -127,7 +128,7 @@ func (p *faultProxy) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	defer response.Body.Close()
 	streaming := req.Header.Get("Content-Type") == "s2s/proto"
 	appendRequest := req.Method == http.MethodPost
-	if response.StatusCode == http.StatusOK && appendRequest && fault == afterCommit {
+	if response.StatusCode == http.StatusOK && appendRequest && (fault == afterCommit || fault == crashAfterCommit) {
 		var data []byte
 		if streaming {
 			frame, readErr := framing.NewFrameReader(response.Body).ReadFrame()
@@ -145,6 +146,14 @@ func (p *faultProxy) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		p.mu.Lock()
 		p.committed = append(p.committed, observedAppend{input: plan.Input, start: ack.Start.SeqNum, end: ack.End.SeqNum, tail: ack.Tail.SeqNum})
 		p.mu.Unlock()
+		if fault == crashAfterCommit {
+			if err := p.crash(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			p.injected(id, fault)
+			panic(http.ErrAbortHandler)
+		}
 		p.injected(id, fault)
 		p.replyError(w, streaming, http.StatusServiceUnavailable, "unavailable")
 		return

@@ -137,7 +137,7 @@ jobs:
         with:
           name: server-binary
           path: ${{ runner.temp }}/s2-lite
-      - name: Test Lite fault harness
+      - name: Test faults and crash recovery
         run: |
           chmod +x "$S2_LITE_BIN"
           go test -race -count=1 -timeout=3m ./internal/faulttest
