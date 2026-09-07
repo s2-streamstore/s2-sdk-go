@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: none
     name: CI
-    needs: [examples, test, s2-integration, s2-lite-integration, golangci-lint, bento-integration]
+    needs: [examples, test, s2-integration, s2-lite-integration, fault-tests, golangci-lint, bento-integration]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -107,6 +107,37 @@ jobs:
   build-s2-lite:
     name: Build S2-lite
     uses: s2-streamstore/s2/.github/workflows/build-s2-lite.yml@main
+
+  fault-tests:
+    name: SDK correctness
+    needs: build-s2-lite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Configure fault harness
+        run: |
+          {
+            echo "S2_LITE_BIN=$RUNNER_TEMP/s2-lite/server"
+            echo "S2_FAULT_OUTPUT=$RUNNER_TEMP/sdk-faults"
+          } >> "$GITHUB_ENV"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.23"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: server-binary
+          path: ${{ runner.temp }}/s2-lite
+      - name: Test Lite fault harness
+        run: |
+          chmod +x "$S2_LITE_BIN"
+          go test -race -count=1 -timeout=3m ./internal/faulttest
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: failure()
+        with:
+          name: sdk-faults
+          path: |
+            ${{ runner.temp }}/sdk-faults
 
   s2-lite-integration:
     name: S2-lite Integration
