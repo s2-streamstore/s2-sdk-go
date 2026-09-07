@@ -29,10 +29,20 @@ type batch struct {
 	Match   bool              `json:"match,omitempty"`
 }
 
+type readFault struct {
+	After int    `json:"after"`
+	Kind  string `json:"kind"`
+}
+
 type trace struct {
-	Session bool                 `json:"session"`
-	Policy  s2.AppendRetryPolicy `json:"policy"`
-	Batches []batch              `json:"batches"`
+	Session     bool                 `json:"session"`
+	Policy      s2.AppendRetryPolicy `json:"policy"`
+	Compression s2.CompressionType   `json:"compression,omitempty"`
+	Fragment    int                  `json:"fragment,omitempty"`
+	Batches     []batch              `json:"batches"`
+	ReadFaults  []readFault          `json:"read_faults,omitempty"`
+	Count       uint64               `json:"count,omitempty"`
+	Bytes       uint64               `json:"bytes,omitempty"`
 }
 
 func TestReplay(t *testing.T) {
@@ -51,10 +61,10 @@ func TestReplay(t *testing.T) {
 		checkReplay(t, lite.endpoint, script)
 		return
 	}
-	for mode := byte(0); mode < 4; mode++ {
+	for mode := byte(0); mode < 12; mode++ {
 		for fault := byte(0); fault < 6; fault++ {
 			t.Run(fmt.Sprintf("%d/%d", mode, fault), func(t *testing.T) {
-				checkReplay(t, lite.endpoint, makeTrace([]byte{mode, fault, 3, 1, 255, 192}))
+				checkReplay(t, lite.endpoint, makeTrace([]byte{mode | fault/2<<4, fault, 3, 1, 255, 192}))
 			})
 		}
 	}
@@ -104,9 +114,25 @@ func TestReplayDeterministic(t *testing.T) {
 	}
 }
 
+func FuzzReplay(f *testing.F) {
+	endpoint := fuzzLite(f)
+	f.Add([]byte{0, 0, 3, 1})
+	f.Add([]byte{5, 2, 1, 4})
+	f.Add([]byte{9, 4, 2, 5})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) < 2 || len(data) > 32 {
+			return
+		}
+		checkReplay(t, endpoint, makeTrace(data))
+	})
+}
+
 func makeTrace(data []byte) trace {
 	script := trace{
 		Session: data[0]&1 != 0, Policy: s2.AppendRetryPolicyAll,
+		Compression: s2.CompressionType(data[0] / 4 % 3),
+		Fragment:    []int{0, 1, 7, 1024}[data[0]/4%4],
+		ReadFaults:  []readFault{{After: int(data[1] % 3), Kind: "reset"}, {After: 1, Kind: "unavailable"}},
 	}
 	if data[0]&2 != 0 {
 		script.Policy = s2.AppendRetryPolicyNoSideEffects
@@ -123,6 +149,12 @@ func makeTrace(data []byte) trace {
 			})
 		}
 		script.Batches = append(script.Batches, b)
+	}
+	if data[0]&16 != 0 {
+		script.Count = uint64(data[1]%8 + 1)
+	}
+	if data[0]&32 != 0 {
+		script.Bytes = (uint64(data[1]) + 1) * 32
 	}
 	return script
 }
@@ -144,7 +176,7 @@ func (s trace) validate() error {
 	if s.Policy != s2.AppendRetryPolicyAll && s.Policy != s2.AppendRetryPolicyNoSideEffects {
 		return fmt.Errorf("invalid retry policy %q", s.Policy)
 	}
-	if len(s.Batches) == 0 || len(s.Batches) > 32 {
+	if len(s.Batches) == 0 || len(s.Batches) > 32 || len(s.ReadFaults) > 2 || s.Fragment < 0 || s.Compression > s2.CompressionGzip {
 		return errors.New("invalid trace bounds")
 	}
 	var count int
@@ -171,6 +203,11 @@ func (s trace) validate() error {
 	}
 	if count > 128 || size > 256*1024 {
 		return errors.New("trace exceeds 128 records or 256 KiB")
+	}
+	for _, fault := range s.ReadFaults {
+		if fault.After < 0 || (fault.Kind != "reset" && fault.Kind != "unavailable" && fault.Kind != "truncate") {
+			return fmt.Errorf("invalid read fault %+v", fault)
+		}
 	}
 	return nil
 }
@@ -260,6 +297,39 @@ func (h *harness) replay() error {
 	tail, err := h.stream(len(h.script.Batches)).CheckTail(ctx)
 	if err != nil || tail.Tail.SeqNum != uint64(len(expected)) {
 		return fmt.Errorf("tail=%+v, err=%v, want %d", tail, err, len(expected))
+	}
+	count := uint64(len(expected))
+	if h.script.Count > 0 && h.script.Count < count {
+		count = h.script.Count
+	}
+	opts := &s2.ReadOptions{SeqNum: s2.Uint64(0), Count: &count}
+	expected = expected[:count]
+	if h.script.Bytes > 0 {
+		opts.Bytes = &h.script.Bytes
+		var used uint64
+		for i, record := range expected {
+			used += recordBytes(record)
+			if used > h.script.Bytes {
+				expected = expected[:i]
+				break
+			}
+		}
+	}
+	reader, err := h.stream(len(h.script.Batches)+1).ReadSession(ctx, opts)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	var records []s2.SequencedRecord
+	for reader.Next() {
+		records = append(records, reader.Record())
+		select {
+		case h.proxy.readSeen[len(h.script.Batches)+1] <- struct{}{}:
+		default:
+		}
+	}
+	if reader.Err() != nil || !sameRecords(records, expected) || ctx.Err() != nil {
+		return fmt.Errorf("streaming read: got %d records, want %d; err=%v; context=%v", len(records), len(expected), reader.Err(), ctx.Err())
 	}
 	return nil
 }

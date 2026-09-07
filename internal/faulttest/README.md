@@ -22,6 +22,14 @@ Failures retain `trace.json` and `wire.json` in the logged artifact directory:
 S2_FAULT_TRACE=/path/to/trace.json go test ./internal/faulttest -run '^TestReplay$' -count=1
 ```
 
+Streaming reads exercise record/byte limits, compression, fragmented responses,
+and resets or errors after record delivery. Fuzz bytes generate the workload
+and fault plan; sequential replay compares the logical protocol history.
+
+```sh
+go test ./internal/faulttest -run '^$' -fuzz '^FuzzReplay$' -fuzztime=30s -parallel=1
+```
+
 Tests requiring a binary skip when it is unset. CI supplies the required
-binaries and runs the race detector. `S2_FAULT_OUTPUT` chooses the
+binaries and runs the race detector and fuzzers. `S2_FAULT_OUTPUT` chooses the
 artifact parent directory; successful runs clean up their files.

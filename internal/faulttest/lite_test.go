@@ -60,6 +60,17 @@ func newLite(t testing.TB) *liteProcess {
 	return lite
 }
 
+func fuzzLite(f *testing.F) string {
+	// Workers may exit without cleanup; the coordinator owns Lite.
+	const key = "S2_FAULT_FUZZ_ENDPOINT"
+	if endpoint := os.Getenv(key); endpoint != "" {
+		return endpoint
+	}
+	lite := newLite(f)
+	f.Setenv(key, lite.endpoint)
+	return lite.endpoint
+}
+
 func (p *liteProcess) start() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

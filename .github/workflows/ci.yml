@@ -132,12 +132,16 @@ jobs:
         run: |
           chmod +x "$S2_LITE_BIN"
           go test -race -count=1 -timeout=3m ./internal/faulttest
+      - name: Fuzz
+        run: |
+          go test ./internal/faulttest -run '^$' -fuzz '^FuzzReplay$' -fuzztime=20s -parallel=1
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: failure()
         with:
           name: sdk-faults
           path: |
             ${{ runner.temp }}/sdk-faults
+            internal/faulttest/testdata/fuzz
 
   s2-lite-integration:
     name: S2-lite Integration
