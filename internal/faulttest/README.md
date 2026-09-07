@@ -30,6 +30,17 @@ and fault plan; sequential replay compares the logical protocol history.
 go test ./internal/faulttest -run '^$' -fuzz '^FuzzReplay$' -fuzztime=30s -parallel=1
 ```
 
+The shared Porcupine adapter checks rolling hash vectors and accepts/rejects
+known histories, including uncertain appends and lost acknowledged records.
+
+```sh
+git clone https://github.com/s2-streamstore/s2-verification /tmp/s2-verification
+git -C /tmp/s2-verification checkout b4af8c8ef4965d9b335101c422eadb33f3169004
+(cd /tmp/s2-verification/golang/s2-porcupine && go build -mod=readonly -o /tmp/s2-porcupine .)
+export S2_PORCUPINE=/tmp/s2-porcupine
+go test -race ./internal/faulttest
+```
+
 Tests requiring a binary skip when it is unset. CI supplies the required
 binaries and runs the race detector and fuzzers. `S2_FAULT_OUTPUT` chooses the
 artifact parent directory; successful runs clean up their files.
