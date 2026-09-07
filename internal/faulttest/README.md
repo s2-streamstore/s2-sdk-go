@@ -41,6 +41,21 @@ export S2_PORCUPINE=/tmp/s2-porcupine
 go test -race ./internal/faulttest
 ```
 
+Concurrent tests race unary appends, sessions, producers, reads, and tail checks
+against Lite through the proxy, with sequence guards, fencing, and faults.
+Each trace gets a fresh basin; fuzz workers share the coordinator-owned Lite process.
+
+```sh
+go test ./internal/faulttest -run '^$' -fuzz '^FuzzConcurrent$' -fuzztime=30s -parallel=1
+S2_CONCURRENT_TRACE=/path/to/trace.json go test ./internal/faulttest -run '^TestConcurrent$' -count=1
+/tmp/s2-porcupine -file=/path/to/history.jsonl
+```
+
+Concurrent failures retain `history.jsonl` and any checker visualization.
+A trace repeats inputs and fault triggers; Lite timing and goroutine scheduling
+can vary. JSONL rechecks the exact observed history. Unknown appends remain
+pending; writers use `NoSideEffects` to avoid intentional duplicates.
+
 Tests requiring a binary skip when it is unset. CI supplies the required
 binaries and runs the race detector and fuzzers. `S2_FAULT_OUTPUT` chooses the
 artifact parent directory; successful runs clean up their files.
