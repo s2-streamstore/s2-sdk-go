@@ -117,6 +117,7 @@ jobs:
       - name: Configure fault harness
         run: |
           {
+            echo "S2_PORCUPINE=$RUNNER_TEMP/s2-porcupine"
             echo "S2_LITE_BIN=$RUNNER_TEMP/s2-lite/server"
             echo "S2_FAULT_OUTPUT=$RUNNER_TEMP/sdk-faults"
           } >> "$GITHUB_ENV"
@@ -124,6 +125,14 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version: "1.23"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: s2-streamstore/s2-verification
+          ref: b4af8c8ef4965d9b335101c422eadb33f3169004
+          path: .s2-verification
+      - name: Build shared checker
+        working-directory: .s2-verification/golang/s2-porcupine
+        run: go build -mod=readonly -o "$S2_PORCUPINE" .
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: server-binary

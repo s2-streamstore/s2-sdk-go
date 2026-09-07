@@ -7,8 +7,13 @@ require (
 	github.com/klauspost/compress v1.18.2
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/tidwall/btree v1.8.1
+	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/net v0.25.0
 	google.golang.org/protobuf v1.34.0
 )
 
-require golang.org/x/text v0.15.0 // indirect
+require (
+	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
+	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/text v0.15.0 // indirect
+)
