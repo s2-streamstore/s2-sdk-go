@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -25,18 +26,22 @@ import (
 
 type faultPlan struct {
 	Fault string
+	Reads []readFault
 }
 
 type faultProxy struct {
-	endpoint  string
-	upstream  *url.URL
-	transport *http2.Transport
-	mu        sync.Mutex
-	attempts  map[int]int
-	fired     map[int]bool
-	wire      []string
-	ops       []faultPlan
-	corrupt   func(proto.Message)
+	endpoint    string
+	upstream    *url.URL
+	transport   *http2.Transport
+	mu          sync.Mutex
+	attempts    map[int]int
+	fired       map[int]bool
+	wire        []string
+	ops         []faultPlan
+	readSeen    []chan struct{}
+	corrupt     func(proto.Message)
+	fragment    int
+	compression s2.CompressionType
 }
 
 func newFaultProxy(t *testing.T, endpoint string, plans []faultPlan) *faultProxy {
@@ -46,6 +51,9 @@ func newFaultProxy(t *testing.T, endpoint string, plans []faultPlan) *faultProxy
 		t.Fatal(err)
 	}
 	p := &faultProxy{upstream: u, ops: plans, attempts: make(map[int]int), fired: make(map[int]bool)}
+	for range plans {
+		p.readSeen = append(p.readSeen, make(chan struct{}, 1))
+	}
 	p.transport = &http2.Transport{AllowHTTP: true, DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 		if u.Scheme == "https" {
 			return (&tls.Dialer{Config: cfg}).DialContext(ctx, network, addr)
@@ -137,8 +145,8 @@ func (p *faultProxy) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Del("Content-Length")
 	w.WriteHeader(response.StatusCode)
 	w.(http.Flusher).Flush()
-	if response.StatusCode != http.StatusOK || (fault == "" && p.corrupt == nil) {
-		_, _ = io.Copy(flushWriter{w}, response.Body)
+	if response.StatusCode != http.StatusOK || (fault == "" && len(plan.Reads) == 0 && p.corrupt == nil) {
+		_, _ = io.Copy(flushWriter{w, p.fragment}, response.Body)
 		return
 	}
 	if !streaming {
@@ -153,10 +161,73 @@ func (p *faultProxy) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				data = p.rewrite(data, &pb.ReadBatch{})
 			}
 		}
-		_, _ = (flushWriter{w}).Write(data)
+		_, _ = (flushWriter{w, p.fragment}).Write(data)
 		return
 	}
-	_, _ = io.Copy(flushWriter{w}, response.Body)
+	readPlan := readFault{After: -1}
+	if !appendRequest {
+		if attempt <= len(plan.Reads) {
+			readPlan = plan.Reads[attempt-1]
+		}
+	}
+	frames := framing.NewFrameReader(response.Body)
+	delivered := 0
+	for {
+		if delivered == readPlan.After {
+			p.injectRead(w, id, readPlan.Kind)
+			return
+		}
+		frame, err := frames.ReadFrame()
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		data, err := frame.DecompressedBody()
+		if err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		status := 0
+		if frame.StatusCode != nil {
+			status = *frame.StatusCode
+		}
+		if !appendRequest && !frame.Terminal && (readPlan.After >= 0 || len(plan.Reads) > 0) {
+			var batch pb.ReadBatch
+			if proto.Unmarshal(data, &batch) != nil {
+				panic(http.ErrAbortHandler)
+			}
+			if len(batch.Records) > 0 {
+				for _, record := range batch.Records {
+					part, _ := proto.Marshal(&pb.ReadBatch{Records: []*pb.SequencedRecord{record}, Tail: batch.Tail})
+					if !p.writeFrame(w, part, false, status, frame.ReconnectAdvised) {
+						return
+					}
+					select {
+					case <-p.readSeen[id]:
+					case <-req.Context().Done():
+						return
+					}
+					delivered++
+					if delivered == readPlan.After {
+						p.injectRead(w, id, readPlan.Kind)
+						return
+					}
+				}
+				continue
+			}
+		}
+		if p.corrupt != nil && !frame.Terminal {
+			if appendRequest {
+				data = p.rewrite(data, &pb.AppendAck{})
+			} else {
+				data = p.rewrite(data, &pb.ReadBatch{})
+			}
+		}
+		if !p.writeFrame(w, data, frame.Terminal, status, frame.ReconnectAdvised) || frame.Terminal {
+			return
+		}
+	}
 }
 
 func (p *faultProxy) rewrite(data []byte, message proto.Message) []byte {
@@ -171,22 +242,34 @@ func (p *faultProxy) rewrite(data []byte, message proto.Message) []byte {
 	return data
 }
 
+func (p *faultProxy) injectRead(w http.ResponseWriter, id int, kind string) {
+	p.injected(id, kind)
+	switch kind {
+	case "reset":
+		panic(http.ErrAbortHandler)
+	case "unavailable":
+		p.replyError(w, true, http.StatusServiceUnavailable, "unavailable")
+	case "truncate":
+		_, _ = (flushWriter{w, p.fragment}).Write([]byte{0, 0, 10, 0, 1})
+	}
+}
+
 func (p *faultProxy) replyError(w http.ResponseWriter, streaming bool, status int, code string) {
 	data, _ := json.Marshal(s2.ErrorInfo{Code: code, Message: code})
 	if streaming {
 		p.writeFrame(w, data, true, status, false)
 	} else {
 		w.WriteHeader(status)
-		_, _ = (flushWriter{w}).Write(data)
+		_, _ = (flushWriter{w, p.fragment}).Write(data)
 	}
 }
 
 func (p *faultProxy) writeFrame(w http.ResponseWriter, data []byte, terminal bool, status int, reconnect bool) bool {
-	wire := framing.CreateFrameWithStatus(data, terminal, framing.CompressionNone, status)
+	wire := framing.CreateFrameWithStatus(data, terminal, p.compression, status)
 	if reconnect {
 		wire[3] |= 0x10
 	}
-	_, err := (flushWriter{w}).Write(wire)
+	_, err := (flushWriter{w, p.fragment}).Write(wire)
 	return err == nil
 }
 
@@ -199,10 +282,23 @@ func (p *faultProxy) injected(id int, fault string) {
 
 type flushWriter struct {
 	http.ResponseWriter
+	fragment int
 }
 
 func (w flushWriter) Write(data []byte) (int, error) {
-	n, err := w.ResponseWriter.Write(data)
-	w.ResponseWriter.(http.Flusher).Flush()
-	return n, err
+	written := 0
+	for len(data) > 0 {
+		n := len(data)
+		if w.fragment > 0 && n > w.fragment {
+			n = w.fragment
+		}
+		count, err := w.ResponseWriter.Write(data[:n])
+		written += count
+		if err != nil {
+			return written, err
+		}
+		w.ResponseWriter.(http.Flusher).Flush()
+		data = data[n:]
+	}
+	return written, nil
 }
