@@ -62,7 +62,7 @@ func newFaultProxy(t *testing.T, endpoint string, operations int) *faultProxy {
 }
 
 func (p *faultProxy) serveHTTP(w http.ResponseWriter, req *http.Request) {
-	parts := strings.SplitN(strings.TrimPrefix(req.URL.Path, "/op/"), "/", 2)
+	parts := strings.SplitN(strings.TrimPrefix(req.URL.EscapedPath(), "/op/"), "/", 2)
 	id, err := strconv.Atoi(parts[0])
 	if err != nil || len(parts) != 2 || id < 0 || id >= p.ops {
 		http.Error(w, "invalid operation", http.StatusBadRequest)
@@ -70,7 +70,8 @@ func (p *faultProxy) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	request := req.Clone(req.Context())
 	request.URL.Scheme, request.URL.Host = p.upstream.Scheme, p.upstream.Host
-	request.URL.Path = "/" + parts[1]
+	request.URL.RawPath = "/" + parts[1]
+	request.URL.Path, _ = url.PathUnescape(request.URL.RawPath)
 	request.Host = p.upstream.Host
 	request.RequestURI = ""
 	response, err := p.transport.RoundTrip(request)

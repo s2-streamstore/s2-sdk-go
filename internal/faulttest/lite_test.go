@@ -140,7 +140,7 @@ func provision(t *testing.T, endpoint string) (string, string) {
 		defer cancel()
 		_ = client.Basins.Delete(ctx, basin)
 	})
-	name := s2.StreamName("history")
+	name := s2.StreamName("history/with spaces%2F?#")
 	if _, err := client.Basin(string(basin)).Streams.Create(ctx, s2.CreateStreamArgs{Stream: name}); err != nil {
 		t.Fatal(err)
 	}
