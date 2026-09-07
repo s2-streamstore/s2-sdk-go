@@ -25,8 +25,14 @@ import (
 )
 
 type faultPlan struct {
+	Input *s2.AppendInput
 	Fault string
 	Reads []readFault
+}
+
+type observedAppend struct {
+	input            *s2.AppendInput
+	start, end, tail uint64
 }
 
 type faultProxy struct {
@@ -36,6 +42,7 @@ type faultProxy struct {
 	mu          sync.Mutex
 	attempts    map[int]int
 	fired       map[int]bool
+	committed   []observedAppend
 	wire        []string
 	ops         []faultPlan
 	readSeen    []chan struct{}
@@ -135,6 +142,9 @@ func (p *faultProxy) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		if err != nil || proto.Unmarshal(data, &ack) != nil || ack.Start == nil || ack.End == nil || ack.Tail == nil {
 			panic(http.ErrAbortHandler)
 		}
+		p.mu.Lock()
+		p.committed = append(p.committed, observedAppend{input: plan.Input, start: ack.Start.SeqNum, end: ack.End.SeqNum, tail: ack.Tail.SeqNum})
+		p.mu.Unlock()
 		p.injected(id, fault)
 		p.replyError(w, streaming, http.StatusServiceUnavailable, "unavailable")
 		return
@@ -168,6 +178,9 @@ func (p *faultProxy) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	if !appendRequest {
 		if attempt <= len(plan.Reads) {
 			readPlan = plan.Reads[attempt-1]
+		}
+		if fault == readReset {
+			readPlan = readFault{After: 1, Kind: "reset"}
 		}
 	}
 	frames := framing.NewFrameReader(response.Body)

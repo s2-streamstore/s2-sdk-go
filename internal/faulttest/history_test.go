@@ -20,8 +20,6 @@ import (
 	"github.com/zeebo/xxh3"
 )
 
-const fenceCommand = "fence"
-
 const verificationRevision = "b4af8c8ef4965d9b335101c422eadb33f3169004"
 
 type historyEvent struct {
