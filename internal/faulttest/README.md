@@ -56,6 +56,15 @@ A trace repeats inputs and fault triggers; Lite timing and goroutine scheduling
 can vary. JSONL rechecks the exact observed history. Unknown appends remain
 pending; writers use `NoSideEffects` to avoid intentional duplicates.
 
+`TestLiteDurability` kills Lite after observing a committed ACK and restarts it
+on the same storage. It checks the history, acknowledged payloads, a second
+restart, and persisted fencing. Each crash test owns a separate process and
+storage directory. Use `S2_CONCURRENT_TRACE` with this test to replay crashes.
+
+`TestConcurrentEndpoint` accepts `S2_FAULT_ENDPOINT` and `S2_FAULT_ACCESS_TOKEN`
+for an existing shared endpoint, through the same proxy. It creates and deletes
+a dedicated test basin.
+
 Tests requiring a binary skip when it is unset. CI supplies the required
 binaries and runs the race detector and fuzzers. `S2_FAULT_OUTPUT` chooses the
 artifact parent directory; successful runs clean up their files.

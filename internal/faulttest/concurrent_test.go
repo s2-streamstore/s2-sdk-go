@@ -18,13 +18,14 @@ import (
 )
 
 const (
-	opAppend     = "append"
-	opSession    = "session"
-	opProducer   = "producer"
-	opRead       = "read"
-	opTail       = "tail"
-	readReset    = "read_reset"
-	fenceCommand = "fence"
+	opAppend         = "append"
+	opSession        = "session"
+	opProducer       = "producer"
+	opRead           = "read"
+	opTail           = "tail"
+	readReset        = "read_reset"
+	crashAfterCommit = "crash_after_commit"
+	fenceCommand     = "fence"
 )
 
 type operation struct {
@@ -84,7 +85,7 @@ func (s concurrentTrace) validate() error {
 				if op.Input == nil || len(op.Input.Records) != 1 {
 					return fmt.Errorf("concurrent append operations require one record")
 				}
-				if op.Fault != "" && op.Fault != beforeCommit && op.Fault != afterCommit {
+				if op.Fault != "" && op.Fault != beforeCommit && op.Fault != afterCommit && op.Fault != crashAfterCommit {
 					return fmt.Errorf("invalid append fault %q", op.Fault)
 				}
 			case opRead, opTail:
@@ -172,10 +173,10 @@ func FuzzConcurrent(f *testing.F) {
 func runConcurrentLite(t *testing.T, checker, endpoint string, script concurrentTrace) {
 	t.Helper()
 	basin, stream := provision(t, endpoint)
-	runConcurrent(t, checker, endpoint, basin, stream, script)
+	runConcurrent(t, checker, endpoint, basin, stream, script, nil, nil)
 }
 
-func runConcurrent(t *testing.T, checker, endpoint, basin, streamName string, script concurrentTrace) {
+func runConcurrent(t *testing.T, checker, endpoint, basin, streamName string, script concurrentTrace, crash func() error, afterWave func() error) {
 	t.Helper()
 	if err := script.validate(); err != nil {
 		t.Fatal(err)
@@ -195,6 +196,7 @@ func runConcurrent(t *testing.T, checker, endpoint, basin, streamName string, sc
 		}
 	}
 	p := newFaultProxy(t, endpoint, plans)
+	p.crash = crash
 	h := &history{}
 	defer func() {
 		_ = os.WriteFile(filepath.Join(dir, "history.jsonl"), h.jsonl(), 0600)
@@ -212,6 +214,15 @@ func runConcurrent(t *testing.T, checker, endpoint, basin, streamName string, sc
 	for _, wave := range script.Waves {
 		var wg sync.WaitGroup
 		start := make(chan struct{})
+		crashing := false
+		for _, op := range wave {
+			if op.Fault == crashAfterCommit {
+				if crash == nil {
+					t.Fatal("crash_after_commit requires a managed Lite process")
+				}
+				crashing = true
+			}
+		}
 		for _, op := range wave {
 			opID := id
 			id++
@@ -232,10 +243,10 @@ func runConcurrent(t *testing.T, checker, endpoint, basin, streamName string, sc
 				case opAppend, opSession, opProducer:
 					ack, err := performAppend(ctx, client, op)
 					h.finish(opID, appendFinish(ack, err))
-					if err == nil && op.Fault == afterCommit {
+					if err == nil && (op.Fault == afterCommit || op.Fault == crashAfterCommit) {
 						violation = fmt.Errorf("op %d: append succeeded despite a withheld ACK", opID)
 					}
-					if op.Fault != afterCommit && err != nil {
+					if !crashing && op.Fault != afterCommit && err != nil {
 						var apiErr *s2.S2Error
 						guarded := op.Input.MatchSeqNum != nil || op.Input.FencingToken != nil
 						if !guarded || !errors.As(err, &apiErr) || apiErr.Status != http.StatusPreconditionFailed {
@@ -254,7 +265,9 @@ func runConcurrent(t *testing.T, checker, endpoint, basin, streamName string, sc
 					records, err := readPrefix(ctx, client, p.readSeen[opID])
 					if err != nil {
 						h.finish(opID, "ReadFailure")
-						violation = fmt.Errorf("op %d: read failed: %w", opID, err)
+						if !crashing {
+							violation = fmt.Errorf("op %d: read failed: %w", opID, err)
+						}
 					} else {
 						h.finish(opID, map[string]any{"ReadSuccess": map[string]uint64{"tail": uint64(len(records)), "stream_hash": streamHash(records)}})
 						violation = contiguous(records)
@@ -263,7 +276,9 @@ func runConcurrent(t *testing.T, checker, endpoint, basin, streamName string, sc
 					tail, err := client.CheckTail(ctx)
 					if err != nil {
 						h.finish(opID, "CheckTailFailure")
-						violation = fmt.Errorf("op %d: tail failed: %w", opID, err)
+						if !crashing {
+							violation = fmt.Errorf("op %d: tail failed: %w", opID, err)
+						}
 					} else {
 						h.finish(opID, map[string]any{"CheckTailSuccess": map[string]uint64{"tail": tail.Tail.SeqNum}})
 					}
@@ -277,6 +292,11 @@ func runConcurrent(t *testing.T, checker, endpoint, basin, streamName string, sc
 		}
 		close(start)
 		wg.Wait()
+		if afterWave != nil {
+			if err := afterWave(); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if ctx.Err() != nil {
 			t.Fatal(ctx.Err())
 		}
