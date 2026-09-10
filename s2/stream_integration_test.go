@@ -15,7 +15,11 @@ import (
 
 const streamTestTimeout = 60 * time.Second
 
-const errCodeResourceAlreadyExists = "resource_already_exists"
+const (
+	errCodeResourceAlreadyExists = "resource_already_exists"
+	errCodeValidation            = "VALIDATION"
+	errOriginSDK                 = "sdk"
+)
 
 var (
 	sharedTestClient    *s2.Client
@@ -1770,7 +1774,7 @@ func TestCreateStream_NameWithNulByte(t *testing.T) {
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: "a\x00b"})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Code != "VALIDATION" || s2Err.Origin != "sdk" {
+	if !errors.As(err, &s2Err) || s2Err.Code != errCodeValidation || s2Err.Origin != errOriginSDK {
 		t.Fatalf("Expected SDK validation error for stream name containing NUL byte, got %v", err)
 	}
 	t.Logf("Got expected SDK validation error: %v", err)
@@ -2062,7 +2066,7 @@ func TestAppend_FencingTokenTooLong(t *testing.T) {
 	})
 
 	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Origin != "sdk" {
+	if !errors.As(err, &s2Err) || s2Err.Origin != errOriginSDK {
 		t.Fatalf("Expected SDK validation error for fencing token too long, got: %v", err)
 	}
 	t.Logf("Got expected error: %v", err)
