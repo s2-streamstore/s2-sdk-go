@@ -628,10 +628,11 @@ func TestIssueAccessToken_InvalidID_NulByte(t *testing.T) {
 		ID:    "a\x00b",
 		Scope: s2.AccessTokenScope{Ops: []string{s2.OperationListBasins}},
 	})
-	if err == nil {
-		t.Error("Expected error for token ID containing NUL byte")
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Code != "VALIDATION" || s2Err.Origin != "sdk" {
+		t.Fatalf("Expected SDK validation error for token ID containing NUL byte, got %v", err)
 	}
-	t.Logf("Got expected error for token ID with NUL byte: %v", err)
+	t.Logf("Got expected SDK validation error: %v", err)
 }
 
 // --- Revoke Access Token Tests ---

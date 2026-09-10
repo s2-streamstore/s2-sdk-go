@@ -1769,10 +1769,11 @@ func TestCreateStream_NameWithNulByte(t *testing.T) {
 	basin := getSharedBasin(t)
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: "a\x00b"})
 
-	if err == nil {
-		t.Error("Expected error for stream name containing NUL byte, got nil")
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Code != "VALIDATION" || s2Err.Origin != "sdk" {
+		t.Fatalf("Expected SDK validation error for stream name containing NUL byte, got %v", err)
 	}
-	t.Logf("Got expected error (SDK validation or server): %v", err)
+	t.Logf("Got expected SDK validation error: %v", err)
 }
 
 func TestCreateStream_NameWithUnicode(t *testing.T) {
