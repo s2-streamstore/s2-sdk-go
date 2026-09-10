@@ -6,6 +6,7 @@ import (
 )
 
 // Access token ID.
+// It must be unique to the account and between 1 and 96 bytes in length, and must not contain NUL bytes.
 type AccessTokenID string
 
 // Basin name which must be globally unique.
@@ -14,7 +15,7 @@ type AccessTokenID string
 type BasinName string
 
 // Stream name that is unique to the basin.
-// It can be between 1 and 512 bytes in length.
+// It can be between 1 and 512 bytes in length, and must not contain NUL bytes.
 type StreamName string
 
 // LocationName identifies where a basin is placed.
@@ -612,8 +613,10 @@ type AppendSessionOptions struct {
 
 type ListAccessTokensArgs struct {
 	// Filter to access tokens whose IDs begin with this prefix.
+	// It must not contain NUL bytes.
 	Prefix string `json:"prefix,omitempty"`
 	// Filter to access tokens whose IDs lexicographically start after this string.
+	// It must not contain NUL bytes.
 	StartAfter string `json:"start_after,omitempty"`
 	// Number of results, up to a maximum of 1000.
 	Limit *int `json:"limit,omitempty"`
@@ -621,7 +624,7 @@ type ListAccessTokensArgs struct {
 
 type IssueAccessTokenArgs struct {
 	// Access token ID.
-	// It must be unique to the account and between 1 and 96 bytes in length.
+	// It must be unique to the account and between 1 and 96 bytes in length, and must not contain NUL bytes.
 	ID AccessTokenID `json:"id"`
 	// Access token scope.
 	Scope AccessTokenScope `json:"scope"`
@@ -693,9 +696,11 @@ type EnsureBasinResponse struct {
 
 type ListStreamsArgs struct {
 	// Filter to streams whose names begin with this prefix.
+	// It must not contain NUL bytes.
 	Prefix string `json:"prefix,omitempty"`
 	// Filter to streams whose names lexicographically start after this string.
 	// It must be greater than or equal to the `prefix` if specified.
+	// It must not contain NUL bytes.
 	StartAfter string `json:"start_after,omitempty"`
 	// Number of results, up to a maximum of 1000.
 	Limit *int `json:"limit,omitempty"`
@@ -705,7 +710,8 @@ type ListStreamsArgs struct {
 }
 
 type CreateStreamArgs struct {
-	// Stream name.
+	// Stream name that is unique to the basin.
+	// It can be between 1 and 512 bytes in length, and must not contain NUL bytes.
 	Stream StreamName `json:"stream"`
 	// Stream configuration.
 	Config *StreamConfig `json:"config,omitempty"`

@@ -1761,6 +1761,20 @@ func TestCreateStream_NameTooLong(t *testing.T) {
 	t.Logf("Got expected error (SDK validation or server): %v", err)
 }
 
+func TestCreateStream_NameWithNulByte(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
+	defer cancel()
+	t.Log("Testing: Create stream with name containing a NUL byte")
+
+	basin := getSharedBasin(t)
+	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: "a\x00b"})
+
+	if err == nil {
+		t.Error("Expected error for stream name containing NUL byte, got nil")
+	}
+	t.Logf("Got expected error (SDK validation or server): %v", err)
+}
+
 func TestCreateStream_NameWithUnicode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
