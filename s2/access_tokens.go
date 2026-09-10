@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 type AccessTokensClient struct {
@@ -153,6 +154,9 @@ func validateAccessTokenID(id AccessTokenID) error {
 	length := len(id)
 	if length < 1 || length > 96 {
 		return newValidationError("access token ID must be between 1 and 96 bytes")
+	}
+	if strings.ContainsRune(string(id), 0) {
+		return newValidationError("access token ID must not contain NUL bytes")
 	}
 	return nil
 }

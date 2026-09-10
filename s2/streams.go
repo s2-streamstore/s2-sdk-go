@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 type StreamsClient struct {
@@ -279,6 +280,9 @@ func validateStreamName(name StreamName) error {
 	length := len(name)
 	if length < 1 || length > 512 {
 		return newValidationError("stream name must be between 1 and 512 bytes")
+	}
+	if strings.ContainsRune(string(name), 0) {
+		return newValidationError("stream name must not contain NUL bytes")
 	}
 	return nil
 }

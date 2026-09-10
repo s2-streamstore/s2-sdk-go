@@ -617,6 +617,24 @@ func TestIssueAccessToken_InvalidID_TooLong(t *testing.T) {
 	t.Logf("Got expected error for too long token ID: %v", err)
 }
 
+func TestIssueAccessToken_InvalidID_NulByte(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), accessTokenTestTimeout)
+	defer cancel()
+	t.Log("Testing: Issue access token with ID containing a NUL byte (expects validation error)")
+
+	client := testClient(t)
+
+	_, err := client.AccessTokens.Issue(ctx, s2.IssueAccessTokenArgs{
+		ID:    "a\x00b",
+		Scope: s2.AccessTokenScope{Ops: []string{s2.OperationListBasins}},
+	})
+	var s2Err *s2.S2Error
+	if !errors.As(err, &s2Err) || s2Err.Code != errCodeValidation || s2Err.Origin != errOriginSDK {
+		t.Fatalf("Expected SDK validation error for token ID containing NUL byte, got %v", err)
+	}
+	t.Logf("Got expected SDK validation error: %v", err)
+}
+
 // --- Revoke Access Token Tests ---
 
 func TestRevokeAccessToken_Existing(t *testing.T) {
