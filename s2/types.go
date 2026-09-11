@@ -572,6 +572,12 @@ type AppendInput struct {
 	MatchSeqNum *uint64 `json:"match_seq_num,omitempty"`
 	// Enforce a fencing token, which starts out as an empty string that can be overridden by a `fence` command record.
 	FencingToken *string `json:"fencing_token,omitempty"`
+	// Stream configuration to apply if the stream is created on append.
+	// Unset fields inherit the basin's default stream configuration.
+	// Ignored if the stream already exists.
+	// Only used by [StreamClient.Append]; append sessions send it once at connect,
+	// see [AppendSessionOptions.StreamConfig].
+	StreamConfig *StreamConfig `json:"-"`
 }
 
 // Success response to an `append` request.
@@ -609,6 +615,11 @@ type AppendSessionOptions struct {
 	// Retry configuration for handling transient failures.
 	// Applies to management operations (basins, streams, tokens) and stream operations (read, append).
 	RetryConfig *RetryConfig
+	// Stream configuration to apply if the stream is created on append.
+	// Unset fields inherit the basin's default stream configuration.
+	// Ignored if the stream already exists.
+	// Sent when the session connects and reconnects.
+	StreamConfig *StreamConfig
 }
 
 type ListAccessTokensArgs struct {

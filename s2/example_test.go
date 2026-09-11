@@ -404,6 +404,27 @@ func ExampleStreamClient_Append() {
 	fmt.Printf("appended at seq=%d\n", ack.Start.SeqNum)
 }
 
+func ExampleStreamClient_Append_streamConfig() {
+	client := s2.New("your-access-token", nil)
+	stream := client.Basin("my-basin").Stream("my-stream")
+	ctx := context.Background()
+
+	// Applied only if the basin has create-on-append enabled and this append creates the stream.
+	ack, err := stream.Append(ctx, &s2.AppendInput{
+		Records: []s2.AppendRecord{
+			{Body: []byte("hello world")},
+		},
+		StreamConfig: &s2.StreamConfig{
+			RetentionPolicy: &s2.RetentionPolicy{Age: s2.Int64(3600)},
+		},
+	})
+	if err != nil {
+		log.Fatalf("append: %v", err)
+	}
+
+	fmt.Printf("appended at seq=%d\n", ack.Start.SeqNum)
+}
+
 func ExampleStreamClient_Read() {
 	client := s2.New("your-access-token", nil)
 	stream := client.Basin("my-basin").Stream("my-stream")

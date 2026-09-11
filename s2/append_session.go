@@ -420,7 +420,7 @@ func (r *AppendSession) getSession() error {
 	logInfo(r.streamClient.logger, "append pump opening transport session",
 		"stream", string(r.streamClient.name))
 
-	session, err := r.streamClient.createAppendSession(r.pumpCtx)
+	session, err := r.streamClient.createAppendSession(r.pumpCtx, r.options.StreamConfig)
 	if err != nil {
 		logError(r.streamClient.logger, "append pump failed to open transport session",
 			"stream", string(r.streamClient.name),

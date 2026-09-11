@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -60,6 +61,22 @@ func (b *BasinClient) StreamWithOptions(name StreamName, opts *StreamOptions) *S
 
 func (s *StreamClient) Name() StreamName {
 	return s.name
+}
+
+const s2StreamConfigHeader = "s2-stream-config"
+
+func setStreamConfigHeader(headers http.Header, config *StreamConfig) error {
+	if config == nil {
+		return nil
+	}
+
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return newValidationError(fmt.Sprintf("encode stream config: %v", err))
+	}
+
+	headers.Set(s2StreamConfigHeader, string(encoded))
+	return nil
 }
 
 func (s *StreamClient) getHTTPClient() *http.Client {
@@ -260,6 +277,7 @@ func cloneAppendInput(input *AppendInput) *AppendInput {
 		Records:      cloneAppendRecords(input.Records),
 		MatchSeqNum:  cloneUint64Ptr(input.MatchSeqNum),
 		FencingToken: cloneStringPtr(input.FencingToken),
+		StreamConfig: input.StreamConfig,
 	}
 }
 

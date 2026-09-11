@@ -244,7 +244,7 @@ func TestStreamWithOptionsAppendSessionSetsEncryptionHeader(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	session, err := stream.createAppendSession(ctx)
+	session, err := stream.createAppendSession(ctx, nil)
 	if err != nil {
 		t.Fatalf("create append session failed: %v", err)
 	}
