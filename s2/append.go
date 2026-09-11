@@ -58,6 +58,7 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 			pbInput,
 			&pbAck,
 			s.encryptionKey,
+			prepared.StreamConfig,
 		); err != nil {
 			return nil, err
 		}
@@ -74,6 +75,7 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 
 type transportAppendSession struct {
 	streamClient      *StreamClient
+	streamConfig      *StreamConfig
 	acksCh            chan *AppendAck
 	errorsCh          chan error
 	closed            chan struct{}
@@ -89,7 +91,7 @@ type transportAppendSession struct {
 	halfCloseOnce     sync.Once
 }
 
-func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppendSession, error) {
+func (s *StreamClient) createAppendSession(ctx context.Context, streamConfig *StreamConfig) (*transportAppendSession, error) {
 	if s.appendSessionFactory != nil {
 		return s.appendSessionFactory(ctx)
 	}
@@ -98,6 +100,7 @@ func (s *StreamClient) createAppendSession(ctx context.Context) (*transportAppen
 
 	session := &transportAppendSession{
 		streamClient: s,
+		streamConfig: streamConfig,
 		acksCh:       make(chan *AppendAck, appendAckChannelBuffer),
 		errorsCh:     make(chan error, 1),
 		closed:       make(chan struct{}),
@@ -140,6 +143,9 @@ func (p *transportAppendSession) start(ctx context.Context) error {
 		req.Header.Set("s2-basin", basinName)
 	}
 	setEncryptionKeyHeader(req.Header, p.streamClient.encryptionKey)
+	if err := setStreamConfigHeader(req.Header, p.streamConfig); err != nil {
+		return err
+	}
 
 	p.mu.Lock()
 	p.requestWriter = pipeWriter

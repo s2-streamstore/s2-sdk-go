@@ -48,6 +48,10 @@ type ReadOptions struct {
 	// Filtering is performed client-side.
 	// Defaults to false.
 	IgnoreCommandRecords bool `json:"-"`
+	// Stream configuration to apply if the stream is created on read.
+	// Unset fields inherit the basin's default stream configuration.
+	// Ignored if the stream already exists.
+	StreamConfig *StreamConfig `json:"-"`
 }
 
 func buildReadQueryParams(opts *ReadOptions) string {
@@ -93,6 +97,11 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		path += "?" + queryParams
 	}
 
+	var streamConfig *StreamConfig
+	if opts != nil {
+		streamConfig = opts.StreamConfig
+	}
+
 	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
 		httpClient := &httpClient{
 			client:      s.basinClient.httpClient,
@@ -111,6 +120,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 			nil,
 			&pbBatch,
 			s.encryptionKey,
+			streamConfig,
 		); err != nil {
 			return nil, err
 		}
@@ -470,6 +480,11 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		req.Header.Set("s2-basin", basinName)
 	}
 	setEncryptionKeyHeader(req.Header, r.streamClient.encryptionKey)
+	if opts != nil {
+		if err := setStreamConfigHeader(req.Header, opts.StreamConfig); err != nil {
+			return err
+		}
+	}
 
 	resp, err := r.streamClient.getHTTPClient().Do(req)
 	if err != nil {

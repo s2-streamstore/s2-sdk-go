@@ -128,6 +128,7 @@ func (h *httpClient) requestProto(
 	body proto.Message,
 	result proto.Message,
 	encryptionKey *EncryptionKey,
+	streamConfig *StreamConfig,
 ) error {
 	const protoContentType = "application/protobuf"
 	logInfo(h.logger, "s2 http proto request",
@@ -135,6 +136,7 @@ func (h *httpClient) requestProto(
 		"path", path,
 		"url", h.baseURL+path,
 		"encryption", encryptionKey != nil,
+		"stream_config", streamConfig != nil,
 		"compression", h.compression.ContentEncoding(),
 	)
 
@@ -179,6 +181,9 @@ func (h *httpClient) requestProto(
 		req.Header.Set("s2-basin", h.basinName)
 	}
 	setEncryptionKeyHeader(req.Header, encryptionKey)
+	if err := setStreamConfigHeader(req.Header, streamConfig); err != nil {
+		return err
+	}
 
 	resp, err := h.client.Do(req)
 	if err != nil {
