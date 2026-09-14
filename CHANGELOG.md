@@ -2,12 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.23.0] - 2026-09-14
+
+### Features
+
+- Reject NUL bytes in stream names and access token IDs ([#384](https://github.com/s2-streamstore/s2-sdk-go/issues/384))
+- S2-stream-config header support ([#385](https://github.com/s2-streamstore/s2-sdk-go/issues/385))
+
+### Testing
+
+- Run the public SDK through a proxy to Lite (1/6) ([#377](https://github.com/s2-streamstore/s2-sdk-go/issues/377))
+
+### Miscellaneous Tasks
+
+- Update s2-specs to edaa1fb ([#386](https://github.com/s2-streamstore/s2-sdk-go/issues/386))
+
 ## [v0.22.1] - 2026-09-06
 
 ### Performance
 
 - Marshal appends directly into frames ([#359](https://github.com/s2-streamstore/s2-sdk-go/issues/359))
 - Flatten append protobuf allocations ([#360](https://github.com/s2-streamstore/s2-sdk-go/issues/360))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.22.1 ([#376](https://github.com/s2-streamstore/s2-sdk-go/issues/376))
 
 ## [v0.22.0] - 2026-09-02
 
