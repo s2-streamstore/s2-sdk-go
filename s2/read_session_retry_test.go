@@ -76,6 +76,29 @@ func TestReadSessionBuildAttemptOptions_DoesNotOverSubtract(t *testing.T) {
 	}
 }
 
+// Regression for the s2-stream-config header drop: buildAttemptOptions must not
+// collapse *ReadOptions to nil when the only meaningful field set is StreamConfig,
+// otherwise runOnce's `if opts != nil` header-setting block is skipped and the
+// s2-stream-config header is never attached to the read-session request.
+func TestReadSessionBuildAttemptOptions_KeepsStreamConfig(t *testing.T) {
+	r := &streamReader{
+		baseOpts: cloneReadSessionOptions(&ReadOptions{StreamConfig: testStreamConfig()}),
+	}
+
+	opts := r.buildAttemptOptions(0)
+	if opts == nil {
+		t.Fatalf("expected non-nil options when only StreamConfig is set, got nil")
+	}
+	if opts.StreamConfig == nil {
+		t.Fatalf("expected StreamConfig to be preserved on attempt options, got nil")
+	}
+	if opts.SeqNum != nil || opts.Timestamp != nil || opts.TailOffset != nil ||
+		opts.Count != nil || opts.Bytes != nil || opts.Wait != nil ||
+		opts.Until != nil || opts.Clamp != nil {
+		t.Fatalf("expected all position/bound fields to be nil, got %+v", opts)
+	}
+}
+
 type staticStatusRoundTripper struct {
 	status int
 	body   []byte

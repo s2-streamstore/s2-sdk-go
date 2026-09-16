@@ -94,6 +94,60 @@ func TestReadSessionSetsStreamConfigHeader(t *testing.T) {
 	assertHeaderCaptured(t, rt.headerCh, testStreamConfigHeader)
 }
 
+// Regression for the s2-stream-config header drop on the read-session path.
+// The full flow ReadSession -> newStreamReader -> run -> buildAttemptOptions ->
+// runOnce (the only path real callers use) must attach the s2-stream-config
+// header to the first outbound request when only StreamConfig is set and every
+// position/bound field is nil. The direct-runOnce test above bypasses
+// buildAttemptOptions and so does not exercise the nil-guard that dropped it.
+func TestReadSessionStreamConfigOnlySendsHeader(t *testing.T) {
+	rt := &streamConfigHeaderRoundTripper{headerCh: make(chan string, 1)}
+	stream := newTestStreamClientWithTransport(rt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	session, err := stream.ReadSession(ctx, &ReadOptions{StreamConfig: testStreamConfig()})
+	if err != nil {
+		t.Fatalf("ReadSession failed: %v", err)
+	}
+	defer session.Close()
+
+	assertHeaderCaptured(t, rt.headerCh, testStreamConfigHeader)
+	if !rt.present {
+		t.Fatalf("expected s2-stream-config header to be present on the request")
+	}
+}
+
+// No-regression for the fix: a bare ReadOptions with no StreamConfig and no
+// position/bound fields must continue to omit the s2-stream-config header
+// (buildAttemptOptions collapses to nil and runOnce skips setStreamConfigHeader).
+func TestReadSessionBareOptionsOmitsHeader(t *testing.T) {
+	rt := &streamConfigHeaderRoundTripper{headerCh: make(chan string, 1)}
+	stream := newTestStreamClientWithTransport(rt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	session, err := stream.ReadSession(ctx, &ReadOptions{})
+	if err != nil {
+		t.Fatalf("ReadSession failed: %v", err)
+	}
+	defer session.Close()
+
+	select {
+	case got := <-rt.headerCh:
+		if got != "" {
+			t.Fatalf("expected empty s2-stream-config header for bare options, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for read session request")
+	}
+	if rt.present {
+		t.Fatalf("expected s2-stream-config header to be absent, but it was present")
+	}
+}
+
 func TestAppendWithoutStreamConfigOmitsHeader(t *testing.T) {
 	rt := &streamConfigHeaderRoundTripper{response: &pb.AppendAck{}}
 	stream := newTestStreamClientWithTransport(rt)
