@@ -277,7 +277,7 @@ func cloneAppendInput(input *AppendInput) *AppendInput {
 		Records:      cloneAppendRecords(input.Records),
 		MatchSeqNum:  cloneUint64Ptr(input.MatchSeqNum),
 		FencingToken: cloneStringPtr(input.FencingToken),
-		StreamConfig: input.StreamConfig,
+		StreamConfig: cloneStreamConfigPtr(input.StreamConfig),
 	}
 }
 
@@ -333,6 +333,60 @@ func cloneEncryptionKeyPtr(src *EncryptionKey) *EncryptionKey {
 	return &val
 }
 
+func cloneInt64Ptr(src *int64) *int64 {
+	if src == nil {
+		return nil
+	}
+	val := *src
+	return &val
+}
+
+func cloneBoolPtr(src *bool) *bool {
+	if src == nil {
+		return nil
+	}
+	val := *src
+	return &val
+}
+
+// cloneStreamConfigPtr deep-copies a [StreamConfig] and every nested pointer
+// field so the SDK does not retain references to caller-owned mutable state
+// across retries and background goroutines.
+func cloneStreamConfigPtr(src *StreamConfig) *StreamConfig {
+	if src == nil {
+		return nil
+	}
+	clone := &StreamConfig{}
+	if src.DeleteOnEmpty != nil {
+		v := *src.DeleteOnEmpty
+		v.MinAgeSecs = cloneInt64Ptr(src.DeleteOnEmpty.MinAgeSecs)
+		clone.DeleteOnEmpty = &v
+	}
+	if src.RetentionPolicy != nil {
+		v := *src.RetentionPolicy
+		v.Age = cloneInt64Ptr(src.RetentionPolicy.Age)
+		if src.RetentionPolicy.Infinite != nil {
+			inf := *src.RetentionPolicy.Infinite
+			v.Infinite = &inf
+		}
+		clone.RetentionPolicy = &v
+	}
+	if src.StorageClass != nil {
+		v := *src.StorageClass
+		clone.StorageClass = &v
+	}
+	if src.Timestamping != nil {
+		v := *src.Timestamping
+		if src.Timestamping.Mode != nil {
+			mode := *src.Timestamping.Mode
+			v.Mode = &mode
+		}
+		v.Uncapped = cloneBoolPtr(src.Timestamping.Uncapped)
+		clone.Timestamping = &v
+	}
+	return clone
+}
+
 func cloneReadSessionOptions(opts *ReadOptions) *ReadOptions {
 	if opts == nil {
 		return nil
@@ -372,6 +426,7 @@ func cloneReadSessionOptions(opts *ReadOptions) *ReadOptions {
 		val := *opts.Clamp
 		clone.Clamp = &val
 	}
+	clone.StreamConfig = cloneStreamConfigPtr(opts.StreamConfig)
 
 	return &clone
 }
