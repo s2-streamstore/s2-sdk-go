@@ -495,6 +495,21 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 		}
 	}()
 	adviceHandled := false
+	processAck := func(ack *AppendAck) {
+		r.handleAck(session, ack)
+		if session.ReconnectAdvised() && !adviceHandled {
+			adviceHandled = true
+			if r.shouldReconnectOnAdvice() {
+				reconnectAccepted = true
+				// Half-close so the server acknowledges accepted appends
+				// and then ends the response.
+				session.halfClose()
+			} else {
+				session.declineReconnect()
+				r.wakeupPump()
+			}
+		}
+	}
 	acksCh := session.acksCh
 
 	for {
@@ -506,26 +521,14 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 				acksCh = nil
 				continue
 			}
-			r.handleAck(session, ack)
-			if session.ReconnectAdvised() && !adviceHandled {
-				adviceHandled = true
-				if r.shouldReconnectOnAdvice() {
-					reconnectAccepted = true
-					// Half-close so the server acknowledges accepted appends
-					// and then ends the response.
-					session.halfClose()
-				} else {
-					session.declineReconnect()
-					r.wakeupPump()
-				}
-			}
+			processAck(ack)
 
 		case err, ok := <-session.errorsCh:
 			if !ok {
 				// errorsCh closes before acksCh, so drain any remaining
 				// ACKs before treating the response as complete.
 				for ack := range session.acksCh {
-					r.handleAck(session, ack)
+					processAck(ack)
 				}
 				endedCleanly = true
 				return
@@ -542,7 +545,7 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 					if !ok {
 						break drainAcks
 					}
-					r.handleAck(session, ack)
+					processAck(ack)
 				default:
 					break drainAcks
 				}
