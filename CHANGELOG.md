@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.23.1] - 2026-09-19
+
+### Bug Fixes
+
+- Preserve buffered append ACKs during session teardown ([#392](https://github.com/s2-streamstore/s2-sdk-go/issues/392))
+- *(producer)* Preserve successful flush across parent cancellation ([#393](https://github.com/s2-streamstore/s2-sdk-go/issues/393))
+- *(read)* Preserve stream config in read session attempts ([#394](https://github.com/s2-streamstore/s2-sdk-go/issues/394))
+- *(client)* Bound streaming TLS handshakes by connection timeout ([#395](https://github.com/s2-streamstore/s2-sdk-go/issues/395))
+
 ## [v0.23.0] - 2026-09-14
 
 ### Features
@@ -16,6 +25,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Update s2-specs to edaa1fb ([#386](https://github.com/s2-streamstore/s2-sdk-go/issues/386))
+- *(release)* V0.23.0 ([#387](https://github.com/s2-streamstore/s2-sdk-go/issues/387))
 
 ## [v0.22.1] - 2026-09-06
 
