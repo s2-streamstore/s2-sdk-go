@@ -48,6 +48,7 @@ type ClientOptions struct {
 	// Defaults to 5 seconds.
 	RequestTimeout time.Duration
 	// Timeout for establishing TCP connections.
+	// For streaming HTTPS requests, this also includes the TLS handshake.
 	// Defaults to 3 seconds.
 	ConnectionTimeout time.Duration
 	// Compression algorithm for request bodies.
@@ -242,6 +243,9 @@ func newStreamingTransport(connectionTimeout time.Duration) http.RoundTripper {
 		WriteByteTimeout:           http2WriteByteTimeout,
 		StrictMaxConcurrentStreams: false,
 		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+			ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+			defer cancel()
+
 			conn, err := dialer.DialContext(ctx, network, addr)
 			if err != nil {
 				return nil, err
