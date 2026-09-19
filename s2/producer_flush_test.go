@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
@@ -296,6 +297,68 @@ func TestProducer_FlushPropagatesTerminalAckError(t *testing.T) {
 	}
 	if err := producer.Close(); err != conditionErr {
 		t.Fatalf("close error: %v", err)
+	}
+}
+
+func TestProducer_FlushSucceedsWhenParentCanceledAfterCoveredAck(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), flushTestTimeout)
+	defer cancel()
+	parent, cancelParent := context.WithCancel(context.Background())
+	batcher := NewBatcher(parent, &BatchingOptions{
+		MaxRecords: 100,
+		Linger:     time.Hour,
+	})
+	session := newControlledAppendSession()
+	producer := newProducerWithSession(parent, batcher, session)
+
+	// Hold the barrier between ticket resolution and barrier completion.
+	producer.ackWG.Add(1)
+	releaseBarrier := sync.OnceFunc(producer.ackWG.Done)
+	defer func() {
+		cancelParent()
+		releaseBarrier()
+		_ = producer.Close()
+	}()
+
+	ticket := submitRecord(t, producer, "durable")
+	flushDone := startFlush(producer, ctx)
+	call := nextAppendCall(t, session)
+	for len(batcher.batchesCh) == 0 {
+		if ctx.Err() != nil {
+			t.Fatal("flush barrier was not ordered")
+		}
+		runtime.Gosched()
+	}
+	call.accept()
+	call.resolve(appendAck(41, 42), nil)
+	ack, err := ticket.Ack(ctx)
+	if err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+	if ack.SeqNum() != 41 {
+		t.Fatalf("seq num: %d, want 41", ack.SeqNum())
+	}
+
+	cancelParent()
+	for producer.terminalError() == nil {
+		if ctx.Err() != nil {
+			t.Fatal("parent cancellation was not recorded")
+		}
+		runtime.Gosched()
+	}
+	releaseBarrier()
+
+	if err := waitFlush(t, flushDone); err != nil {
+		t.Fatalf("flush of durably acknowledged record: %v", err)
+	}
+	if _, err := producer.Submit(AppendRecord{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("submit after cancellation: %v", err)
+	}
+	if err := producer.Flush(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("flush after cancellation: %v", err)
+	}
+	if err := producer.Close(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("close after cancellation: %v", err)
 	}
 }
 

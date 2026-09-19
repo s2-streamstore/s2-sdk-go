@@ -27,6 +27,7 @@ type Producer struct {
 	consumerDone chan struct{}
 	errMu        sync.RWMutex
 	terminalErr  error
+	appendErr    error
 	closing      atomic.Bool
 	closeOnce    sync.Once
 	closeDone    chan struct{}
@@ -236,6 +237,8 @@ func (p *Producer) mapSubmitError(err error) error {
 // stops this call's wait, while ordering and draining the barrier continue in
 // the background. If a covered append fails, the error is terminal, closes the
 // Producer, and is returned by subsequent Submit, Flush, and Close calls.
+// Canceling the Producer's parent context does not fail an ordered barrier
+// whose covered records were all durably acknowledged.
 // Unlike [Batcher.Flush], this method waits for durable acknowledgments.
 func (p *Producer) Flush(ctx context.Context) error {
 	if ctx == nil {
@@ -298,7 +301,7 @@ func (p *Producer) consumeBatches() {
 		}
 		if batch.barrier != nil {
 			p.ackWG.Wait()
-			batch.barrier <- p.terminalError()
+			batch.barrier <- p.appendError()
 		}
 	}
 	p.ackWG.Wait()
@@ -416,10 +419,22 @@ func (p *Producer) resolveSynchronousBatchError(meta []recordMeta, err error) {
 }
 
 func (p *Producer) dispatchBatchError(meta []recordMeta, err error) {
+	p.errMu.Lock()
+	if p.appendErr == nil {
+		p.appendErr = err
+	}
+	p.errMu.Unlock()
+
 	releaseProducerPermits(meta)
 	for _, m := range meta {
 		m.resolve(&producerOutcome{err: err})
 	}
+}
+
+func (p *Producer) appendError() error {
+	p.errMu.RLock()
+	defer p.errMu.RUnlock()
+	return p.appendErr
 }
 
 func (p *Producer) terminalError() error {
