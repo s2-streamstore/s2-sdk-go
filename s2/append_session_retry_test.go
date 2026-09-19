@@ -258,10 +258,10 @@ func TestAppendSession_CloseDrainsInflight(t *testing.T) {
 	}
 
 	stream := newTestStreamClientForAppend(retryCfg)
-	var transport *transportAppendSession
+	writes := make(chan struct{}, 3)
+	transport := newTransportSession(stream, &signalWriteCloser{signal: writes})
 
 	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
-		transport = newTransportSession(stream, &signalWriteCloser{})
 		return transport, nil
 	}
 
@@ -282,6 +282,13 @@ func TestAppendSession_CloseDrainsInflight(t *testing.T) {
 			t.Fatalf("wait %d failed: %v", i, err)
 		}
 		tickets[i] = ticket
+	}
+	for range tickets {
+		select {
+		case <-writes:
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for all batches to be sent")
+		}
 	}
 
 	// Start closing in background — should wait for drain

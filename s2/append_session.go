@@ -495,37 +495,60 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 		}
 	}()
 	adviceHandled := false
+	processAck := func(ack *AppendAck) {
+		r.handleAck(session, ack)
+		if session.ReconnectAdvised() && !adviceHandled {
+			adviceHandled = true
+			if r.shouldReconnectOnAdvice() {
+				reconnectAccepted = true
+				// Half-close so the server acknowledges accepted appends
+				// and then ends the response.
+				session.halfClose()
+			} else {
+				session.declineReconnect()
+				r.wakeupPump()
+			}
+		}
+	}
+	acksCh := session.acksCh
 
 	for {
 		select {
-		case ack, ok := <-session.acksCh:
+		case ack, ok := <-acksCh:
 			if !ok {
-				endedCleanly = true
-				return
+				// errorsCh closes first and may still contain a terminal
+				// error. Consume it before deciding this was a clean end.
+				acksCh = nil
+				continue
 			}
-			r.handleAck(session, ack)
-			if session.ReconnectAdvised() && !adviceHandled {
-				adviceHandled = true
-				if r.shouldReconnectOnAdvice() {
-					reconnectAccepted = true
-					// Half-close so the server acknowledges accepted appends
-					// and then ends the response.
-					session.halfClose()
-				} else {
-					session.declineReconnect()
-					r.wakeupPump()
-				}
-			}
+			processAck(ack)
 
 		case err, ok := <-session.errorsCh:
 			if !ok {
-				// A closed channel yields buffered values first, so this
-				// only fires once every ack has been handled.
+				// errorsCh closes before acksCh, so drain any remaining
+				// ACKs before treating the response as complete.
 				for ack := range session.acksCh {
-					r.handleAck(session, ack)
+					processAck(ack)
 				}
 				endedCleanly = true
 				return
+			}
+			// The transport publishes ACKs before reporting an error, but
+			// select can deliver the error first. Complete those appends
+			// before deciding which remaining entries to retry or fail.
+			// Do not wait for closure: connection failures can report an
+			// error without starting the reader that closes the channels.
+		drainAcks:
+			for {
+				select {
+				case ack, ok := <-acksCh:
+					if !ok {
+						break drainAcks
+					}
+					processAck(ack)
+				default:
+					break drainAcks
+				}
 			}
 			r.handleSessionError(session, err)
 			return
