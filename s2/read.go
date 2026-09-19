@@ -439,7 +439,7 @@ func (r *streamReader) buildAttemptOptions(plannedDelay time.Duration) *ReadOpti
 		}
 	}
 
-	if opts.Count == nil && opts.Bytes == nil && opts.Wait == nil && opts.SeqNum == nil && opts.Timestamp == nil && opts.TailOffset == nil && opts.Until == nil && opts.Clamp == nil {
+	if opts.Count == nil && opts.Bytes == nil && opts.Wait == nil && opts.SeqNum == nil && opts.Timestamp == nil && opts.TailOffset == nil && opts.Until == nil && opts.Clamp == nil && opts.StreamConfig == nil {
 		return nil
 	}
 	return opts
