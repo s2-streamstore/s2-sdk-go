@@ -146,6 +146,43 @@ func TestWithAppendRetries_NoSideEffectsRetriesNoSideEffectServerError(t *testin
 	}
 }
 
+func TestWithAppendRetries_NoSideEffectsRetriesTransactionConflict(t *testing.T) {
+	ctx := context.Background()
+	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
+
+	attempts := 0
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		attempts++
+		if attempts < 2 {
+			return nil, &S2Error{Status: 409, Code: "transaction_conflict", Origin: "server"}
+		}
+		return &AppendAck{}, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestWithAppendRetries_NoSideEffectsDoesNotRetryUnavailable(t *testing.T) {
+	ctx := context.Background()
+	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
+
+	attempts := 0
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		attempts++
+		return nil, &S2Error{Status: 503, Code: "unavailable", Origin: "server"}
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts)
+	}
+}
+
 func TestWithAppendRetries_NoSideEffectsNetworkError(t *testing.T) {
 	ctx := context.Background()
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
