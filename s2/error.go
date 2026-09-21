@@ -33,6 +33,52 @@ type ErrorInfo struct {
 	Message string `json:"message"`
 }
 
+type errorCodeInfo struct {
+	status        int
+	retryable     bool
+	noSideEffects bool
+}
+
+// Canonical server error codes; mirrors ErrorCode in the S2 API.
+var errorCodes = map[string]errorCodeInfo{
+	"access_token_not_found":  {404, false, true},
+	"authn":                   {401, false, true},
+	"bad_frame":               {400, false, true},
+	"bad_header":              {400, false, true},
+	"bad_json":                {400, false, true},
+	"bad_path":                {400, false, true},
+	"bad_proto":               {400, false, true},
+	"bad_query":               {400, false, true},
+	"basin_deletion_pending":  {409, false, true},
+	"basin_not_found":         {404, false, true},
+	"client_hangup":           {499, false, false},
+	"decryption_failed":       {400, false, true},
+	"hot_server":              {502, true, true},
+	"invalid":                 {422, false, true},
+	"not_implemented":         {501, false, true},
+	"other":                   {500, true, false},
+	"permission_denied":       {403, false, true},
+	"quota_exhausted":         {403, false, true},
+	"rate_limited":            {429, true, true},
+	"request_timeout":         {408, true, false},
+	"resource_already_exists": {409, false, true},
+	"server_draining":         {503, true, true},
+	"storage":                 {500, true, false},
+	"stream_deletion_pending": {409, false, true},
+	"stream_not_found":        {404, false, true},
+	"transaction_conflict":    {409, true, true},
+	"unavailable":             {503, true, false},
+	"upstream_timeout":        {504, true, false},
+}
+
+func isRetryableStatus(status int) bool {
+	switch status {
+	case 408, 429, 500, 502, 503, 504:
+		return true
+	}
+	return false
+}
+
 func newValidationError(message string) *S2Error {
 	return &S2Error{
 		Message: message,
@@ -57,19 +103,13 @@ func (e *S2Error) IsRetryable() bool {
 		return false
 	}
 
-	// Retryable HTTP status codes
-	switch e.Status {
-	case 408: // Request Timeout
-		return true
-	case 429: // Too Many Requests
-		return true
-	case 500, 502, 503: // Server Errors
-		return true
-	case 504: // Gateway Timeout
-		return true
-	default:
-		return false
+	if e.Origin == "server" {
+		if info, ok := errorCodes[e.Code]; ok {
+			return info.status == e.Status && info.retryable
+		}
 	}
+
+	return isRetryableStatus(e.Status)
 }
 
 // HasNoSideEffects reports whether this error guarantees no mutation occurred.
@@ -78,12 +118,12 @@ func (e *S2Error) HasNoSideEffects() bool {
 		return false
 	}
 
-	if e.Origin == "server" {
-		return (e.Status == 429 && e.Code == "rate_limited") ||
-			(e.Status == 502 && e.Code == "hot_server")
+	if e.Origin != "server" {
+		return false
 	}
 
-	return false
+	info, ok := errorCodes[e.Code]
+	return ok && info.status == e.Status && info.noSideEffects
 }
 
 func (e *S2Error) IsNetworkError() bool {
