@@ -277,7 +277,7 @@ func cloneAppendInput(input *AppendInput) *AppendInput {
 		Records:      cloneAppendRecords(input.Records),
 		MatchSeqNum:  cloneUint64Ptr(input.MatchSeqNum),
 		FencingToken: cloneStringPtr(input.FencingToken),
-		StreamConfig: input.StreamConfig,
+		StreamConfig: cloneStreamConfigPtr(input.StreamConfig),
 	}
 }
 
@@ -333,6 +333,43 @@ func cloneEncryptionKeyPtr(src *EncryptionKey) *EncryptionKey {
 	return &val
 }
 
+func cloneStreamConfigPtr(src *StreamConfig) *StreamConfig {
+	if src == nil {
+		return nil
+	}
+
+	clone := *src
+	if src.DeleteOnEmpty != nil {
+		clone.DeleteOnEmpty = Ptr(*src.DeleteOnEmpty)
+		if src.DeleteOnEmpty.MinAgeSecs != nil {
+			clone.DeleteOnEmpty.MinAgeSecs = Ptr(*src.DeleteOnEmpty.MinAgeSecs)
+		}
+	}
+	if src.RetentionPolicy != nil {
+		clone.RetentionPolicy = Ptr(*src.RetentionPolicy)
+		if src.RetentionPolicy.Age != nil {
+			clone.RetentionPolicy.Age = Ptr(*src.RetentionPolicy.Age)
+		}
+		if src.RetentionPolicy.Infinite != nil {
+			clone.RetentionPolicy.Infinite = Ptr(*src.RetentionPolicy.Infinite)
+		}
+	}
+	if src.StorageClass != nil {
+		clone.StorageClass = Ptr(*src.StorageClass)
+	}
+	if src.Timestamping != nil {
+		clone.Timestamping = Ptr(*src.Timestamping)
+		if src.Timestamping.Mode != nil {
+			clone.Timestamping.Mode = Ptr(*src.Timestamping.Mode)
+		}
+		if src.Timestamping.Uncapped != nil {
+			clone.Timestamping.Uncapped = Ptr(*src.Timestamping.Uncapped)
+		}
+	}
+
+	return &clone
+}
+
 func cloneReadSessionOptions(opts *ReadOptions) *ReadOptions {
 	if opts == nil {
 		return nil
@@ -372,6 +409,7 @@ func cloneReadSessionOptions(opts *ReadOptions) *ReadOptions {
 		val := *opts.Clamp
 		clone.Clamp = &val
 	}
+	clone.StreamConfig = cloneStreamConfigPtr(opts.StreamConfig)
 
 	return &clone
 }
