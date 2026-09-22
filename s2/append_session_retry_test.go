@@ -835,6 +835,39 @@ func TestAppendSession_HandleSessionErrorIsIdempotentAcrossConcurrentCalls(t *te
 	}
 }
 
+func TestAppendSession_IgnoresTimeoutAfterTransportFailure(t *testing.T) {
+	for _, policy := range []AppendRetryPolicy{AppendRetryPolicyAll, AppendRetryPolicyNoSideEffects} {
+		t.Run(string(policy), func(t *testing.T) {
+			session, transport, entries := newAppendAckDrainSession(t, &RetryConfig{
+				MaxAttempts:       3,
+				MinBaseDelay:      time.Millisecond,
+				MaxBaseDelay:      time.Millisecond,
+				AppendRetryPolicy: policy,
+			}, 1)
+
+			session.handleSessionError(transport, &S2Error{
+				Status: 429, Code: "rate_limited", Origin: "server",
+			})
+			session.handleSessionError(nil, &S2Error{
+				Status: 408, Code: "REQUEST_TIMEOUT", Origin: "sdk",
+			})
+
+			if session.currentAttempt != 1 {
+				t.Errorf("expected one retry attempt, got %d", session.currentAttempt)
+			}
+			if session.closed || len(session.inflightQueue) != 1 {
+				t.Errorf("expected open session with pending append, got closed=%t pending=%d",
+					session.closed, len(session.inflightQueue))
+			}
+			select {
+			case result := <-entries[0].resultCh:
+				t.Errorf("append completed before retry: %v", result.err)
+			default:
+			}
+		})
+	}
+}
+
 func TestAppendSession_WriteUnblockedByTerminalErrorUsesServerError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
