@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.23.2] - 2026-09-22
+
+### Bug Fixes
+
+- *(error)* Classify retryable/no-side-effect errors by canonical error code ([#397](https://github.com/s2-streamstore/s2-sdk-go/issues/397))
+- *(stream)* Snapshot stream config for append and read retries ([#398](https://github.com/s2-streamstore/s2-sdk-go/issues/398))
+- *(append)* Ignore stale timeout errors ([#399](https://github.com/s2-streamstore/s2-sdk-go/issues/399))
+
 ## [v0.23.1] - 2026-09-19
 
 ### Bug Fixes
@@ -10,6 +18,10 @@ All notable changes to this project will be documented in this file.
 - *(producer)* Preserve successful flush across parent cancellation ([#393](https://github.com/s2-streamstore/s2-sdk-go/issues/393))
 - *(read)* Preserve stream config in read session attempts ([#394](https://github.com/s2-streamstore/s2-sdk-go/issues/394))
 - *(client)* Bound streaming TLS handshakes by connection timeout ([#395](https://github.com/s2-streamstore/s2-sdk-go/issues/395))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.23.1 ([#396](https://github.com/s2-streamstore/s2-sdk-go/issues/396))
 
 ## [v0.23.0] - 2026-09-14
 
