@@ -105,6 +105,36 @@ func TestS2Error_HasNoSideEffects(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "server transaction_conflict",
+			err:  &S2Error{Status: 409, Code: "transaction_conflict", Origin: "server"},
+			want: true,
+		},
+		{
+			name: "server server_draining",
+			err:  &S2Error{Status: 503, Code: "server_draining", Origin: "server"},
+			want: true,
+		},
+		{
+			name: "server unavailable",
+			err:  &S2Error{Status: 503, Code: "unavailable", Origin: "server"},
+			want: false,
+		},
+		{
+			name: "server rate_limited status mismatch",
+			err:  &S2Error{Status: 500, Code: "rate_limited", Origin: "server"},
+			want: false,
+		},
+		{
+			name: "unknown server code",
+			err:  &S2Error{Status: 429, Code: "unknown", Origin: "server"},
+			want: false,
+		},
+		{
+			name: "non-server origin",
+			err:  &S2Error{Status: 429, Code: "rate_limited", Origin: "network"},
+			want: false,
+		},
+		{
 			name: "generic retryable server error",
 			err:  &S2Error{Status: 503, Origin: "server"},
 			want: false,
@@ -119,6 +149,73 @@ func TestS2Error_HasNoSideEffects(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.err.HasNoSideEffects(); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestS2Error_IsRetryable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *S2Error
+		want bool
+	}{
+		{
+			name: "server transaction_conflict",
+			err:  &S2Error{Status: 409, Code: "transaction_conflict", Origin: "server"},
+			want: true,
+		},
+		{
+			name: "server resource_already_exists",
+			err:  &S2Error{Status: 409, Code: "resource_already_exists", Origin: "server"},
+			want: false,
+		},
+		{
+			name: "server unknown code non-retryable status",
+			err:  &S2Error{Status: 409, Code: "unknown", Origin: "server"},
+			want: false,
+		},
+		{
+			name: "server unknown code retryable status",
+			err:  &S2Error{Status: 503, Code: "unknown", Origin: "server"},
+			want: true,
+		},
+		{
+			name: "server empty code retryable status",
+			err:  &S2Error{Status: 500, Origin: "server"},
+			want: true,
+		},
+		{
+			name: "server invalid status mismatch",
+			err:  &S2Error{Status: 500, Code: "invalid", Origin: "server"},
+			want: false,
+		},
+		{
+			name: "server other",
+			err:  &S2Error{Status: 500, Code: "other", Origin: "server"},
+			want: true,
+		},
+		{
+			name: "network stream reset",
+			err:  &S2Error{Status: 502, Code: "STREAM_RESET", Origin: "network"},
+			want: true,
+		},
+		{
+			name: "status zero",
+			err:  &S2Error{Status: 0, Origin: "server"},
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.IsRetryable(); got != tt.want {
 				t.Fatalf("expected %v, got %v", tt.want, got)
 			}
 		})
