@@ -739,9 +739,7 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		r.sessionMu.Unlock()
 		r.closeSessionIfUnused(failedSession)
 	} else {
-		r.sessionMu.Lock()
-		r.currentSession = nil
-		r.sessionMu.Unlock()
+		return
 	}
 
 	if isServerDraining(err) {
