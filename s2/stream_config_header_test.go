@@ -160,6 +160,91 @@ func TestReadSessionStreamConfigAcrossAttempts(t *testing.T) {
 	}
 }
 
+func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
+	for _, operation := range []string{"append", "read session"} {
+		t.Run(operation, func(t *testing.T) {
+			config := &StreamConfig{
+				DeleteOnEmpty:   &DeleteOnEmptyConfig{MinAgeSecs: Int64(300)},
+				RetentionPolicy: &RetentionPolicy{Age: Int64(3600)},
+				StorageClass:    Ptr(StorageClassExpress),
+				Timestamping: &TimestampingConfig{
+					Mode:     Ptr(TimestampingModeClientPrefer),
+					Uncapped: Bool(false),
+				},
+			}
+			const expectedHeader = `{"delete_on_empty":{"min_age_secs":300},"retention_policy":{"age":3600},"storage_class":"express","timestamping":{"mode":"client-prefer","uncapped":false}}`
+			headers := make(chan string, 2)
+			attempts := 0
+			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				headers <- req.Header.Get(s2StreamConfigHeader)
+				attempts++
+				status := http.StatusOK
+				if attempts == 1 {
+					*config.DeleteOnEmpty.MinAgeSecs = 600
+					*config.RetentionPolicy.Age = 7200
+					*config.StorageClass = StorageClassStandard
+					*config.Timestamping.Mode = TimestampingModeArrival
+					*config.Timestamping.Uncapped = true
+					config.DeleteOnEmpty.MinAgeSecs = nil
+					config.RetentionPolicy.Age = nil
+					config.Timestamping.Mode = nil
+					config.Timestamping.Uncapped = nil
+					*config = StreamConfig{}
+					status = http.StatusInternalServerError
+				}
+				return &http.Response{
+					StatusCode: status,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+					Header:     make(http.Header),
+					Request:    req,
+				}, nil
+			})
+			stream := newTestStreamClientWithTransport(rt)
+			stream.basinClient.retryConfig = &RetryConfig{
+				MaxAttempts:       2,
+				MinBaseDelay:      time.Millisecond,
+				MaxBaseDelay:      time.Millisecond,
+				AppendRetryPolicy: AppendRetryPolicyAll,
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+
+			switch operation {
+			case "append":
+				if _, err := stream.Append(ctx, &AppendInput{
+					Records:      []AppendRecord{{Body: []byte("hello")}},
+					StreamConfig: config,
+				}); err != nil {
+					t.Fatalf("append failed: %v", err)
+				}
+			case "read session":
+				session, err := stream.ReadSession(ctx, &ReadOptions{StreamConfig: config})
+				if err != nil {
+					t.Fatalf("read session: %v", err)
+				}
+				defer session.Close()
+				if session.Next() {
+					t.Fatal("unexpected record")
+				}
+				if err := session.Err(); err != nil {
+					t.Fatalf("read session error: %v", err)
+				}
+			}
+			if ctx.Err() != nil {
+				t.Fatal("operation timed out")
+			}
+			if len(headers) != 2 {
+				t.Fatalf("expected two requests, got %d", len(headers))
+			}
+			for attempt := 1; attempt <= 2; attempt++ {
+				if got := <-headers; got != expectedHeader {
+					t.Errorf("attempt %d: expected stream config header %q, got %q", attempt, expectedHeader, got)
+				}
+			}
+		})
+	}
+}
+
 func TestAppendWithoutStreamConfigOmitsHeader(t *testing.T) {
 	rt := &streamConfigHeaderRoundTripper{response: &pb.AppendAck{}}
 	stream := newTestStreamClientWithTransport(rt)
