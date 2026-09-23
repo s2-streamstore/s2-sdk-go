@@ -803,9 +803,26 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 	r.currentAttempt++
 	r.stateMu.Unlock()
 
+	r.markInflightUncertainty(failedSession, err)
 	r.resetInflightAttemptStarts()
 
 	r.scheduleRetry()
+}
+
+// markInflightUncertainty remembers, per entry, that an attempt which may have
+// taken effect is being retried, so a later definite failure cannot be
+// reported as side-effect free for those entries.
+func (r *AppendSession) markInflightUncertainty(failedSession *transportAppendSession, err error) {
+	if isNoSideEffectsError(err) {
+		return
+	}
+	r.inflightMu.Lock()
+	for _, entry := range r.inflightQueue {
+		if failedSession == nil || entry.wasSentOnSessionLocked(failedSession) {
+			entry.priorUncertainty = true
+		}
+	}
+	r.inflightMu.Unlock()
 }
 
 func (r *AppendSession) resetInflightAttemptStarts() {
@@ -844,7 +861,7 @@ func (r *AppendSession) failAllInflightLocked(err error) []*transportAppendSessi
 	for _, entry := range r.inflightQueue {
 		if atomic.CompareAndSwapInt32(&entry.completed, 0, 1) {
 			select {
-			case entry.resultCh <- &inflightResult{err: err}:
+			case entry.resultCh <- &inflightResult{err: withPriorUncertainty(err, entry.priorUncertainty)}:
 				close(entry.resultCh)
 			default:
 			}
@@ -945,6 +962,9 @@ type inflightEntry struct {
 	resultCh       chan *inflightResult
 	completed      int32
 	sentOnSessions []*transportAppendSession // tracks sessions this entry was sent on
+	// priorUncertainty is set once an attempt carrying this entry failed in a
+	// way that may have taken effect and was retried.
+	priorUncertainty bool
 }
 
 type inflightResult struct {

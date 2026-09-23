@@ -130,6 +130,48 @@ func (e *S2Error) IsNetworkError() bool {
 	return e != nil && e.Origin == "network"
 }
 
+// AppendIndefiniteFailureError is returned when the final append attempt failed
+// definitively, but an earlier attempt may have taken effect, so the entire
+// append operation is indefinite.
+//
+// FinalAttemptError describes why retries stopped. It is exposed via Unwrap,
+// so errors.As can still reach the underlying *S2Error for diagnostics; use
+// HasNoSideEffects on the outer error to classify the operation as a whole.
+type AppendIndefiniteFailureError struct {
+	FinalAttemptError error
+}
+
+func (e *AppendIndefiniteFailureError) Error() string {
+	return fmt.Sprintf("append may have taken effect in an earlier attempt; final attempt failed: %v", e.FinalAttemptError)
+}
+
+func (e *AppendIndefiniteFailureError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.FinalAttemptError
+}
+
+// HasNoSideEffects reports whether err guarantees that no append took effect
+// across every attempt of the operation, not just the final one.
+func HasNoSideEffects(err error) bool {
+	var indefinite *AppendIndefiniteFailureError
+	if errors.As(err, &indefinite) {
+		return false
+	}
+	var s2Err *S2Error
+	return errors.As(err, &s2Err) && s2Err.HasNoSideEffects()
+}
+
+// withPriorUncertainty wraps a definite final error when an earlier attempt may
+// have taken effect. Already indefinite errors are returned unchanged.
+func withPriorUncertainty(err error, priorUncertainty bool) error {
+	if err == nil || !priorUncertainty || !HasNoSideEffects(err) {
+		return err
+	}
+	return &AppendIndefiniteFailureError{FinalAttemptError: err}
+}
+
 type SeqNumMismatchError struct {
 	*S2Error
 	ExpectedSeqNum uint64
