@@ -58,6 +58,34 @@ func TestDecodeAPIError_RangeNotSatisfiable_WithTail(t *testing.T) {
 	}
 }
 
+func TestWithPriorUncertainty(t *testing.T) {
+	definite := &S2Error{Code: "permission_denied", Status: 403, Origin: "server"}
+	indefinite := &S2Error{Code: "unavailable", Status: 503, Origin: "server"}
+
+	if got := withPriorUncertainty(definite, false); got != definite {
+		t.Fatalf("no prior uncertainty should return error unchanged, got %v", got)
+	}
+	if got := withPriorUncertainty(indefinite, true); got != indefinite {
+		t.Fatalf("indefinite error should not be wrapped, got %v", got)
+	}
+
+	wrapped := withPriorUncertainty(definite, true)
+	var indef *AppendIndefiniteFailureError
+	if !errors.As(wrapped, &indef) || indef.FinalAttemptError != definite {
+		t.Fatalf("expected wrapper around final error, got %v", wrapped)
+	}
+	if HasNoSideEffects(wrapped) || !HasNoSideEffects(definite) || HasNoSideEffects(indefinite) {
+		t.Fatal("HasNoSideEffects classification wrong")
+	}
+	var s2Err *S2Error
+	if !errors.As(wrapped, &s2Err) || s2Err != definite {
+		t.Fatalf("final attempt error not reachable through wrapper: %v", wrapped)
+	}
+	if got := withPriorUncertainty(wrapped, true); got != wrapped {
+		t.Fatal("wrapper must not be wrapped twice")
+	}
+}
+
 func TestDecodeAPIError_RangeNotSatisfiable_PlainBody(t *testing.T) {
 	err := decodeAPIError(http.StatusRequestedRangeNotSatisfiable, []byte("custom range error"))
 

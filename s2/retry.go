@@ -199,6 +199,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 	}
 
 	var lastError error
+	priorUncertainty := false
 
 	for attemptNo := 1; attemptNo <= maxAttempts; attemptNo++ {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -224,6 +225,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 
 				break
 			}
+			priorUncertainty = true
 			delay := calculateRetryBackoff(config, attemptNo)
 			logInfo(logger, "s2 append retrying after network error",
 				"attempt", attemptNo,
@@ -238,9 +240,12 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 		}
 
 		if !shouldRetryError(err, config) || attemptNo == maxAttempts {
-			return nil, err
+			return nil, withPriorUncertainty(err, priorUncertainty)
 		}
 
+		if !HasNoSideEffects(err) {
+			priorUncertainty = true
+		}
 		delay := calculateRetryBackoff(config, attemptNo)
 		logInfo(logger, "s2 append retrying after error",
 			"attempt", attemptNo,
@@ -256,7 +261,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 		return nil, ctxErr
 	}
 
-	return nil, lastError
+	return nil, withPriorUncertainty(lastError, priorUncertainty)
 }
 
 func shouldRetryNetworkError(config *RetryConfig) bool {

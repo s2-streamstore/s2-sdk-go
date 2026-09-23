@@ -132,6 +132,55 @@ func TestAppendSession_ReadAcksDrainsBeforeError(t *testing.T) {
 	}
 }
 
+func TestAppendSession_PreservesUncertaintyForUnresolvedBatches(t *testing.T) {
+	session, transport, entries := newAppendAckDrainSession(t, &RetryConfig{
+		AppendRetryPolicy: AppendRetryPolicyAll,
+		MaxAttempts:       3,
+	}, 2)
+
+	// A late batch enqueued after the failure was never sent on the failed session.
+	session.capacity = newCapacityTracker(1024, 3)
+	session.capacity.curItems, session.capacity.curBytes = 2, 2
+	if err := session.capacity.reserve(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	unsent, err := session.enqueueReservedEntry(&AppendInput{Records: []AppendRecord{{Body: []byte("late")}}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session.handleSessionError(transport, serverError(503, "unavailable"))
+	if session.closed {
+		t.Fatal("retryable error closed the session")
+	}
+	for i, entry := range entries {
+		if !entry.priorUncertainty {
+			t.Fatalf("sent batch %d not marked uncertain", i)
+		}
+	}
+	if unsent.priorUncertainty {
+		t.Fatal("unsent batch marked uncertain")
+	}
+
+	final := serverError(403, "permission_denied")
+	session.failAllInflight(final)
+
+	for i, entry := range entries {
+		result := <-entry.resultCh
+		var indefinite *AppendIndefiniteFailureError
+		if result == nil || !errors.As(result.err, &indefinite) || indefinite.FinalAttemptError != final {
+			t.Fatalf("batch %d: expected indefinite failure wrapping final error, got %+v", i, result)
+		}
+		if HasNoSideEffects(result.err) {
+			t.Fatalf("batch %d reported as side-effect free", i)
+		}
+	}
+	result := <-unsent.resultCh
+	if result == nil || result.err != final {
+		t.Fatalf("unsent batch: expected plain final error, got %+v", result)
+	}
+}
+
 func TestAppendSession_ReadAcksHandlesErrorAfterAckChannelCloses(t *testing.T) {
 	// Exercise both select choices when the ACK channel is already empty
 	// and closed but a terminal error is still buffered.

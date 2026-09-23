@@ -92,6 +92,84 @@ func TestWithRetries_NetworkErrorRetries(t *testing.T) {
 	}
 }
 
+func TestWithAppendRetries_PreservesUncertaintyAcrossAttempts(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		responses    []error
+		wantWrapped  bool
+		wantDefinite bool
+		wantAttempts int
+	}{
+		{
+			"indefinite then definite",
+			[]error{serverError(503, "unavailable"), serverError(403, "permission_denied")},
+			true, false, 2,
+		},
+		{
+			"both indefinite",
+			[]error{serverError(503, "unavailable"), serverError(500, "other"), serverError(503, "unavailable")},
+			false, false, 3,
+		},
+		{
+			"both definite",
+			[]error{serverError(429, "rate_limited"), serverError(403, "permission_denied")},
+			false, true, 2,
+		},
+		{
+			"indefinite then retryable definite exhausts",
+			[]error{serverError(503, "unavailable"), serverError(429, "rate_limited"), serverError(429, "rate_limited")},
+			true, false, 3,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyAll}
+			attempts := 0
+			_, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+				resp := tc.responses[attempts]
+				attempts++
+				return nil, resp
+			})
+			if attempts != tc.wantAttempts {
+				t.Fatalf("expected %d attempts, got %d", tc.wantAttempts, attempts)
+			}
+			final := tc.responses[tc.wantAttempts-1]
+			var indefinite *AppendIndefiniteFailureError
+			if got := errors.As(err, &indefinite); got != tc.wantWrapped {
+				t.Fatalf("wrapped = %v, want %v (err: %v)", got, tc.wantWrapped, err)
+			}
+			if got := HasNoSideEffects(err); got != tc.wantDefinite {
+				t.Fatalf("HasNoSideEffects = %v, want %v: %v", got, tc.wantDefinite, err)
+			}
+			var s2Err *S2Error
+			if !errors.As(err, &s2Err) || s2Err != final {
+				t.Fatalf("final attempt error not reachable, got %v", err)
+			}
+			if tc.wantWrapped && indefinite.FinalAttemptError != final {
+				t.Fatalf("FinalAttemptError = %v, want %v", indefinite.FinalAttemptError, final)
+			}
+		})
+	}
+}
+
+func TestWithAppendRetries_SuccessAfterIndefiniteFailure(t *testing.T) {
+	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyAll}
+	attempts := 0
+	ack, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, serverError(503, "unavailable")
+		}
+		return &AppendAck{}, nil
+	})
+	if err != nil || ack == nil || attempts != 2 {
+		t.Fatalf("expected success on second attempt, got ack=%v err=%v attempts=%d", ack, err, attempts)
+	}
+}
+
+func serverError(status int, code string) *S2Error {
+	return &S2Error{Message: code, Code: code, Status: status, Origin: "server"}
+}
+
 func TestWithAppendRetries_NoSideEffectsWithoutMatchSeqNum(t *testing.T) {
 	ctx := context.Background()
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
