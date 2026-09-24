@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.23.3] - 2026-09-24
+
+### Bug Fixes
+
+- Preserve uncertainty across append retries ([#401](https://github.com/s2-streamstore/s2-sdk-go/issues/401))
+
 ## [v0.23.2] - 2026-09-22
 
 ### Bug Fixes
@@ -9,6 +15,10 @@ All notable changes to this project will be documented in this file.
 - *(error)* Classify retryable/no-side-effect errors by canonical error code ([#397](https://github.com/s2-streamstore/s2-sdk-go/issues/397))
 - *(stream)* Snapshot stream config for append and read retries ([#398](https://github.com/s2-streamstore/s2-sdk-go/issues/398))
 - *(append)* Ignore stale timeout errors ([#399](https://github.com/s2-streamstore/s2-sdk-go/issues/399))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.23.2 ([#400](https://github.com/s2-streamstore/s2-sdk-go/issues/400))
 
 ## [v0.23.1] - 2026-09-19
 
