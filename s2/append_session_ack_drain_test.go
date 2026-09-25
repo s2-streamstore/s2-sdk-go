@@ -238,6 +238,90 @@ func TestAppendSession_ReadAcksErrorDoesNotWaitForChannelClose(t *testing.T) {
 	}
 }
 
+func TestAppendSession_412AfterUncertainAttempt_Wrapped(t *testing.T) {
+	// A retryable indefinite first attempt (503 unavailable, noSideEffects=false)
+	// marks sent inflight entries priorUncertainty=true. A subsequent terminal
+	// 412 AppendConditionFailed must be wrapped in *AppendIndefiniteFailureError
+	// for those entries because the 412 guarantees the retry wrote nothing
+	// while the earlier attempt may have committed. This mirrors the Rust SDK's
+	// AppendError::ConditionFailed classification under prior uncertainty.
+	for _, tc := range []struct {
+		name  string
+		final error
+	}{
+		{"seq_num_mismatch", newSeqNumMismatchError(412, 42)},
+		{"fencing_token_mismatch", newFencingTokenMismatchError(412, "fence")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session, transport, entries := newAppendAckDrainSession(t, &RetryConfig{
+				AppendRetryPolicy: AppendRetryPolicyAll,
+				MaxAttempts:       3,
+			}, 2)
+
+			session.handleSessionError(transport, serverError(503, "unavailable"))
+			if session.closed {
+				t.Fatal("retryable error closed the session")
+			}
+			for i, entry := range entries {
+				if !entry.priorUncertainty {
+					t.Fatalf("sent batch %d not marked uncertain", i)
+				}
+			}
+
+			session.failAllInflight(tc.final)
+
+			for i, entry := range entries {
+				result := <-entry.resultCh
+				if result == nil {
+					t.Fatalf("batch %d: nil result", i)
+				}
+				var indefinite *AppendIndefiniteFailureError
+				if !errors.As(result.err, &indefinite) {
+					t.Fatalf("batch %d: expected *AppendIndefiniteFailureError wrap, got %T: %v", i, result.err, result.err)
+				}
+				if indefinite.FinalAttemptError != tc.final {
+					t.Fatalf("batch %d: FinalAttemptError = %v, want %v", i, indefinite.FinalAttemptError, tc.final)
+				}
+				if HasNoSideEffects(result.err) {
+					t.Fatalf("batch %d: wrapped indefinite failure must not report HasNoSideEffects", i)
+				}
+				var s2Err *S2Error
+				if !errors.As(result.err, &s2Err) || s2Err.Code != "APPEND_CONDITION_FAILED" || s2Err.Status != 412 {
+					t.Fatalf("batch %d: underlying 412 *S2Error not reachable, got %v", i, result.err)
+				}
+			}
+		})
+	}
+}
+
+func TestAppendSession_Bare412SingleAttemptNotWrapped(t *testing.T) {
+	// A terminal 412 with no prior uncertainty must reach the caller bare
+	// (not wrapped): a single-attempt 412 is HasNoSideEffects but the
+	// AppendIndefiniteFailureError wrap only applies under prior uncertainty.
+	session, _, entries := newAppendAckDrainSession(t, &RetryConfig{
+		AppendRetryPolicy: AppendRetryPolicyAll,
+		MaxAttempts:       3,
+	}, 1)
+
+	seqErr := newSeqNumMismatchError(412, 42)
+	session.failAllInflight(seqErr)
+
+	result := <-entries[0].resultCh
+	if result == nil || result.err == nil {
+		t.Fatalf("expected bare 412 error, got %+v", result)
+	}
+	if result.err != seqErr {
+		t.Fatalf("expected bare typed 412 (no prior uncertainty), got %v", result.err)
+	}
+	var indefinite *AppendIndefiniteFailureError
+	if errors.As(result.err, &indefinite) {
+		t.Fatalf("single-attempt 412 must not be wrapped, got %v", result.err)
+	}
+	if !HasNoSideEffects(result.err) {
+		t.Fatalf("bare 412 must report HasNoSideEffects")
+	}
+}
+
 func newAppendAckDrainSession(t *testing.T, retryCfg *RetryConfig, count int) (*AppendSession, *transportAppendSession, []*inflightEntry) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

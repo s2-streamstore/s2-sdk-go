@@ -39,7 +39,9 @@ type errorCodeInfo struct {
 	noSideEffects bool
 }
 
-// Canonical server error codes; mirrors ErrorCode in the S2 API.
+// Canonical server error codes (mirrors ErrorCode in the S2 API) plus
+// client-synthesized codes for responses that use a separate schema
+// (e.g. APPEND_CONDITION_FAILED for 412 AppendConditionFailed).
 var errorCodes = map[string]errorCodeInfo{
 	"access_token_not_found":  {404, false, true},
 	"authn":                   {401, false, true},
@@ -69,6 +71,11 @@ var errorCodes = map[string]errorCodeInfo{
 	"transaction_conflict":    {409, true, true},
 	"unavailable":             {503, true, false},
 	"upstream_timeout":        {504, true, false},
+	// 412 precondition failed — guaranteed no write. Synthesized for the
+	// AppendConditionFailed response schema, which is separate from the
+	// ErrorCode enum; mirrors the Rust SDK's AppendError::ConditionFailed
+	// classification as has_no_side_effects() at the AppendError layer.
+	"APPEND_CONDITION_FAILED": {412, false, true},
 }
 
 func isRetryableStatus(status int) bool {

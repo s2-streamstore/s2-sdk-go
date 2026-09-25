@@ -86,6 +86,72 @@ func TestWithPriorUncertainty(t *testing.T) {
 	}
 }
 
+// TestWithPriorUncertainty_AppendConditionFailed guards the 412
+// AppendConditionFailed case that the synthesized *SeqNumMismatchError and
+// *FencingTokenMismatchError produce. A 412 guarantees the server wrote
+// nothing, so it must classify as HasNoSideEffects and, under prior
+// uncertainty, be wrapped in *AppendIndefiniteFailureError (mirrors the Rust
+// SDK's AppendError::ConditionFailed classification). Without prior
+// uncertainty the bare typed error is returned unchanged.
+func TestWithPriorUncertainty_AppendConditionFailed(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"seq_num_mismatch", newSeqNumMismatchError(412, 5)},
+		{"fencing_token_mismatch", newFencingTokenMismatchError(412, "fence")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !HasNoSideEffects(tc.err) {
+				t.Fatalf("HasNoSideEffects(err) = false, want true (412 must be no-side-effects)")
+			}
+			var s2Err *S2Error
+			if !errors.As(tc.err, &s2Err) {
+				t.Fatalf("expected *S2Error reachable via errors.As, got %T", tc.err)
+			}
+			if s2Err.IsRetryable() {
+				t.Fatalf("412 must not be retryable")
+			}
+
+			// No prior uncertainty: bare error returned unchanged.
+			if got := withPriorUncertainty(tc.err, false); got != tc.err {
+				t.Fatalf("no prior uncertainty should return bare error, got %v", got)
+			}
+
+			// Prior uncertainty: wrapped in *AppendIndefiniteFailureError.
+			wrapped := withPriorUncertainty(tc.err, true)
+			var indef *AppendIndefiniteFailureError
+			if !errors.As(wrapped, &indef) {
+				t.Fatalf("expected *AppendIndefiniteFailureError wrap, got %T", wrapped)
+			}
+			if indef.FinalAttemptError != tc.err {
+				t.Fatalf("FinalAttemptError = %v, want %v", indef.FinalAttemptError, tc.err)
+			}
+			if HasNoSideEffects(wrapped) {
+				t.Fatalf("wrapped indefinite failure must not be HasNoSideEffects")
+			}
+			// The underlying typed error and *S2Error remain reachable.
+			var seq *SeqNumMismatchError
+			var fen *FencingTokenMismatchError
+			if tc.name == "seq_num_mismatch" && !errors.As(wrapped, &seq) {
+				t.Fatalf("expected *SeqNumMismatchError reachable through wrap, got %v", wrapped)
+			}
+			if tc.name == "fencing_token_mismatch" && !errors.As(wrapped, &fen) {
+				t.Fatalf("expected *FencingTokenMismatchError reachable through wrap, got %v", wrapped)
+			}
+			var inner *S2Error
+			if !errors.As(wrapped, &inner) || inner != s2Err {
+				t.Fatalf("underlying *S2Error not reachable through wrap, got %v", wrapped)
+			}
+			// Must not double-wrap.
+			if got := withPriorUncertainty(wrapped, true); got != wrapped {
+				t.Fatal("already-indefinite error must not be wrapped twice")
+			}
+		})
+	}
+}
+
 func TestDecodeAPIError_RangeNotSatisfiable_PlainBody(t *testing.T) {
 	err := decodeAPIError(http.StatusRequestedRangeNotSatisfiable, []byte("custom range error"))
 
@@ -145,6 +211,26 @@ func TestS2Error_HasNoSideEffects(t *testing.T) {
 		{
 			name: "server unavailable",
 			err:  &S2Error{Status: 503, Code: "unavailable", Origin: "server"},
+			want: false,
+		},
+		{
+			name: "server append_condition_failed 412",
+			err:  &S2Error{Status: 412, Code: "APPEND_CONDITION_FAILED", Origin: "server"},
+			want: true,
+		},
+		{
+			name: "server append_condition_failed synthesized seq mismatch",
+			err:  newSeqNumMismatchError(412, 5).S2Error,
+			want: true,
+		},
+		{
+			name: "server append_condition_failed synthesized fencing mismatch",
+			err:  newFencingTokenMismatchError(412, "token").S2Error,
+			want: true,
+		},
+		{
+			name: "server append_condition_failed status mismatch",
+			err:  &S2Error{Status: 500, Code: "APPEND_CONDITION_FAILED", Origin: "server"},
 			want: false,
 		},
 		{
@@ -223,6 +309,21 @@ func TestS2Error_IsRetryable(t *testing.T) {
 			name: "server other",
 			err:  &S2Error{Status: 500, Code: "other", Origin: "server"},
 			want: true,
+		},
+		{
+			name: "server append_condition_failed 412 not retryable",
+			err:  &S2Error{Status: 412, Code: "APPEND_CONDITION_FAILED", Origin: "server"},
+			want: false,
+		},
+		{
+			name: "server seq_num mismatch not retryable",
+			err:  newSeqNumMismatchError(412, 5).S2Error,
+			want: false,
+		},
+		{
+			name: "server fencing token mismatch not retryable",
+			err:  newFencingTokenMismatchError(412, "token").S2Error,
+			want: false,
 		},
 		{
 			name: "network stream reset",
