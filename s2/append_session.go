@@ -474,6 +474,9 @@ func (r *AppendSession) submitInflightBatches() {
 		if entry.attemptStart.IsZero() {
 			entry.attemptStart = time.Now()
 		}
+		// Clear any timed-out marker from a prior attempt: this entry is now
+		// being sent on a fresh session and may be acked normally again.
+		atomic.StoreInt32(&entry.timedOut, 0)
 		r.inflightMu.Unlock()
 
 		if err := session.appendInput(entry.input); err != nil {
@@ -576,6 +579,16 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 	entry := r.inflightQueue[0]
 
 	if !entry.wasSentOnSessionLocked(session) {
+		r.inflightMu.Unlock()
+		return
+	}
+
+	// A timeout has committed to failing this head (the pump goroutine set
+	// timedOut under inflightMu and is racing toward failAllInflight). Skip
+	// the ACK so the fail-all path owns the entry and the caller receives a
+	// consistent REQUEST_TIMEOUT (may-have-side-effects) rather than a
+	// misleading success while the session is being torn down.
+	if atomic.LoadInt32(&entry.timedOut) != 0 {
 		r.inflightMu.Unlock()
 		return
 	}
@@ -728,20 +741,28 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 	// isCurrent check, log twice, increment currentAttempt twice, and
 	// double-schedule a retry. Whichever caller swaps currentSession from
 	// failedSession to nil wins; the loser bails.
-	if failedSession != nil {
-		r.sessionMu.Lock()
-		if r.currentSession != failedSession {
-			r.sessionMu.Unlock()
-			r.closeSessionIfUnused(failedSession)
-			return
-		}
-		r.currentSession = nil
-		r.sessionMu.Unlock()
-		r.closeSessionIfUnused(failedSession)
-	} else {
+	if failedSession == nil {
 		return
 	}
 
+	r.sessionMu.Lock()
+	if r.currentSession != failedSession {
+		r.sessionMu.Unlock()
+		r.closeSessionIfUnused(failedSession)
+		return
+	}
+	r.currentSession = nil
+	r.sessionMu.Unlock()
+	r.closeSessionIfUnused(failedSession)
+
+	r.handleSessionErrorBody(failedSession, err)
+}
+
+// handleSessionErrorBody runs the post-claim retry/failure logic for a
+// session the caller has already atomically claimed (currentSession set to
+// nil) and close-if-unused'd. Callers must not hold inflightMu or sessionMu,
+// since the body re-acquires both (e.g. via failAllInflight/markInflightUncertainty).
+func (r *AppendSession) handleSessionErrorBody(failedSession *transportAppendSession, err error) {
 	if isServerDraining(err) {
 		r.stateMu.Lock()
 		r.advisedReconnects.record(time.Now())
@@ -916,10 +937,11 @@ func (r *AppendSession) checkTimeouts() {
 	now := time.Now()
 	r.inflightMu.RLock()
 	var timedOut bool
+	var head *inflightEntry
 	var attemptStart time.Time
 	var requestTimeout time.Duration
 	if len(r.inflightQueue) > 0 {
-		head := r.inflightQueue[0]
+		head = r.inflightQueue[0]
 		attemptStart = head.attemptStart
 		requestTimeout = head.requestTimeout
 		timedOut = requestTimeout > 0 && !attemptStart.IsZero() && !now.Before(attemptStart.Add(requestTimeout))
@@ -936,11 +958,47 @@ func (r *AppendSession) checkTimeouts() {
 			"elapsed", elapsed,
 			"attempt", attempt)
 
-		r.sessionMu.RLock()
-		session := r.currentSession
-		r.sessionMu.RUnlock()
+		// Re-validate the head and claim the session atomically. The head
+		// snapshot above was taken under inflightMu.RLock and released
+		// before this point; meanwhile handleAck (on the readAcks goroutine)
+		// can complete and pop the head using only inflightMu + stateMu — it
+		// never touches currentSession. Without this re-validation, a stale
+		// timeout for an already-acknowledged head would tear down the
+		// still-live session and prematurely fail later inflight entries.
+		// Holding inflightMu and sessionMu together prevents handleAck from
+		// completing the head between the re-validation and the claim.
+		r.closedMu.RLock()
+		closed := r.closed
+		r.closedMu.RUnlock()
+		if closed {
+			return
+		}
 
-		r.handleSessionError(session, &S2Error{
+		r.inflightMu.Lock()
+		r.sessionMu.Lock()
+		if len(r.inflightQueue) == 0 || r.inflightQueue[0] != head ||
+			atomic.LoadInt32(&r.inflightQueue[0].completed) != 0 {
+			r.sessionMu.Unlock()
+			r.inflightMu.Unlock()
+			return // stale timeout: head was acknowledged or replaced
+		}
+		// Mark the head as being timed out so handleAck (on the readAcks
+		// goroutine) skips it: the CAS-fail-all path below owns this entry
+		// now. Without this flag, a late ACK arriving between the claim
+		// and failAllInflight would pop and ack the head, producing the
+		// inconsistent "head acked + later inflight failed + session torn
+		// down" outcome. A subsequent retried send clears the flag.
+		atomic.StoreInt32(&head.timedOut, 1)
+		session := r.currentSession
+		r.currentSession = nil
+		r.sessionMu.Unlock()
+		r.inflightMu.Unlock()
+
+		if session == nil {
+			return
+		}
+		r.closeSessionIfUnused(session)
+		r.handleSessionErrorBody(session, &S2Error{
 			Message: fmt.Sprintf("append request timed out after %v (attempt %d)", elapsed, attempt),
 			Code:    "REQUEST_TIMEOUT",
 			Status:  408,
@@ -962,6 +1020,10 @@ type inflightEntry struct {
 	resultCh       chan *inflightResult
 	completed      int32
 	sentOnSessions []*transportAppendSession // tracks sessions this entry was sent on
+	// timedOut is set once checkTimeouts commits to failing this head, so a
+	// racing handleAck skips the entry instead of acknowledging it out from
+	// under the fail-all path. Cleared on a retried send.
+	timedOut int32
 	// priorUncertainty is set once an attempt carrying this entry failed in a
 	// way that may have taken effect and was retried.
 	priorUncertainty bool
