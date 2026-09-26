@@ -672,3 +672,82 @@ func TestReadSessionCaughtUpFutureStaysPendingAcrossRetry(t *testing.T) {
 		t.Fatalf("expected tail %+v, got %+v", want, tail)
 	}
 }
+
+type queryRecordingRoundTripper struct {
+	bodies  []io.ReadCloser
+	mu      sync.Mutex
+	queries []string
+}
+
+func (r *queryRecordingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	call := len(r.queries)
+	r.queries = append(r.queries, req.URL.RawQuery)
+	if call >= len(r.bodies) {
+		return nil, errors.New("unexpected extra read attempt")
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       r.bodies[call],
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+func TestReadSessionRetryResumesFromTailAfterEmptyBatch(t *testing.T) {
+	failFirst := make(chan struct{})
+	first := buildReadBatchFrameWithTail(t, nil, &pb.StreamPosition{SeqNum: 100, Timestamp: 10})
+	var second bytes.Buffer
+	second.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
+		{SeqNum: 100, Body: []byte("a")},
+	}, &pb.StreamPosition{SeqNum: 101, Timestamp: 20}))
+	second.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
+
+	rt := &queryRecordingRoundTripper{bodies: []io.ReadCloser{
+		newFailingReadBody(first, failFirst),
+		io.NopCloser(bytes.NewReader(second.Bytes())),
+	}}
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), &ReadOptions{TailOffset: Int64(0)})
+	if err != nil {
+		t.Fatalf("open read session: %v", err)
+	}
+	defer session.Close()
+
+	future := session.CaughtUp()
+	done := make(chan []uint64)
+	go func() {
+		var got []uint64
+		for session.Next() {
+			got = append(got, session.Record().SeqNum)
+		}
+		done <- got
+	}()
+	waitCaughtUp(t, future)
+	close(failFirst)
+
+	var got []uint64
+	select {
+	case got = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the read session to finish")
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("unexpected session error: %v", err)
+	}
+	if len(got) != 1 || got[0] != 100 {
+		t.Fatalf("expected seq_nums [100], got %v", got)
+	}
+
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if len(rt.queries) != 2 {
+		t.Fatalf("expected 2 read attempts, got %d", len(rt.queries))
+	}
+	if rt.queries[0] != "tail_offset=0" {
+		t.Fatalf("expected first attempt to start at tail_offset=0, got %q", rt.queries[0])
+	}
+	if rt.queries[1] != "seq_num=100" {
+		t.Fatalf("expected retry to resume at the reported tail seq_num=100, got %q", rt.queries[1])
+	}
+}
