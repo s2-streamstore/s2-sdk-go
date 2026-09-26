@@ -603,6 +603,14 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.stateMu.Lock()
 			r.lastTailAt = time.Now()
 			r.lastTail = batch.Tail
+			if len(batch.Records) == 0 {
+				// An empty batch with a tail resolves a timestamp, tail-relative or
+				// clamped start. Anchor it so a retry does not evaluate the original
+				// start against a newer tail and skip records.
+				r.nextSeq = batch.Tail.SeqNum
+				r.nextTS = batch.Tail.Timestamp
+				r.hasNextSeq = true
+			}
 			r.stateMu.Unlock()
 		}
 
