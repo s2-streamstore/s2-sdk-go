@@ -33,7 +33,6 @@ type AccountMetricSet string
 type BasinMetricSet string
 type StreamMetricSet string
 type MetricSample [2]float64
-type StorageClass string
 type TimestampingMode string
 
 // ProvisionResult indicates whether provisioning created, updated, or skipped writing a resource.
@@ -73,11 +72,6 @@ const (
 
 const (
 	StreamMetricSetStorage StreamMetricSet = "storage"
-)
-
-const (
-	StorageClassStandard StorageClass = "standard"
-	StorageClassExpress  StorageClass = "express"
 )
 
 const (
@@ -193,6 +187,10 @@ type LocationInfo struct {
 	Name LocationName `json:"name"`
 	// IsPrivate is true for account-private placements.
 	IsPrivate bool `json:"is_private"`
+	// Storage classes available to the account in this location.
+	StorageClasses []string `json:"storage_classes,omitempty"`
+	// Default storage class for this location.
+	DefaultStorageClass *string `json:"default_storage_class,omitempty"`
 }
 
 type BasinConfig struct {
@@ -227,7 +225,8 @@ type StreamConfig struct {
 	// If unspecified, the default is to retain records for 7 days.
 	RetentionPolicy *RetentionPolicy `json:"retention_policy,omitempty"`
 	// Storage class for recent writes.
-	StorageClass *StorageClass `json:"storage_class,omitempty"`
+	// Discover available values with [LocationsClient.List].
+	StorageClass *string `json:"storage_class,omitempty"`
 	// Timestamping behavior.
 	Timestamping *TimestampingConfig `json:"timestamping,omitempty"`
 }
@@ -323,8 +322,8 @@ type StreamReconfiguration struct {
 	// Takes precedence over RetentionPolicy.
 	ClearRetentionPolicy bool `json:"-"`
 	// Storage class for recent writes.
-	StorageClass *StorageClass `json:"storage_class,omitempty"`
-	// Set to true to clear the storage class, restoring the server default.
+	StorageClass *string `json:"storage_class,omitempty"`
+	// Set to true to restore the inherited storage class.
 	// Takes precedence over StorageClass.
 	ClearStorageClass bool `json:"-"`
 	// Timestamping behavior.

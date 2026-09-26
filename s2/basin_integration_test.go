@@ -506,7 +506,7 @@ func TestCreateBasin_WithFullConfig(t *testing.T) {
 	basinName := uniqueBasinName("test-full")
 	defer deleteBasin(ctx, client, basinName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	timestampMode := s2.TimestampingModeClientPrefer
 	info, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
@@ -621,7 +621,7 @@ func TestCreateBasin_StorageClassStandard(t *testing.T) {
 	basinName := uniqueBasinName("test-scst")
 	defer deleteBasin(ctx, client, basinName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
@@ -644,7 +644,7 @@ func TestCreateBasin_StorageClassStandard(t *testing.T) {
 	if config.DefaultStreamConfig == nil || config.DefaultStreamConfig.StorageClass == nil {
 		t.Fatal("Expected default_stream_config.storage_class")
 	}
-	if *config.DefaultStreamConfig.StorageClass != s2.StorageClassStandard {
+	if *config.DefaultStreamConfig.StorageClass != testStorageClassStandard {
 		t.Errorf("Expected storage_class=standard, got %s", *config.DefaultStreamConfig.StorageClass)
 	}
 	t.Log("Verified storage_class=standard")
@@ -659,7 +659,7 @@ func TestCreateBasin_StorageClassExpress(t *testing.T) {
 	basinName := uniqueBasinName("test-scex")
 	defer deleteBasin(ctx, client, basinName)
 
-	storageClass := s2.StorageClassExpress
+	storageClass := testStorageClassExpress
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
@@ -683,7 +683,7 @@ func TestCreateBasin_StorageClassExpress(t *testing.T) {
 	}
 
 	if config.DefaultStreamConfig != nil && config.DefaultStreamConfig.StorageClass != nil {
-		if *config.DefaultStreamConfig.StorageClass != s2.StorageClassExpress {
+		if *config.DefaultStreamConfig.StorageClass != testStorageClassExpress {
 			t.Errorf("Expected storage_class=express, got %s", *config.DefaultStreamConfig.StorageClass)
 		}
 	}
@@ -1101,7 +1101,7 @@ func TestGetBasinConfig_VerifyAllFieldsReturned(t *testing.T) {
 	basinName := uniqueBasinName("test-gall")
 	defer deleteBasin(ctx, client, basinName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	timestampMode := s2.TimestampingModeClientRequire
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
@@ -1599,11 +1599,11 @@ func TestCreateStreamOnAppend_DefaultStreamConfigApplied(t *testing.T) {
 
 func TestReconfigureBasin_ChangeStorageClass(t *testing.T) {
 	testCases := []struct {
-		from s2.StorageClass
-		to   s2.StorageClass
+		from string
+		to   string
 	}{
-		{s2.StorageClassStandard, s2.StorageClassExpress},
-		{s2.StorageClassExpress, s2.StorageClassStandard},
+		{testStorageClassStandard, testStorageClassExpress},
+		{testStorageClassExpress, testStorageClassStandard},
 	}
 
 	for _, tc := range testCases {
@@ -2071,7 +2071,7 @@ func TestReconfigureBasin_PartialConfig(t *testing.T) {
 	basinName := uniqueBasinName("test-rpar")
 	defer deleteBasin(ctx, client, basinName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	_, err := client.Basins.Create(ctx, s2.CreateBasinArgs{
 		Basin: basinName,
 		Config: &s2.BasinConfig{
@@ -2105,7 +2105,7 @@ func TestReconfigureBasin_PartialConfig(t *testing.T) {
 	}
 	if config.DefaultStreamConfig == nil || config.DefaultStreamConfig.StorageClass == nil {
 		t.Error("Expected storage_class to be preserved")
-	} else if *config.DefaultStreamConfig.StorageClass != s2.StorageClassStandard {
+	} else if *config.DefaultStreamConfig.StorageClass != testStorageClassStandard {
 		t.Error("Expected storage_class to remain standard")
 	}
 	t.Log("Verified partial reconfigure only changes specified fields")

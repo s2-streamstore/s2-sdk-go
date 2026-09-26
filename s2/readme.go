@@ -208,7 +208,7 @@ Streams
 	info, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
 		Stream: "my-stream",
 		Config: &s2.StreamConfig{
-			StorageClass: s2.Ptr(s2.StorageClassExpress),
+			StorageClass: s2.Ptr("express"),
 			RetentionPolicy: &s2.RetentionPolicy{
 				Age: s2.Ptr(int64(86400 * 7)),  // keep for 7 days
 			},
