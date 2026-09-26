@@ -59,6 +59,15 @@ Lists the locations available to the account.
 - `is_private` (boolean)
   - `true` for account-private placements
 
+- `storage_classes` (array of strings, optional)
+  - Storage classes available to the account in this location
+
+- `default_storage_class` (string, optional)
+  - Default storage class for this location
+
+Storage-class names are open strings. Both fields may be absent or null on older
+servers and decode to `nil`; the SDK does not infer a default.
+
 ### Test Cases
 
 - **List available locations**
@@ -173,3 +182,5 @@ Sets the account's default location. Body is the `LocationName`.
   from `GetDefault`.
 - A basin's location cannot be changed once the basin exists; changing the
   account default via `SetDefault` does not relocate existing basins.
+- Omitting a basin's default storage class lets the service choose the location's
+  default. Omitting a stream's storage class inherits the basin's default.

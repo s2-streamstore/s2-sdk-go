@@ -33,7 +33,11 @@ type AccountMetricSet string
 type BasinMetricSet string
 type StreamMetricSet string
 type MetricSample [2]float64
+
+// StorageClass is a service-defined storage class name.
+// Discover available classes and defaults with [LocationsClient.List].
 type StorageClass string
+
 type TimestampingMode string
 
 // ProvisionResult indicates whether provisioning created, updated, or skipped writing a resource.
@@ -193,6 +197,10 @@ type LocationInfo struct {
 	Name LocationName `json:"name"`
 	// IsPrivate is true for account-private placements.
 	IsPrivate bool `json:"is_private"`
+	// Storage classes available to the account in this location.
+	StorageClasses []StorageClass `json:"storage_classes,omitempty"`
+	// Default storage class for this location.
+	DefaultStorageClass *StorageClass `json:"default_storage_class,omitempty"`
 }
 
 type BasinConfig struct {
