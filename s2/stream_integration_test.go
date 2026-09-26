@@ -16,6 +16,9 @@ import (
 const streamTestTimeout = 60 * time.Second
 
 const (
+	testStorageClassStandard = "standard"
+	testStorageClassExpress  = "express"
+
 	errCodeResourceAlreadyExists = "resource_already_exists"
 	errCodeValidation            = "VALIDATION"
 	errOriginSDK                 = "sdk"
@@ -371,7 +374,7 @@ func TestCreateStream_WithFullConfig(t *testing.T) {
 	streamName := uniqueStreamName("test-full")
 	defer deleteStream(ctx, basin, streamName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	timestampMode := s2.TimestampingModeClientRequire
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
 		Stream: streamName,
@@ -398,7 +401,7 @@ func TestCreateStream_WithFullConfig(t *testing.T) {
 		t.Fatalf("GetConfig failed: %v", err)
 	}
 
-	if config.StorageClass == nil || *config.StorageClass != s2.StorageClassStandard {
+	if config.StorageClass == nil || *config.StorageClass != testStorageClassStandard {
 		t.Error("Expected storage_class=standard")
 	}
 	t.Logf("Created stream %s with full config", streamName)
@@ -413,7 +416,7 @@ func TestCreateStream_StorageClassStandard(t *testing.T) {
 	streamName := uniqueStreamName("test-scst")
 	defer deleteStream(ctx, basin, streamName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
 		Stream: streamName,
 		Config: &s2.StreamConfig{
@@ -429,7 +432,7 @@ func TestCreateStream_StorageClassStandard(t *testing.T) {
 		t.Fatalf("GetConfig failed: %v", err)
 	}
 
-	if config.StorageClass == nil || *config.StorageClass != s2.StorageClassStandard {
+	if config.StorageClass == nil || *config.StorageClass != testStorageClassStandard {
 		t.Errorf("Expected storage_class=standard")
 	}
 	t.Log("Verified storage_class=standard")
@@ -444,7 +447,7 @@ func TestCreateStream_StorageClassExpress(t *testing.T) {
 	streamName := uniqueStreamName("test-scex")
 	defer deleteStream(ctx, basin, streamName)
 
-	storageClass := s2.StorageClassExpress
+	storageClass := testStorageClassExpress
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
 		Stream: streamName,
 		Config: &s2.StreamConfig{
@@ -464,7 +467,7 @@ func TestCreateStream_StorageClassExpress(t *testing.T) {
 		t.Fatalf("GetConfig failed: %v", err)
 	}
 
-	if config.StorageClass != nil && *config.StorageClass != s2.StorageClassExpress {
+	if config.StorageClass != nil && *config.StorageClass != testStorageClassExpress {
 		t.Errorf("Expected storage_class=express, got %s", *config.StorageClass)
 	}
 	t.Log("Verified storage_class=express")
@@ -685,7 +688,7 @@ func TestGetStreamConfig_Existing(t *testing.T) {
 	streamName := uniqueStreamName("test-gcfg")
 	defer deleteStream(ctx, basin, streamName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
 		Stream: streamName,
 		Config: &s2.StreamConfig{
@@ -701,7 +704,7 @@ func TestGetStreamConfig_Existing(t *testing.T) {
 		t.Fatalf("GetConfig failed: %v", err)
 	}
 
-	if config.StorageClass == nil || *config.StorageClass != s2.StorageClassStandard {
+	if config.StorageClass == nil || *config.StorageClass != testStorageClassStandard {
 		t.Error("Expected storage_class=standard")
 	}
 	t.Logf("Got config: storage_class=%s", *config.StorageClass)
@@ -809,7 +812,7 @@ func TestReconfigureStream_ChangeStorageClass(t *testing.T) {
 	streamName := uniqueStreamName("test-rcsc")
 	defer deleteStream(ctx, basin, streamName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
 		Stream: streamName,
 		Config: &s2.StreamConfig{
@@ -820,7 +823,7 @@ func TestReconfigureStream_ChangeStorageClass(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	newStorageClass := s2.StorageClassExpress
+	newStorageClass := testStorageClassExpress
 	config, err := basin.Streams.Reconfigure(ctx, s2.ReconfigureStreamArgs{
 		Stream: streamName,
 		Config: s2.StreamReconfiguration{
@@ -835,7 +838,7 @@ func TestReconfigureStream_ChangeStorageClass(t *testing.T) {
 		t.Fatalf("Reconfigure failed: %v", err)
 	}
 
-	if config.StorageClass != nil && *config.StorageClass != s2.StorageClassExpress {
+	if config.StorageClass != nil && *config.StorageClass != testStorageClassExpress {
 		t.Errorf("Expected storage_class=express, got %s", *config.StorageClass)
 	}
 	t.Log("Verified storage_class changed to express")
@@ -927,7 +930,7 @@ func TestReconfigureStream_NonExistent(t *testing.T) {
 	t.Log("Testing: Reconfigure non-existent stream")
 
 	basin := getSharedBasin(t)
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	_, err := basin.Streams.Reconfigure(ctx, s2.ReconfigureStreamArgs{
 		Stream: "nonexistent-stream-12345",
 		Config: s2.StreamReconfiguration{
@@ -951,7 +954,7 @@ func TestReconfigureStream_EmptyConfig(t *testing.T) {
 	streamName := uniqueStreamName("test-remp")
 	defer deleteStream(ctx, basin, streamName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
 		Stream: streamName,
 		Config: &s2.StreamConfig{
@@ -970,7 +973,7 @@ func TestReconfigureStream_EmptyConfig(t *testing.T) {
 		t.Fatalf("Reconfigure failed: %v", err)
 	}
 
-	if config.StorageClass == nil || *config.StorageClass != s2.StorageClassStandard {
+	if config.StorageClass == nil || *config.StorageClass != testStorageClassStandard {
 		t.Error("Expected storage_class to remain standard")
 	}
 	t.Log("Verified empty reconfigure preserves config")
@@ -3050,7 +3053,7 @@ func TestReconfigureStream_PartialConfig(t *testing.T) {
 	streamName := uniqueStreamName("test-rcpc")
 	defer deleteStream(ctx, basin, streamName)
 
-	storageClass := s2.StorageClassStandard
+	storageClass := testStorageClassStandard
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
 		Stream: streamName,
 		Config: &s2.StreamConfig{
@@ -3076,7 +3079,7 @@ func TestReconfigureStream_PartialConfig(t *testing.T) {
 		t.Fatalf("Reconfigure failed: %v", err)
 	}
 
-	if config.StorageClass == nil || *config.StorageClass != s2.StorageClassStandard {
+	if config.StorageClass == nil || *config.StorageClass != testStorageClassStandard {
 		t.Error("storage_class should remain standard")
 	}
 	if config.RetentionPolicy == nil || config.RetentionPolicy.Age == nil || *config.RetentionPolicy.Age != 3600 {

@@ -166,7 +166,7 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 			config := &StreamConfig{
 				DeleteOnEmpty:   &DeleteOnEmptyConfig{MinAgeSecs: Int64(300)},
 				RetentionPolicy: &RetentionPolicy{Age: Int64(3600)},
-				StorageClass:    Ptr(StorageClassExpress),
+				StorageClass:    Ptr("express"),
 				Timestamping: &TimestampingConfig{
 					Mode:     Ptr(TimestampingModeClientPrefer),
 					Uncapped: Bool(false),
@@ -182,7 +182,7 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 				if attempts == 1 {
 					*config.DeleteOnEmpty.MinAgeSecs = 600
 					*config.RetentionPolicy.Age = 7200
-					*config.StorageClass = StorageClassStandard
+					*config.StorageClass = "standard"
 					*config.Timestamping.Mode = TimestampingModeArrival
 					*config.Timestamping.Uncapped = true
 					config.DeleteOnEmpty.MinAgeSecs = nil

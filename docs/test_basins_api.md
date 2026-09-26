@@ -183,11 +183,12 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### StreamConfig Object (nested in BasinConfig.default_stream_config)
 
-> **Note:** Fields with default values are **omitted** from API responses. If all StreamConfig fields are defaults, the entire `default_stream_config` is omitted.
+> **Note:** Default-valued fields may be omitted from API responses. An omitted storage class does not identify a particular class.
 
-- `storage_class` (StorageClass, default `express`, omitted)
+- `storage_class` (string, optional)
   - Storage class for recent writes
-  - Values: `standard`, `express`
+  - Discover available values and the location default with `Locations.List`
+  - Omission on creation uses the location's default
 
 - `retention_policy` (RetentionPolicy, default 7 days, omitted)
   - Retention policy
@@ -612,8 +613,9 @@ This document enumerates every knob/parameter of the Basin API to ensure SDK tes
 
 ### StreamReconfiguration Object
 
-- `storage_class` (StorageClass | null)
+- `storage_class` (string | null, optional)
   - Change storage class
+  - Omitted = no change; null = reset to the location's default
 
 - `retention_policy` (RetentionPolicy | null)
   - Change retention policy
@@ -854,10 +856,10 @@ safe to retry.
 
 ### StreamConfig Fields (under default_stream_config)
 
-> **Response serialization:** Fields with default values are omitted from responses.
+> **Response serialization:** Default-valued fields may be omitted from responses; do not infer a storage class from its absence.
 
-- `storage_class` (enum, default `express`)
-  - Values to test: `standard`, `express`
+- `storage_class` (string)
+  - Values to test: classes advertised by `Locations.List`, plus an unavailable name
 
 - `retention_policy` (oneOf, default 7 days)
   - Values to test: `{"age": 1}`, `{"age": 86400}`, `{"age": 604800}`, `{"infinite": {}}`
@@ -882,9 +884,6 @@ When running against an account on the Free tier, certain configurations will be
 
 - Infinite retention
   - Example: "Retention is currently limited to 28 days for free tier"
-
-- Express storage class
-  - Example: "Express storage class is not available on free tier"
 
 ---
 

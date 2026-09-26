@@ -301,11 +301,12 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 ### StreamConfig Object
 
-> **Note:** Fields with default values are **omitted** from API responses.
+> **Note:** Default-valued fields may be omitted from API responses. An omitted storage class does not identify a particular class.
 
-- `storage_class` (StorageClass, default `express`, omitted)
+- `storage_class` (string, optional)
   - Storage class for recent writes
-  - Values: `standard`, `express`
+  - Discover available values with `Locations.List`
+  - Omission on creation inherits the basin's default
 
 - `retention_policy` (RetentionPolicy, default 7 days, omitted)
   - Retention policy
@@ -655,10 +656,11 @@ This document enumerates every knob/parameter of the Stream API to ensure SDK te
 
 ### Request Body: StreamReconfiguration
 
-> **Note:** Fields use partial update semantics — `null` means no change, absent means no change, explicit value means update.
+> **Note:** Fields use partial update semantics: omission preserves the current value, an explicit value updates it, and null resets it.
 
-- `storage_class` (StorageClass | null, optional)
+- `storage_class` (string | null, optional)
   - Change storage class
+  - Null resets to the basin's default
 
 - `retention_policy` (RetentionPolicy | null, optional)
   - Change retention policy
@@ -1570,10 +1572,10 @@ PUT semantics and is always safe to retry.
 
 ### StreamConfig Fields
 
-> **Response serialization:** Fields with default values are omitted from responses.
+> **Response serialization:** Default-valued fields may be omitted from responses; do not infer a storage class from its absence.
 
-- `storage_class` (enum, default `express`)
-  - Values to test: `standard`, `express`
+- `storage_class` (string)
+  - Values to test: classes advertised by `Locations.List`, plus an unavailable name
 
 - `retention_policy` (oneOf, default 7 days)
   - Values to test: `{"age": 1}`, `{"age": 86400}`, `{"age": 604800}`, `{"infinite": {}}`
@@ -1598,9 +1600,6 @@ When running against an account on the Free tier, certain configurations will be
 
 - Infinite retention
   - Example: "Retention is currently limited to 28 days for free tier"
-
-- Express storage class
-  - Example: "Express storage class is not available on free tier"
 
 ---
 

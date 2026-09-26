@@ -166,7 +166,7 @@ func ExampleBasinsClient_Create() {
 		Config: &s2.BasinConfig{
 			StreamCipher: s2.Ptr(s2.EncryptionAlgorithmAes256Gcm),
 			DefaultStreamConfig: &s2.StreamConfig{
-				StorageClass: s2.Ptr(s2.StorageClassStandard),
+				StorageClass: s2.Ptr("standard"),
 			},
 		},
 	})
@@ -266,7 +266,7 @@ func ExampleStreamsClient_Create() {
 	info, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{
 		Stream: "my-stream",
 		Config: &s2.StreamConfig{
-			StorageClass: s2.Ptr(s2.StorageClassExpress),
+			StorageClass: s2.Ptr("express"),
 			RetentionPolicy: &s2.RetentionPolicy{
 				Age: s2.Ptr(int64(86400 * 7)), // 7 days
 			},
