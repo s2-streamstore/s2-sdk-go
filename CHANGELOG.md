@@ -2,11 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.24.0] - 2026-09-27
+
+### Features
+
+- [**breaking**] Use string storage classes and expose location offerings ([#411](https://github.com/s2-streamstore/s2-sdk-go/issues/411))
+
+### Miscellaneous Tasks
+
+- Update s2-specs to 0bd8bba ([#412](https://github.com/s2-streamstore/s2-sdk-go/issues/412))
+
 ## [v0.23.3] - 2026-09-24
 
 ### Bug Fixes
 
 - Preserve uncertainty across append retries ([#401](https://github.com/s2-streamstore/s2-sdk-go/issues/401))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.23.3 ([#402](https://github.com/s2-streamstore/s2-sdk-go/issues/402))
 
 ## [v0.23.2] - 2026-09-22
 
