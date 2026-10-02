@@ -93,6 +93,7 @@ type ReadSession struct {
 	pending             []SequencedRecord
 	pendingCaughtUpTail *StreamPosition
 	pendingConsumed     chan struct{}
+	pendingErr          error
 	current             SequencedRecord
 	err                 error
 	closed              atomic.Bool
@@ -121,6 +122,29 @@ func (s *ReadSession) Next() bool {
 	}
 
 	for {
+		// Drain buffered records before surfacing a deferred fatal error.
+		if s.pendingErr != nil {
+			select {
+			case delivery, ok := <-s.reader.recordsCh:
+				if !ok {
+					s.err = s.pendingErr
+					s.pendingErr = nil
+					s.Close()
+					return false
+				}
+				s.stashDelivery(delivery)
+				if s.yieldPending() {
+					return true
+				}
+				continue
+			default:
+				s.err = s.pendingErr
+				s.pendingErr = nil
+				s.Close()
+				return false
+			}
+		}
+
 		select {
 		case delivery, ok := <-s.reader.recordsCh:
 			if !ok {
@@ -158,9 +182,8 @@ func (s *ReadSession) Next() bool {
 				}
 			}
 			if err != nil {
-				s.err = err
-				s.Close()
-				return false
+				s.pendingErr = err
+				continue
 			}
 		}
 	}
