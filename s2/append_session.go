@@ -390,7 +390,7 @@ func (r *AppendSession) handleSessionStartError(err error) {
 		logError(r.streamClient.logger, "append session max attempts exhausted after transport start failure",
 			"stream", string(r.streamClient.name),
 			"attempts", maxAttempts)
-		r.failAllInflight(fmt.Errorf("max attempts (%d) exhausted, last error: %v: %w",
+		r.failAllInflight(fmt.Errorf("max attempts (%d) exhausted, last error: %w: %w",
 			maxAttempts, err, ErrMaxAttemptsExhausted))
 		return
 	}
@@ -796,7 +796,7 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		logError(r.streamClient.logger, "append session max attempts exhausted",
 			"stream", string(r.streamClient.name),
 			"attempts", maxAttempts)
-		r.failAllInflight(fmt.Errorf("max attempts (%d) exhausted, last error: %v: %w",
+		r.failAllInflight(fmt.Errorf("max attempts (%d) exhausted, last error: %w: %w",
 			maxAttempts, err, ErrMaxAttemptsExhausted))
 		return
 	}
