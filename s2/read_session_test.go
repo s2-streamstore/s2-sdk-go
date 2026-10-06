@@ -495,14 +495,14 @@ func TestReadSessionFatalErrorRejectsCaughtUpFutureWithoutNext(t *testing.T) {
 	if !errors.As(waitErr, &s2Err) {
 		t.Fatalf("expected S2Error, got %v", waitErr)
 	}
-	if s2Err.Code != "BAD_READ" || s2Err.Message != "bad read" {
+	if s2Err.Code != badReadCode || s2Err.Message != "bad read" {
 		t.Fatalf("unexpected fatal error: %+v", s2Err)
 	}
 
 	for session.Next() {
 	}
 	var sessionErr *S2Error
-	if !errors.As(session.Err(), &sessionErr) || sessionErr.Code != "BAD_READ" {
+	if !errors.As(session.Err(), &sessionErr) || sessionErr.Code != badReadCode {
 		t.Fatalf("expected Next to preserve the fatal error, got %v", session.Err())
 	}
 }
