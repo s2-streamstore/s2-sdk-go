@@ -25,6 +25,15 @@ func main() {
 		fmt.Printf("Created client with custom endpoints: %+v\n", client)
 	}
 
+	// Example: Endpoints from environment variables
+	if os.Getenv("S2_ACCESS_TOKEN") != "" {
+		// ANCHOR: env-endpoints
+		// Reads S2_ACCESS_TOKEN, S2_ACCOUNT_ENDPOINT, and S2_BASIN_ENDPOINT.
+		client := s2.NewFromEnvironment(nil)
+		// ANCHOR_END: env-endpoints
+		fmt.Printf("Created client from environment: %+v\n", client)
+	}
+
 	// Example: Custom retry configuration
 	{
 		accessToken := os.Getenv("S2_ACCESS_TOKEN")
