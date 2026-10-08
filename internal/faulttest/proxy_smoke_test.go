@@ -13,7 +13,7 @@ import (
 func TestLiteProxy(t *testing.T) {
 	lite := newLite(t)
 	basin, name := provision(t, lite.endpoint)
-	proxy := newFaultProxy(t, lite.endpoint, 1)
+	proxy := newFaultProxy(t, lite.endpoint, make([]faultPlan, 1))
 	stream := testClient(fmt.Sprintf("%s/op/0/v1", proxy.endpoint), s2.CompressionNone).Basin(basin).Stream(s2.StreamName(name))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
