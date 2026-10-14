@@ -223,7 +223,7 @@ func TestAccountMetrics_InvalidTimeRange(t *testing.T) {
 	}{
 		{name: "start-after-end", start: now, end: now - 3600},
 		{name: "end-too-far-future", start: now - 3600, end: now + 600},
-		{name: "range-too-large", start: now - 40*24*3600, end: now},
+		{name: "range-too-large", start: now - 91*24*3600, end: now},
 	}
 
 	for _, tc := range testCases {
@@ -537,7 +537,7 @@ func TestBasinMetrics_InvalidTimeRange(t *testing.T) {
 	}{
 		{name: "start-after-end", start: now, end: now - 3600},
 		{name: "end-too-far-future", start: now - 3600, end: now + 600},
-		{name: "range-too-large", start: now - 40*24*3600, end: now},
+		{name: "range-too-large", start: now - 91*24*3600, end: now},
 	}
 
 	for _, tc := range testCases {
@@ -889,7 +889,7 @@ func TestStreamMetrics_InvalidTimeRange(t *testing.T) {
 	}{
 		{name: "start-after-end", start: now, end: now - 3600},
 		{name: "end-too-far-future", start: now - 3600, end: now + 600},
-		{name: "range-too-large", start: now - 40*24*3600, end: now},
+		{name: "range-too-large", start: now - 91*24*3600, end: now},
 	}
 
 	for _, tc := range testCases {
