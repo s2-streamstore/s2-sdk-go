@@ -29,6 +29,10 @@ type LocationName string
 type EncryptionAlgorithm string
 type MetricUnit string
 type TimeseriesInterval string
+
+// Account-level metric sets.
+// `estimated-billable-usage` returns estimated USD by billing dimension and as a `total` series.
+// Supports hour (default) and day intervals, aggregating finalized hours. Daily points may be partial.
 type AccountMetricSet string
 type BasinMetricSet string
 type StreamMetricSet string
@@ -48,6 +52,7 @@ const (
 const (
 	MetricUnitBytes      MetricUnit = "bytes"
 	MetricUnitOperations MetricUnit = "operations"
+	MetricUnitUSD        MetricUnit = "usd"
 )
 
 const (
@@ -57,8 +62,9 @@ const (
 )
 
 const (
-	AccountMetricSetActiveBasins AccountMetricSet = "active-basins"
-	AccountMetricSetAccountOps   AccountMetricSet = "account-ops"
+	AccountMetricSetActiveBasins           AccountMetricSet = "active-basins"
+	AccountMetricSetAccountOps             AccountMetricSet = "account-ops"
+	AccountMetricSetEstimatedBillableUsage AccountMetricSet = "estimated-billable-usage"
 )
 
 const (
