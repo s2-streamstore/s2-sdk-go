@@ -20,7 +20,7 @@
 > - Both `start` and `end` parameters are REQUIRED for all metric sets
 > - `start` must be <= `end`
 > - `end` must not be more than ~60 seconds in the future
-> - Time range must not exceed 30 days
+> - Time range must not exceed 90 days
 > - Metric values are floating point numbers
 > - Timeseries data points are tuples of `[timestamp, value]`
 > - The metrics API does NOT return 404 for non-existent basins/streams - it returns permission errors or empty data
@@ -179,8 +179,8 @@
   - Input: `set=active-basins`, `start=<now-1h>`, `end=<now+10m>`
   - Expected: 422 (`invalid`)
 
-- **Time range > 30 days**
-  - Input: `set=active-basins`, `start=<now-40d>`, `end=<now>`
+- **Time range > 90 days**
+  - Input: `set=active-basins`, `start=<now-91d>`, `end=<now>`
   - Expected: 422 (`invalid`)
 
 - **Empty time range returns empty data**
@@ -332,8 +332,8 @@
   - Input: valid basin, `set=storage`, `start=<now-1h>`, `end=<now+10m>`
   - Expected: 422 (`invalid`)
 
-- **Time range > 30 days**
-  - Input: valid basin, `set=storage`, `start=<now-40d>`, `end=<now>`
+- **Time range > 90 days**
+  - Input: valid basin, `set=storage`, `start=<now-91d>`, `end=<now>`
   - Expected: 422 (`invalid`)
 
 - **Storage interval invalid**
@@ -455,8 +455,8 @@
   - Input: valid basin/stream, `set=storage`, `start=<now-1h>`, `end=<now+10m>`
   - Expected: 422 (`invalid`)
 
-- **Time range > 30 days**
-  - Input: valid basin/stream, `set=storage`, `start=<now-40d>`, `end=<now>`
+- **Time range > 90 days**
+  - Input: valid basin/stream, `set=storage`, `start=<now-91d>`, `end=<now>`
   - Expected: 422 (`invalid`)
 
 - **Storage interval invalid**
