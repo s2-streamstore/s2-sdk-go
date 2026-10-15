@@ -286,7 +286,19 @@ func TestIterBasins_LimitZero(t *testing.T) {
 
 	client := testClient(t)
 
-	iterAll := client.Basins.Iter(ctx, nil)
+	// Other suites mutate this account, so compare only basins owned by this test.
+	prefix := string(uniqueBasinName("test-iter-zero"))
+	const expectedCount = 3
+	for i := range expectedCount {
+		name := s2.BasinName(fmt.Sprintf("%s-%d", prefix, i))
+		if _, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: name}); err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+		defer deleteBasin(ctx, client, name)
+		waitForBasinActive(ctx, t, client, name)
+	}
+
+	iterAll := client.Basins.Iter(ctx, &s2.ListBasinsArgs{Prefix: prefix})
 	allCount := 0
 	for iterAll.Next() {
 		allCount++
@@ -296,7 +308,7 @@ func TestIterBasins_LimitZero(t *testing.T) {
 	}
 
 	zero := 0
-	iterZero := client.Basins.Iter(ctx, &s2.ListBasinsArgs{Limit: &zero})
+	iterZero := client.Basins.Iter(ctx, &s2.ListBasinsArgs{Prefix: prefix, Limit: &zero})
 	zeroCount := 0
 	for iterZero.Next() {
 		zeroCount++
@@ -305,9 +317,11 @@ func TestIterBasins_LimitZero(t *testing.T) {
 		t.Fatalf("Iter (Limit=0): %v", err)
 	}
 
-	if zeroCount != allCount {
-		t.Errorf("Iter(Limit=0) returned %d items; Iter(nil) returned %d. Limit=0 should be 'no limit'.",
-			zeroCount, allCount)
+	if allCount != expectedCount {
+		t.Errorf("Iter (no limit) returned %d basins; expected %d", allCount, expectedCount)
+	}
+	if zeroCount != expectedCount {
+		t.Errorf("Iter (Limit=0) returned %d basins; expected %d", zeroCount, expectedCount)
 	}
 }
 
