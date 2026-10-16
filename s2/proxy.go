@@ -50,7 +50,7 @@ func dialThroughProxy(ctx context.Context, dialer *net.Dialer, tlsConfig *tls.Co
 			return nil, err
 		}
 		return socks.(proxy.ContextDialer).DialContext(ctx, "tcp", addr)
-	case "http", "https":
+	case schemeHTTP, schemeHTTPS:
 	default:
 		return nil, fmt.Errorf("unsupported proxy scheme %q", proxyURL.Scheme)
 	}
@@ -58,7 +58,7 @@ func dialThroughProxy(ctx context.Context, dialer *net.Dialer, tlsConfig *tls.Co
 	proxyAddr := proxyURL.Host
 	if proxyURL.Port() == "" {
 		port := "80"
-		if proxyURL.Scheme == "https" {
+		if proxyURL.Scheme == schemeHTTPS {
 			port = "443"
 		}
 		proxyAddr = net.JoinHostPort(proxyURL.Hostname(), port)
@@ -80,7 +80,7 @@ func dialThroughProxy(ctx context.Context, dialer *net.Dialer, tlsConfig *tls.Co
 		return nil, err
 	}
 
-	if proxyURL.Scheme == "https" {
+	if proxyURL.Scheme == schemeHTTPS {
 		cfg := &tls.Config{}
 		if tlsConfig != nil {
 			cfg = tlsConfig.Clone()

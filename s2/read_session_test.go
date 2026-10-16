@@ -709,8 +709,8 @@ func TestReadSessionDeliversBufferedRecordsBeforeFatalError(t *testing.T) {
 		t.Fatalf("expected %d buffered records before the fatal error, got %v", batches, got)
 	}
 	var s2Err *S2Error
-	if !errors.As(session.Err(), &s2Err) || s2Err.Code != "BAD_READ" {
-		t.Fatalf("expected BAD_READ after buffered records, got %v", session.Err())
+	if !errors.As(session.Err(), &s2Err) || s2Err.Status != http.StatusBadRequest {
+		t.Fatalf("expected the fatal error after buffered records, got %v", session.Err())
 	}
 	if pos := session.NextReadPosition(); pos == nil || pos.SeqNum != batches {
 		t.Fatalf("expected next read position %d, got %+v", batches, pos)

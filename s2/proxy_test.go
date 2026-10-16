@@ -124,5 +124,4 @@ func TestStreamingClientUsesUserProxy(t *testing.T) {
 	if got := connects.Load(); got != 1 {
 		t.Fatalf("expected 1 CONNECT through the proxy, got %d", got)
 	}
-
 }
