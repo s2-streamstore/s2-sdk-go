@@ -93,9 +93,13 @@ type ReadSession struct {
 	pending             []SequencedRecord
 	pendingCaughtUpTail *StreamPosition
 	pendingConsumed     chan struct{}
+	pendingNext         *StreamPosition
 	current             SequencedRecord
-	err                 error
-	closed              atomic.Bool
+	// position advances as records are returned by Next, so buffered records
+	// that were never returned are read again on resume.
+	position atomic.Pointer[StreamPosition]
+	err      error
+	closed   atomic.Bool
 	// readerDone is set once errorCh yields; readerErr is surfaced after
 	// buffered records are drained.
 	readerDone bool
@@ -164,6 +168,7 @@ func (s *ReadSession) stashDelivery(delivery readDelivery) {
 	s.pending = delivery.records
 	s.pendingCaughtUpTail = delivery.caughtUpTail
 	s.pendingConsumed = delivery.consumed
+	s.pendingNext = delivery.next
 	if len(s.pending) == 0 {
 		s.finishDelivery()
 	}
@@ -176,6 +181,7 @@ func (s *ReadSession) yieldPending() bool {
 	s.current = s.pending[0]
 	s.pending[0] = SequencedRecord{} // release references so consumed records can be collected
 	s.pending = s.pending[1:]
+	s.position.Store(&StreamPosition{SeqNum: s.current.SeqNum + 1, Timestamp: s.current.Timestamp})
 	if len(s.pending) == 0 {
 		s.finishDelivery()
 	}
@@ -183,6 +189,10 @@ func (s *ReadSession) yieldPending() bool {
 }
 
 func (s *ReadSession) finishDelivery() {
+	if s.pendingNext != nil {
+		s.position.Store(s.pendingNext)
+		s.pendingNext = nil
+	}
 	if s.pendingCaughtUpTail != nil {
 		s.reader.caughtUp.setCaughtUp(*s.pendingCaughtUpTail)
 		s.pendingCaughtUpTail = nil
@@ -264,13 +274,20 @@ func (f *CaughtUpFuture) Wait(ctx context.Context) (StreamPosition, error) {
 	}
 }
 
-// Returns the next read position, if known. Ignored command records are
-// included in this position.
+// Returns the position after the last record returned by Next, if known.
+// Resuming from it reads every record Next has not yet returned. Ignored
+// command records are included in this position. Safe to call concurrently
+// with Next.
 func (s *ReadSession) NextReadPosition() *StreamPosition {
-	if s == nil || s.reader == nil {
+	if s == nil {
 		return nil
 	}
-	return s.reader.NextReadPosition()
+	pos := s.position.Load()
+	if pos == nil {
+		return nil
+	}
+	copy := *pos
+	return &copy
 }
 
 // Returns the last observed tail position, if known.

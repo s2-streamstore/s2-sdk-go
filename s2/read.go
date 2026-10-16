@@ -146,6 +146,9 @@ type readDelivery struct {
 	records      []SequencedRecord
 	caughtUpTail *StreamPosition
 	consumed     chan struct{}
+	// next is the read position once the whole batch, including filtered
+	// command records, is consumed.
+	next *StreamPosition
 }
 
 type streamReader struct {
@@ -341,18 +344,6 @@ func (r *streamReader) Close() error {
 		r.cancel()
 	}
 	return nil
-}
-
-func (r *streamReader) NextReadPosition() *StreamPosition {
-	r.stateMu.RLock()
-	defer r.stateMu.RUnlock()
-	if !r.hasNextSeq {
-		return nil
-	}
-	return &StreamPosition{
-		SeqNum:    r.nextSeq,
-		Timestamp: r.nextTS,
-	}
 }
 
 func (r *streamReader) LastObservedTail() *StreamPosition {
@@ -610,6 +601,15 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 
 		caughtUp := readBatchCaughtUp(batch)
 
+		var next *StreamPosition
+		if n := len(batch.Records); n > 0 {
+			last := batch.Records[n-1]
+			next = &StreamPosition{SeqNum: last.SeqNum + 1, Timestamp: last.Timestamp}
+		} else if batch.Tail != nil {
+			// An empty batch with a tail resolves a relative or timestamp start.
+			next = &StreamPosition{SeqNum: batch.Tail.SeqNum, Timestamp: batch.Tail.Timestamp}
+		}
+
 		if len(batch.Records) > 0 {
 			// Snapshot full-batch accounting before filtering: limits and the
 			// resume position must reflect every record read, including command
@@ -632,8 +632,8 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			r.caughtUp.setBehind()
 		}
 
-		if hasRecords || caughtUp {
-			delivery := readDelivery{records: batch.Records}
+		if next != nil {
+			delivery := readDelivery{records: batch.Records, next: next}
 			if caughtUp {
 				delivery.caughtUpTail = batch.Tail
 				delivery.consumed = make(chan struct{})
