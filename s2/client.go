@@ -28,6 +28,9 @@ const (
 	http2ReadIdleTimeout   = 30 * time.Second
 	http2PingTimeout       = 15 * time.Second
 	http2WriteByteTimeout  = 30 * time.Second
+	// Closes streaming connections that stay idle, including ones already
+	// removed from the pool after reconnect advice.
+	http2IdleConnTimeout = 90 * time.Second
 )
 
 type ClientOptions struct {
@@ -113,6 +116,18 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	if baseTransport == nil {
 		baseTransport = http.DefaultTransport
 	}
+	// A client shared with an earlier New is already wrapped.
+	if wrapped, ok := baseTransport.(userAgentRoundTripper); ok {
+		baseTransport = wrapped.base
+	}
+	// Streaming uses its own HTTP/2 transport; carry over the TLS and proxy
+	// settings of a user-provided transport so it reaches the same endpoints.
+	var streamingTLSConfig *tls.Config
+	var streamingProxy proxyFunc
+	if t, ok := baseTransport.(*http.Transport); ok && opts.HTTPClient != nil {
+		streamingTLSConfig = t.TLSClientConfig
+		streamingProxy = t.Proxy
+	}
 	httpClient.Transport = userAgentRoundTripper{
 		base:      baseTransport,
 		userAgent: defaultUserAgent(),
@@ -148,7 +163,7 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		accessToken:        accessToken,
 		baseURL:            baseURL,
 		httpClient:         httpClient,
-		streamingClient:    createStreamingClient(connectionTimeout),
+		streamingClient:    createStreamingClient(connectionTimeout, streamingTLSConfig, streamingProxy),
 		makeBasinBaseURL:   makeBasinBaseURL,
 		retryConfig:        retryConfig,
 		logger:             opts.Logger,
@@ -202,9 +217,9 @@ func (t *schemeAwareTransport) CloseIdleConnections() {
 	t.h2c.CloseIdleConnections()
 }
 
-func createStreamingClient(connectionTimeout time.Duration) *http.Client {
+func createStreamingClient(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyFunc) *http.Client {
 	newTransport := func() http.RoundTripper {
-		return newStreamingTransport(connectionTimeout)
+		return newStreamingTransport(connectionTimeout, tlsConfig, proxy)
 	}
 
 	return &http.Client{
@@ -216,9 +231,14 @@ func createStreamingClient(connectionTimeout time.Duration) *http.Client {
 	}
 }
 
-func newStreamingTransport(connectionTimeout time.Duration) http.RoundTripper {
-	dialer := &net.Dialer{
-		Timeout: connectionTimeout,
+func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyFunc) http.RoundTripper {
+	if tlsConfig != nil {
+		tlsConfig = tlsConfig.Clone()
+	}
+	dialer := &streamingDialer{
+		dialer:    &net.Dialer{Timeout: connectionTimeout},
+		proxy:     proxy,
+		tlsConfig: tlsConfig,
 	}
 
 	h2cTransport := &http2.Transport{
@@ -228,9 +248,12 @@ func newStreamingTransport(connectionTimeout time.Duration) http.RoundTripper {
 		ReadIdleTimeout:            http2ReadIdleTimeout,
 		PingTimeout:                http2PingTimeout,
 		WriteByteTimeout:           http2WriteByteTimeout,
+		IdleConnTimeout:            http2IdleConnTimeout,
 		StrictMaxConcurrentStreams: false,
 		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, addr)
+			ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+			defer cancel()
+			return dialer.dial(ctx, schemeHTTP, network, addr)
 		},
 	}
 
@@ -241,12 +264,15 @@ func newStreamingTransport(connectionTimeout time.Duration) http.RoundTripper {
 		ReadIdleTimeout:            http2ReadIdleTimeout,
 		PingTimeout:                http2PingTimeout,
 		WriteByteTimeout:           http2WriteByteTimeout,
+		IdleConnTimeout:            http2IdleConnTimeout,
 		StrictMaxConcurrentStreams: false,
+		// http2.Transport derives cfg from TLSClientConfig per connection.
+		TLSClientConfig: tlsConfig,
 		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 			ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
 			defer cancel()
 
-			conn, err := dialer.DialContext(ctx, network, addr)
+			conn, err := dialer.dial(ctx, schemeHTTPS, network, addr)
 			if err != nil {
 				return nil, err
 			}

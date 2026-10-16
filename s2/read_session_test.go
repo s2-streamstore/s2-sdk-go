@@ -672,3 +672,47 @@ func TestReadSessionCaughtUpFutureStaysPendingAcrossRetry(t *testing.T) {
 		t.Fatalf("expected tail %+v, got %+v", want, tail)
 	}
 }
+
+func TestReadSessionDeliversBufferedRecordsBeforeFatalError(t *testing.T) {
+	const batches = readSessionBatchesBuffer
+	var body bytes.Buffer
+	for i := range batches {
+		body.Write(buildReadBatchFrame(t, []*pb.SequencedRecord{
+			{SeqNum: uint64(i), Body: []byte("r")},
+		}))
+	}
+	body.Write(internalframing.CreateFrameWithStatus(
+		[]byte(`{"message":"bad read","code":"BAD_READ"}`),
+		true,
+		internalframing.CompressionNone,
+		http.StatusBadRequest,
+	))
+	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("failed to open read session: %v", err)
+	}
+	defer session.Close()
+
+	// Wait until the reader has buffered every batch and reported the error.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := session.CaughtUp().Wait(ctx); err == nil {
+		t.Fatal("expected fatal error")
+	}
+
+	var got []uint64
+	for session.Next() {
+		got = append(got, session.Record().SeqNum)
+	}
+	if len(got) != batches {
+		t.Fatalf("expected %d buffered records before the fatal error, got %v", batches, got)
+	}
+	var s2Err *S2Error
+	if !errors.As(session.Err(), &s2Err) || s2Err.Status != http.StatusBadRequest {
+		t.Fatalf("expected the fatal error after buffered records, got %v", session.Err())
+	}
+	if pos := session.NextReadPosition(); pos == nil || pos.SeqNum != batches {
+		t.Fatalf("expected next read position %d, got %+v", batches, pos)
+	}
+}

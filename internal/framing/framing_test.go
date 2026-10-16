@@ -2,6 +2,7 @@ package framing
 
 import (
 	"bytes"
+	"io"
 	"testing"
 )
 
@@ -382,5 +383,16 @@ func TestAcceptEncoding(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFrameReaderReportsTruncatedFrameAsUnexpectedEOF(t *testing.T) {
+	frame := CreateFrame([]byte("hello"), false, CompressionNone)
+	fr := NewFrameReader(bytes.NewReader(append(frame, frame[:5]...)))
+	if _, err := fr.ReadFrame(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fr.ReadFrame(); err != io.ErrUnexpectedEOF {
+		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
 	}
 }

@@ -22,6 +22,15 @@ type spreadTransport struct {
 type spreadEntry struct {
 	rt       http.RoundTripper
 	sessions atomic.Int64
+	poisoned atomic.Bool
+}
+
+// release ends one session. Once a poisoned entry is out of the pool, only its
+// last session can see the connection go idle, so that session closes it.
+func (e *spreadEntry) release() {
+	if e.sessions.Add(-1) == 0 && e.poisoned.Load() {
+		closeIdleConnections(e.rt)
+	}
 }
 
 func newSpreadTransport(newTransport func() http.RoundTripper) *spreadTransport {
@@ -64,6 +73,7 @@ func (t *spreadTransport) poison(host string, target *spreadEntry) {
 	t.mu.Unlock()
 
 	if removed {
+		target.poisoned.Store(true)
 		closeIdleConnections(target.rt)
 	}
 }
@@ -78,7 +88,7 @@ func (t *spreadTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	resp, err := entry.rt.RoundTrip(req)
 	if err != nil {
-		entry.sessions.Add(-1)
+		entry.release()
 		return nil, err
 	}
 
@@ -140,6 +150,9 @@ type releaseOnClose struct {
 }
 
 func (r *releaseOnClose) Close() error {
-	r.once.Do(func() { r.entry.sessions.Add(-1) })
-	return r.ReadCloser.Close()
+	// Close the stream before releasing so the connection is idle if this
+	// was the last session on a poisoned entry.
+	err := r.ReadCloser.Close()
+	r.once.Do(r.entry.release)
+	return err
 }

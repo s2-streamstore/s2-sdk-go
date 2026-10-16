@@ -96,6 +96,10 @@ type ReadSession struct {
 	current             SequencedRecord
 	err                 error
 	closed              atomic.Bool
+	// readerDone is set once errorCh yields; readerErr is surfaced after
+	// buffered records are drained.
+	readerDone bool
+	readerErr  error
 }
 
 // Opens a streaming read session.
@@ -121,17 +125,26 @@ func (s *ReadSession) Next() bool {
 	}
 
 	for {
+		// Once the reader reports how it ended it has stopped producing, and
+		// recordsCh closes right after. Records it already buffered were
+		// counted in NextReadPosition, so deliver them before ending.
+		errorCh := s.reader.errorCh
+		if s.readerDone {
+			errorCh = nil
+		}
+
 		select {
 		case delivery, ok := <-s.reader.recordsCh:
 			if !ok {
-				// Records closed - drain any pending error before exiting
-				select {
-				case err := <-s.reader.errorCh:
-					if err != nil {
-						s.err = err
+				if !s.readerDone {
+					// Records closed - drain any pending error before exiting
+					select {
+					case err := <-s.reader.errorCh:
+						s.readerErr = err
+					default:
 					}
-				default:
 				}
+				s.err = s.readerErr
 				s.Close()
 				return false
 			}
@@ -140,28 +153,9 @@ func (s *ReadSession) Next() bool {
 				return true
 			}
 
-		case err, ok := <-s.reader.errorCh:
-			if !ok {
-				select {
-				case delivery, ok := <-s.reader.recordsCh:
-					if !ok {
-						s.Close()
-						return false
-					}
-					s.stashDelivery(delivery)
-					if s.yieldPending() {
-						return true
-					}
-				default:
-					s.Close()
-					return false
-				}
-			}
-			if err != nil {
-				s.err = err
-				s.Close()
-				return false
-			}
+		case err := <-errorCh:
+			s.readerDone = true
+			s.readerErr = err
 		}
 	}
 }

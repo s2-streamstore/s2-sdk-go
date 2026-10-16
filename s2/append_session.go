@@ -25,6 +25,9 @@ type AppendSession struct {
 
 	currentSession *transportAppendSession
 	sessionMu      sync.RWMutex
+	// failuresPending counts claimed session failures not yet resolved into
+	// a retry or a terminal error; the pump does not reconnect meanwhile.
+	failuresPending atomic.Int32
 
 	pumpCtx    context.Context
 	pumpCancel context.CancelFunc
@@ -390,7 +393,7 @@ func (r *AppendSession) handleSessionStartError(err error) {
 		logError(r.streamClient.logger, "append session max attempts exhausted after transport start failure",
 			"stream", string(r.streamClient.name),
 			"attempts", maxAttempts)
-		r.failAllInflight(fmt.Errorf("max attempts (%d) exhausted, last error: %v: %w",
+		r.failAllInflight(fmt.Errorf("max attempts (%d) exhausted, last error: %w: %w",
 			maxAttempts, err, ErrMaxAttemptsExhausted))
 		return
 	}
@@ -414,6 +417,12 @@ func (r *AppendSession) getSession() error {
 	defer r.sessionMu.Unlock()
 
 	if r.currentSession != nil {
+		return nil
+	}
+	// Until a claimed failure is resolved it may still fail the inflight
+	// appends, so reconnecting could resend them; the resolution wakes the
+	// pump. Checked under sessionMu, where failures are claimed.
+	if r.failuresPending.Load() > 0 || r.pumpCtx.Err() != nil {
 		return nil
 	}
 
@@ -728,19 +737,32 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 	// isCurrent check, log twice, increment currentAttempt twice, and
 	// double-schedule a retry. Whichever caller swaps currentSession from
 	// failedSession to nil wins; the loser bails.
-	if failedSession != nil {
-		r.sessionMu.Lock()
-		if r.currentSession != failedSession {
-			r.sessionMu.Unlock()
-			r.closeSessionIfUnused(failedSession)
-			return
-		}
-		r.currentSession = nil
-		r.sessionMu.Unlock()
-		r.closeSessionIfUnused(failedSession)
-	} else {
+	if failedSession == nil {
 		return
 	}
+	r.sessionMu.Lock()
+	claimed := r.currentSession == failedSession
+	if claimed {
+		r.currentSession = nil
+		r.failuresPending.Add(1)
+	}
+	r.sessionMu.Unlock()
+	r.closeSessionIfUnused(failedSession)
+	if !claimed {
+		return
+	}
+
+	r.handleClaimedSessionError(failedSession, err)
+}
+
+// handleClaimedSessionError retries or fails inflight appends after the caller
+// has claimed failedSession by clearing currentSession and counting it in
+// failuresPending.
+func (r *AppendSession) handleClaimedSessionError(failedSession *transportAppendSession, err error) {
+	defer func() {
+		r.failuresPending.Add(-1)
+		r.wakeupPump()
+	}()
 
 	if isServerDraining(err) {
 		r.stateMu.Lock()
@@ -796,7 +818,7 @@ func (r *AppendSession) handleSessionError(failedSession *transportAppendSession
 		logError(r.streamClient.logger, "append session max attempts exhausted",
 			"stream", string(r.streamClient.name),
 			"attempts", maxAttempts)
-		r.failAllInflight(fmt.Errorf("max attempts (%d) exhausted, last error: %v: %w",
+		r.failAllInflight(fmt.Errorf("max attempts (%d) exhausted, last error: %w: %w",
 			maxAttempts, err, ErrMaxAttemptsExhausted))
 		return
 	}
@@ -913,40 +935,58 @@ func (r *AppendSession) checkTimeouts() {
 	default:
 	}
 
+	r.closedMu.RLock()
+	closed := r.closed
+	r.closedMu.RUnlock()
+	if closed {
+		return
+	}
+
+	// Check the head and claim the session under inflightMu, so an ACK that
+	// pops the head concurrently cannot be followed by a stale timeout that
+	// tears down the session which just delivered it.
 	now := time.Now()
 	r.inflightMu.RLock()
-	var timedOut bool
-	var attemptStart time.Time
-	var requestTimeout time.Duration
-	if len(r.inflightQueue) > 0 {
-		head := r.inflightQueue[0]
-		attemptStart = head.attemptStart
-		requestTimeout = head.requestTimeout
-		timedOut = requestTimeout > 0 && !attemptStart.IsZero() && !now.Before(attemptStart.Add(requestTimeout))
+	if len(r.inflightQueue) == 0 {
+		r.inflightMu.RUnlock()
+		return
 	}
+	head := r.inflightQueue[0]
+	attemptStart := head.attemptStart
+	requestTimeout := head.requestTimeout
+	if requestTimeout <= 0 || attemptStart.IsZero() || now.Before(attemptStart.Add(requestTimeout)) {
+		r.inflightMu.RUnlock()
+		return
+	}
+	r.sessionMu.Lock()
+	session := r.currentSession
+	r.currentSession = nil
+	if session != nil {
+		r.failuresPending.Add(1)
+	}
+	r.sessionMu.Unlock()
 	r.inflightMu.RUnlock()
 
-	if timedOut {
-		elapsed := now.Sub(attemptStart)
-		r.stateMu.RLock()
-		attempt := r.currentAttempt
-		r.stateMu.RUnlock()
-		logError(r.streamClient.logger, "append request timeout",
-			"stream", string(r.streamClient.name),
-			"elapsed", elapsed,
-			"attempt", attempt)
-
-		r.sessionMu.RLock()
-		session := r.currentSession
-		r.sessionMu.RUnlock()
-
-		r.handleSessionError(session, &S2Error{
-			Message: fmt.Sprintf("append request timed out after %v (attempt %d)", elapsed, attempt),
-			Code:    "REQUEST_TIMEOUT",
-			Status:  408,
-			Origin:  "sdk",
-		})
+	if session == nil {
+		return
 	}
+	r.closeSessionIfUnused(session)
+
+	elapsed := now.Sub(attemptStart)
+	r.stateMu.RLock()
+	attempt := r.currentAttempt
+	r.stateMu.RUnlock()
+	logError(r.streamClient.logger, "append request timeout",
+		"stream", string(r.streamClient.name),
+		"elapsed", elapsed,
+		"attempt", attempt)
+
+	r.handleClaimedSessionError(session, &S2Error{
+		Message: fmt.Sprintf("append request timed out after %v (attempt %d)", elapsed, attempt),
+		Code:    "REQUEST_TIMEOUT",
+		Status:  408,
+		Origin:  "sdk",
+	})
 }
 
 func (r *AppendSession) requiresNoSideEffectsRetries() bool {
