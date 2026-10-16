@@ -392,12 +392,15 @@ func TestReadSessionCaughtUpAfterFinalRecord(t *testing.T) {
 
 	future := session.CaughtUp()
 	deadline := time.Now().Add(time.Second)
-	for session.NextReadPosition() == nil && time.Now().Before(deadline) {
+	for session.LastObservedTail() == nil && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	position := session.NextReadPosition()
-	if position == nil || position.SeqNum != 2 {
-		t.Fatalf("expected next read position 2, got %v", position)
+	if session.LastObservedTail() == nil {
+		t.Fatal("timed out waiting for the batch")
+	}
+	// Like caught-up state, the resume position follows delivery.
+	if position := session.NextReadPosition(); position != nil {
+		t.Fatalf("expected no read position before Next, got %+v", position)
 	}
 	select {
 	case <-future.result.done:
@@ -410,6 +413,9 @@ func TestReadSessionCaughtUpAfterFinalRecord(t *testing.T) {
 
 	if !session.Next() || session.Record().SeqNum != 0 {
 		t.Fatal("expected record 0")
+	}
+	if position := session.NextReadPosition(); position == nil || position.SeqNum != 1 {
+		t.Fatalf("expected read position 1 after record 0, got %v", position)
 	}
 	select {
 	case <-future.result.done:
@@ -426,6 +432,9 @@ func TestReadSessionCaughtUpAfterFinalRecord(t *testing.T) {
 	want := StreamPosition{SeqNum: 2, Timestamp: 42}
 	if tail := waitCaughtUp(t, future); tail != want {
 		t.Fatalf("expected tail %+v, got %+v", want, tail)
+	}
+	if position := session.NextReadPosition(); position == nil || position.SeqNum != 2 {
+		t.Fatalf("expected read position 2 after record 1, got %v", position)
 	}
 	if !session.IsCaughtUp() {
 		t.Fatal("expected caught up after the final record")
