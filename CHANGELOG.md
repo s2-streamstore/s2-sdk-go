@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.25.0] - 2026-10-16
+
+### Features
+
+- Support estimated billable usage metrics ([#420](https://github.com/s2-streamstore/s2-sdk-go/issues/420))
+
+### Bug Fixes
+
+- Test to reflect new metric max time range ([#421](https://github.com/s2-streamstore/s2-sdk-go/issues/421))
+- Address Detail-reported streaming and retry bugs ([#423](https://github.com/s2-streamstore/s2-sdk-go/issues/423))
+- *(read)* Advance NextReadPosition as records are delivered ([#425](https://github.com/s2-streamstore/s2-sdk-go/issues/425))
+
+### Documentation
+
+- Add env-endpoints example snippet ([#418](https://github.com/s2-streamstore/s2-sdk-go/issues/418))
+- Correct metrics time range limit from 30 to 90 days in test matrix ([#422](https://github.com/s2-streamstore/s2-sdk-go/issues/422))
+- Add AGENTS.md with test guidance ([#424](https://github.com/s2-streamstore/s2-sdk-go/issues/424))
+
 ## [v0.24.0] - 2026-09-27
 
 ### Features
@@ -11,6 +29,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Update s2-specs to 0bd8bba ([#412](https://github.com/s2-streamstore/s2-sdk-go/issues/412))
+- *(release)* V0.24.0 ([#413](https://github.com/s2-streamstore/s2-sdk-go/issues/413))
 
 ## [v0.23.3] - 2026-09-24
 
