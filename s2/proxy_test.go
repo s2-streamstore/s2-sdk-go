@@ -29,9 +29,11 @@ func newHTTP2TLSServer(t *testing.T) *httptest.Server {
 	return server
 }
 
-func trustingTransport(server *httptest.Server) *http.Transport {
+func trustingTransport(servers ...*httptest.Server) *http.Transport {
 	roots := x509.NewCertPool()
-	roots.AddCert(server.Certificate())
+	for _, server := range servers {
+		roots.AddCert(server.Certificate())
+	}
 	return &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}}
 }
 
@@ -73,7 +75,8 @@ func TestStreamingClientUsesUserProxy(t *testing.T) {
 	server := newHTTP2TLSServer(t)
 
 	var connects atomic.Int32
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// An HTTPS proxy trusted only through the user's RootCAs.
+	proxy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodConnect {
 			http.Error(w, "CONNECT only", http.StatusMethodNotAllowed)
 			return
@@ -103,6 +106,7 @@ func TestStreamingClientUsesUserProxy(t *testing.T) {
 			io.Copy(conn, upstream)
 		}()
 	}))
+	proxy.StartTLS()
 	t.Cleanup(proxy.Close)
 
 	proxyURL, err := url.Parse(proxy.URL)
@@ -110,7 +114,7 @@ func TestStreamingClientUsesUserProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 	proxyURL.User = url.UserPassword("user", "pass")
-	transport := trustingTransport(server)
+	transport := trustingTransport(server, proxy)
 	transport.Proxy = http.ProxyURL(proxyURL)
 
 	client := New("token", &ClientOptions{HTTPClient: &http.Client{Transport: transport}})

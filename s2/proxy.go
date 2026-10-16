@@ -22,6 +22,9 @@ type proxyFunc func(*http.Request) (*url.URL, error)
 type streamingDialer struct {
 	dialer *net.Dialer
 	proxy  proxyFunc
+	// tlsConfig is the user's TLS config, also used for HTTPS proxies as
+	// net/http does.
+	tlsConfig *tls.Config
 }
 
 func (d *streamingDialer) dial(ctx context.Context, scheme, network, addr string) (net.Conn, error) {
@@ -31,7 +34,7 @@ func (d *streamingDialer) dial(ctx context.Context, scheme, network, addr string
 			return nil, fmt.Errorf("resolve proxy for %s: %w", addr, err)
 		}
 		if proxyURL != nil {
-			return dialThroughProxy(ctx, d.dialer, proxyURL, addr)
+			return dialThroughProxy(ctx, d.dialer, d.tlsConfig, proxyURL, addr)
 		}
 	}
 	return d.dialer.DialContext(ctx, network, addr)
@@ -39,7 +42,7 @@ func (d *streamingDialer) dial(ctx context.Context, scheme, network, addr string
 
 // dialThroughProxy opens a TCP tunnel to addr through proxyURL. HTTP/2 needs a
 // raw tunnel, so HTTP(S) proxies are asked to CONNECT rather than forward.
-func dialThroughProxy(ctx context.Context, dialer *net.Dialer, proxyURL *url.URL, addr string) (net.Conn, error) {
+func dialThroughProxy(ctx context.Context, dialer *net.Dialer, tlsConfig *tls.Config, proxyURL *url.URL, addr string) (net.Conn, error) {
 	switch proxyURL.Scheme {
 	case "socks5", "socks5h":
 		socks, err := proxy.FromURL(proxyURL, dialer)
@@ -61,12 +64,13 @@ func dialThroughProxy(ctx context.Context, dialer *net.Dialer, proxyURL *url.URL
 		proxyAddr = net.JoinHostPort(proxyURL.Hostname(), port)
 	}
 
-	conn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
+	rawConn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
 	if err != nil {
 		return nil, fmt.Errorf("dial proxy %s: %w", proxyAddr, err)
 	}
+	conn := rawConn
 	// Bound the proxy handshake by ctx; a deadline in the past unblocks I/O.
-	stop := context.AfterFunc(ctx, func() { conn.SetDeadline(time.Unix(1, 0)) })
+	stop := context.AfterFunc(ctx, func() { rawConn.SetDeadline(time.Unix(1, 0)) })
 	fail := func(err error) (net.Conn, error) {
 		stop()
 		conn.Close()
@@ -77,7 +81,14 @@ func dialThroughProxy(ctx context.Context, dialer *net.Dialer, proxyURL *url.URL
 	}
 
 	if proxyURL.Scheme == "https" {
-		tlsConn := tls.Client(conn, &tls.Config{ServerName: proxyURL.Hostname()})
+		cfg := &tls.Config{}
+		if tlsConfig != nil {
+			cfg = tlsConfig.Clone()
+		}
+		// The CONNECT exchange is HTTP/1.1 with the proxy itself.
+		cfg.ServerName = proxyURL.Hostname()
+		cfg.NextProtos = nil
+		tlsConn := tls.Client(conn, cfg)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			return fail(fmt.Errorf("proxy %s TLS handshake: %w", proxyAddr, err))
 		}

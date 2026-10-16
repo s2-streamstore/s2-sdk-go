@@ -116,6 +116,10 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	if baseTransport == nil {
 		baseTransport = http.DefaultTransport
 	}
+	// A client shared with an earlier New is already wrapped.
+	if wrapped, ok := baseTransport.(userAgentRoundTripper); ok {
+		baseTransport = wrapped.base
+	}
 	// Streaming uses its own HTTP/2 transport; carry over the TLS and proxy
 	// settings of a user-provided transport so it reaches the same endpoints.
 	var streamingTLSConfig *tls.Config
@@ -228,12 +232,13 @@ func createStreamingClient(connectionTimeout time.Duration, tlsConfig *tls.Confi
 }
 
 func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyFunc) http.RoundTripper {
-	dialer := &streamingDialer{
-		dialer: &net.Dialer{Timeout: connectionTimeout},
-		proxy:  proxy,
-	}
 	if tlsConfig != nil {
 		tlsConfig = tlsConfig.Clone()
+	}
+	dialer := &streamingDialer{
+		dialer:    &net.Dialer{Timeout: connectionTimeout},
+		proxy:     proxy,
+		tlsConfig: tlsConfig,
 	}
 
 	h2cTransport := &http2.Transport{
@@ -246,6 +251,8 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 		IdleConnTimeout:            http2IdleConnTimeout,
 		StrictMaxConcurrentStreams: false,
 		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+			defer cancel()
 			return dialer.dial(ctx, schemeHTTP, network, addr)
 		},
 	}
