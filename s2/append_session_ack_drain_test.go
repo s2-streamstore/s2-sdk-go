@@ -275,3 +275,53 @@ func newAppendAckDrainSession(t *testing.T, retryCfg *RetryConfig, count int) (*
 	session.submitInflightBatches()
 	return session, transport, entries
 }
+
+func TestAppendSession_MaxAttemptsKeepsFinalErrorReachable(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		errs           []error
+		wantIndefinite bool
+	}{
+		{
+			name: "all_attempts_side_effect_free",
+			errs: []error{serverError(429, "rate_limited"), serverError(429, "rate_limited")},
+		},
+		{
+			name:           "earlier_attempt_uncertain",
+			errs:           []error{serverError(503, "unavailable"), serverError(429, "rate_limited")},
+			wantIndefinite: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session, transport, entries := newAppendAckDrainSession(t, &RetryConfig{
+				AppendRetryPolicy: AppendRetryPolicyAll,
+				MaxAttempts:       len(tc.errs),
+			}, 2)
+			for _, err := range tc.errs {
+				session.sessionMu.Lock()
+				session.currentSession = transport
+				session.sessionMu.Unlock()
+				session.handleSessionError(transport, err)
+			}
+
+			final := tc.errs[len(tc.errs)-1]
+			for i, entry := range entries {
+				result := <-entry.resultCh
+				if result == nil || !errors.Is(result.err, ErrMaxAttemptsExhausted) {
+					t.Fatalf("batch %d: expected max attempts error, got %+v", i, result)
+				}
+				var s2Err *S2Error
+				if !errors.As(result.err, &s2Err) || s2Err != final {
+					t.Fatalf("batch %d: final S2Error not reachable from %v", i, result.err)
+				}
+				var indefinite *AppendIndefiniteFailureError
+				if errors.As(result.err, &indefinite) != tc.wantIndefinite {
+					t.Fatalf("batch %d: indefinite = %v, want %v (%v)", i, !tc.wantIndefinite, tc.wantIndefinite, result.err)
+				}
+				if HasNoSideEffects(result.err) == tc.wantIndefinite {
+					t.Fatalf("batch %d: HasNoSideEffects = %v, want %v", i, tc.wantIndefinite, !tc.wantIndefinite)
+				}
+			}
+		})
+	}
+}

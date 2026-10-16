@@ -257,6 +257,11 @@ func (r *streamReader) run() {
 			return
 		}
 
+		// Delivered records forgive earlier failures, including on handovers.
+		if r.recordsRead > recordsBefore {
+			consecutiveFailures = 0
+		}
+
 		if errors.Is(err, errReconnectAdvised) {
 			if r.limitsReached() {
 				logInfo(r.logger, "s2 read session limits reached on server advice")
@@ -288,10 +293,7 @@ func (r *streamReader) run() {
 			continue
 		}
 
-		madeProgress := r.recordsRead > recordsBefore
-		if madeProgress {
-			consecutiveFailures = 0
-		} else {
+		if r.recordsRead == recordsBefore {
 			consecutiveFailures++
 		}
 

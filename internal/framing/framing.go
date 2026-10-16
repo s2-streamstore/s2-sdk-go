@@ -255,21 +255,28 @@ func (fr *FrameReader) ReadFrame() (*S2SFrame, error) {
 		}
 
 		if fr.pendingErr != nil {
-			return nil, fr.pendingErr
+			return nil, fr.endErr()
 		}
 
 		n, err := fr.parser.readFrom(fr.reader)
 
 		if err != nil {
+			fr.pendingErr = err
 			if n > 0 {
-				fr.pendingErr = err
-
 				continue
 			}
-			fr.pendingErr = err
-			return nil, err
+			return nil, fr.endErr()
 		}
 	}
+}
+
+// endErr reports a clean end of stream only on a frame boundary; EOF in the
+// middle of a frame means the stream was truncated.
+func (fr *FrameReader) endErr() error {
+	if fr.pendingErr == io.EOF && fr.parser.HasData() {
+		return io.ErrUnexpectedEOF
+	}
+	return fr.pendingErr
 }
 
 const (

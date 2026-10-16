@@ -39,7 +39,8 @@ type errorCodeInfo struct {
 	noSideEffects bool
 }
 
-// Canonical server error codes; mirrors ErrorCode in the S2 API.
+// Canonical server error codes; mirrors ErrorCode in the S2 API, plus codes
+// the SDK synthesizes for responses that use a different error schema.
 var errorCodes = map[string]errorCodeInfo{
 	"access_token_not_found":  {404, false, true},
 	"authn":                   {401, false, true},
@@ -69,6 +70,9 @@ var errorCodes = map[string]errorCodeInfo{
 	"transaction_conflict":    {409, true, true},
 	"unavailable":             {503, true, false},
 	"upstream_timeout":        {504, true, false},
+	// 412 append condition failures carry their own schema; the condition
+	// is checked before the append is applied.
+	"APPEND_CONDITION_FAILED": {412, false, true},
 }
 
 func isRetryableStatus(status int) bool {
