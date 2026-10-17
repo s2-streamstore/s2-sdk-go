@@ -3,6 +3,7 @@ permissions:
   contents: read
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches:
       - main
@@ -19,13 +20,25 @@ jobs:
     permissions:
       contents: none
     name: CI
-    needs: [examples, test, s2-integration, s2-lite-integration, fault-tests, golangci-lint, bento-integration]
+    needs: [examples, test, s2-integration, s2-lite-integration, fault-tests, golangci-lint, bento-integration, spec-doc-sync]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Failed
         run: exit 1
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+
+  spec-doc-sync:
+    name: Review SDK type docs on spec updates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'specsync-reviewed')
+        with:
+          fetch-depth: 0
+      - name: Check s2/types.go when s2-specs changes
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'specsync-reviewed')
+        run: .github/scripts/check-spec-doc-sync.sh '${{ github.event.pull_request.base.sha }}' '${{ github.event.pull_request.head.sha }}'
 
   examples:
     name: Build examples
