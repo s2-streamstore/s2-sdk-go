@@ -240,9 +240,15 @@ func newRangeNotSatisfiableError(status int, body []byte) *RangeNotSatisfiableEr
 		},
 	}
 	if len(body) > 0 {
-		var tailResp TailResponse
-		if json.Unmarshal(body, &tailResp) == nil {
-			err.Tail = &tailResp.Tail
+		// Only set Tail when the body is a JSON object that actually carries a
+		// `tail` field. A 416 body is otherwise opaque (e.g. an intermediary's
+		// ErrorInfo-shaped error), so it must fall through to the plain-message
+		// path rather than fabricate a zero-value tail. Note that a legitimate
+		// tail for an empty stream is `{"tail":{"seq_num":0,"timestamp":0}}`,
+		// which unmarshals to a non-nil pointer and is correctly preserved.
+		var tailResp *TailResponse
+		if json.Unmarshal(body, &tailResp) == nil && tailResp != nil && tailResp.Tail != nil {
+			err.Tail = tailResp.Tail
 		} else {
 			err.Message = string(body)
 		}
