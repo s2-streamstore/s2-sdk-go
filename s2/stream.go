@@ -435,7 +435,12 @@ func isRetryableReadError(ctx context.Context, err error) bool {
 		return true
 	}
 
-	if strings.Contains(strings.ToLower(err.Error()), "http2: client connection lost") {
+	// Connection-level failures surfaced to the stream: lost ping/keepalive, or
+	// net/http force-closing the connection after a write error on another
+	// stream (cleanupWriteRequest -> ClientConn.Close).
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "http2: client connection lost") ||
+		strings.Contains(msg, "http2: client connection force closed") {
 		return true
 	}
 
