@@ -48,12 +48,12 @@ and error mapping).
   - Expected: SDK assumes `http` and preserves host/port
 
 - **Explicit path**
-  - Input: endpoint containing a path or trailing slash
+  - Input: endpoint containing a path (e.g., `https://example.com/api`)
   - Expected: SDK uses the path verbatim and does not append `/v1`
 
-- **Trailing slash treated as explicit path**
-  - Input: endpoint ending with `/` (e.g., `https://example.com/`)
-  - Expected: SDK preserves trailing slash and does not append `/v1`
+- **Trailing slash normalized**
+  - Input: endpoint ending with `/` (e.g., `https://example.com/` or `https://example.com/v1/`)
+  - Expected: SDK strips the trailing slash. A bare trailing slash is treated as "no explicit path", so `/v1` is appended (`https://example.com/` -> `https://example.com/v1`); `https://example.com/v1/` -> `https://example.com/v1`. Request URLs never contain a doubled slash (e.g. `//basins`).
 
 - **Basin placeholder**
   - Input: basin endpoint template containing `{basin}` in host or path

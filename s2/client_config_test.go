@@ -153,9 +153,14 @@ func TestClient_NormalizesBaseURL(t *testing.T) {
 			want:    "https://example.com/test/here",
 		},
 		{
-			name:    "preserves trailing slash",
+			name:    "bare trailing slash defaults to /v1",
 			baseURL: "https://example.com/",
-			want:    "https://example.com/",
+			want:    "https://example.com/v1",
+		},
+		{
+			name:    "trims trailing slash on explicit path",
+			baseURL: "https://example.com/v1/",
+			want:    "https://example.com/v1",
 		},
 		{
 			name:    "defaults localhost to http",
@@ -193,6 +198,20 @@ func TestClient_NormalizesMakeBasinBaseURL(t *testing.T) {
 				return "https://shared.test/api"
 			},
 			want: "https://shared.test/api",
+		},
+		{
+			name: "bare trailing slash defaults to /v1",
+			makeBasinBaseURL: func(string) string {
+				return "https://shared.test/"
+			},
+			want: "https://shared.test/v1",
+		},
+		{
+			name: "trims trailing slash on explicit path",
+			makeBasinBaseURL: func(string) string {
+				return "https://shared.test/v1/"
+			},
+			want: "https://shared.test/v1",
 		},
 	}
 
@@ -233,5 +252,42 @@ func TestSharedBasinEndpoint_UsesBasinHeader(t *testing.T) {
 	}
 	if rt.url != "http://shared.test/v1/streams" {
 		t.Fatalf("expected request URL %q, got %q", "http://shared.test/v1/streams", rt.url)
+	}
+}
+
+func TestClient_TrailingSlashBaseURL_NoDoubleSlashOnWire(t *testing.T) {
+	testCases := []struct {
+		name    string
+		baseURL string
+		want    string
+	}{
+		{name: "bare trailing slash applies /v1", baseURL: "http://host/", want: "http://host/v1/basins"},
+		{name: "explicit path with trailing slash", baseURL: "http://host/v1/", want: "http://host/v1/basins"},
+		{name: "no trailing slash", baseURL: "http://host", want: "http://host/v1/basins"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotURL string
+			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				gotURL = req.URL.String()
+				return jsonResponse(http.StatusOK, "", `{"basins":[],"has_more":false}`), nil
+			})
+			client := New("token", &ClientOptions{
+				BaseURL:    tc.baseURL,
+				HTTPClient: &http.Client{Transport: rt, Timeout: time.Second},
+			})
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+
+			_, err := client.Basins.List(ctx, nil)
+			if err != nil {
+				t.Fatalf("list basins failed: %v", err)
+			}
+			if gotURL != tc.want {
+				t.Fatalf("expected request URL %q, got %q", tc.want, gotURL)
+			}
+		})
 	}
 }

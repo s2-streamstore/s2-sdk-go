@@ -38,13 +38,25 @@ func TestEndpointTemplate_ExplicitPath(t *testing.T) {
 	}
 }
 
-func TestEndpointTemplate_TrailingSlashExplicitPath(t *testing.T) {
+func TestEndpointTemplate_BareTrailingSlashDefaultsToV1(t *testing.T) {
 	template, err := newEndpointTemplate("https://aws.s2.dev/")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := template.baseURL("")
-	want := "https://aws.s2.dev/"
+	want := "https://aws.s2.dev/v1"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestEndpointTemplate_TrimsTrailingSlashFromExplicitPath(t *testing.T) {
+	template, err := newEndpointTemplate("https://aws.s2.dev/v1/")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := template.baseURL("")
+	want := "https://aws.s2.dev/v1"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
