@@ -21,7 +21,7 @@ const (
 	defaultMaxIdleConnsPerHost = 32
 
 	// HTTP/2 transport settings for streaming operations
-	http2MaxReadFrameSize  = 16 * 1024 * 1024
+	http2MaxReadFrameSize  = 1<<24 - 1 // HTTP/2's maximum; net/http ignores larger values
 	http2MaxHeaderListSize = 10 * 1024 * 1024
 	http2ReadIdleTimeout   = 30 * time.Second
 	http2PingTimeout       = 15 * time.Second
@@ -248,14 +248,49 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 			StrictMaxConcurrentRequests: false,
 		}
 	}
-	dialContext := func(scheme string) func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return func(ctx context.Context, network, addr string) (net.Conn, error) {
-			ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
-			defer cancel()
-			return dialer.dial(ctx, scheme, network, addr)
+	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+		defer cancel()
+		return dialer.dial(ctx, schemeHTTP, network, addr)
+	}
+	// Handshake here rather than via TLSClientConfig so that dial, proxy and
+	// TLS share one ConnectionTimeout, and so that a server that does not
+	// negotiate h2 is rejected instead of net/http falling back to HTTP/1.1.
+	dialTLSContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+		defer cancel()
+
+		conn, err := dialer.dial(ctx, schemeHTTPS, network, addr)
+		if err != nil {
+			return nil, err
 		}
+		cfg := &tls.Config{}
+		if tlsConfig != nil {
+			cfg = tlsConfig.Clone()
+		}
+		if cfg.ServerName == "" {
+			if host, _, err := net.SplitHostPort(addr); err == nil {
+				cfg.ServerName = host
+			} else {
+				cfg.ServerName = addr
+			}
+		}
+		cfg.NextProtos = []string{"h2"}
+		tlsConn := tls.Client(conn, cfg)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if proto := tlsConn.ConnectionState().NegotiatedProtocol; proto != "h2" {
+			tlsConn.Close()
+			return nil, fmt.Errorf("server at %s did not negotiate HTTP/2 (got %q)", addr, proto)
+		}
+		return tlsConn, nil
 	}
 
+	// Each pooled transport carries one HTTP/2 connection (spreadTransport
+	// adds transports as sessions grow), so limit it to a single dial; without
+	// this, net/http dials once per concurrent request during a cold start.
 	h2cProtocols := new(http.Protocols)
 	h2cProtocols.SetUnencryptedHTTP2(true)
 	h2cTransport := &http.Transport{
@@ -263,7 +298,8 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 		HTTP2:                  newHTTP2Config(),
 		MaxResponseHeaderBytes: http2MaxHeaderListSize,
 		IdleConnTimeout:        http2IdleConnTimeout,
-		DialContext:            dialContext(schemeHTTP),
+		MaxConnsPerHost:        1,
+		DialContext:            dialContext,
 	}
 
 	httpsProtocols := new(http.Protocols)
@@ -273,9 +309,9 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 		HTTP2:                  newHTTP2Config(),
 		MaxResponseHeaderBytes: http2MaxHeaderListSize,
 		IdleConnTimeout:        http2IdleConnTimeout,
+		MaxConnsPerHost:        1,
 		TLSClientConfig:        tlsConfig,
-		TLSHandshakeTimeout:    connectionTimeout,
-		DialContext:            dialContext(schemeHTTPS),
+		DialTLSContext:         dialTLSContext,
 	}
 
 	return &schemeAwareTransport{https: httpsTransport, h2c: h2cTransport}
