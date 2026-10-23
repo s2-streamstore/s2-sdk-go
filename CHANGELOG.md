@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.26.0] - 2026-10-23
+
+### Bug Fixes
+
+- *(deps)* Require Go 1.26 and bump x/net, x/text, klauspost/compress ([#427](https://github.com/s2-streamstore/s2-sdk-go/issues/427))
+
 ## [v0.25.0] - 2026-10-16
 
 ### Features
@@ -19,6 +25,10 @@ All notable changes to this project will be documented in this file.
 - Add env-endpoints example snippet ([#418](https://github.com/s2-streamstore/s2-sdk-go/issues/418))
 - Correct metrics time range limit from 30 to 90 days in test matrix ([#422](https://github.com/s2-streamstore/s2-sdk-go/issues/422))
 - Add AGENTS.md with test guidance ([#424](https://github.com/s2-streamstore/s2-sdk-go/issues/424))
+
+### Miscellaneous Tasks
+
+- *(release)* V0.25.0 ([#426](https://github.com/s2-streamstore/s2-sdk-go/issues/426))
 
 ## [v0.24.0] - 2026-09-27
 
