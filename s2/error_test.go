@@ -116,6 +116,65 @@ func TestDecodeAPIError_RangeNotSatisfiable_EmptyBody(t *testing.T) {
 	}
 }
 
+// TestDecodeAPIError_RangeNotSatisfiable_JSONWithoutTail guards against the
+// regression where any valid JSON body (even one lacking a `tail` field) was
+// misread as a fabricated zero-value tail. Such a body must instead be preserved
+// in Message with Tail left nil, otherwise a consumer like s2-bentobox silently
+// rewinds its durable checkpoint to sequence number 0.
+func TestDecodeAPIError_RangeNotSatisfiable_JSONWithoutTail(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{name: "empty object", body: []byte(`{}`)},
+		{name: "json null", body: []byte(`null`)},
+		{name: "unrelated error object", body: []byte(`{"code":"proxy_error","message":"upstream failure"}`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := decodeAPIError(http.StatusRequestedRangeNotSatisfiable, tt.body)
+
+			var rangeErr *RangeNotSatisfiableError
+			if !errors.As(err, &rangeErr) {
+				t.Fatalf("expected RangeNotSatisfiableError, got %T", err)
+			}
+			if rangeErr.Status != http.StatusRequestedRangeNotSatisfiable {
+				t.Fatalf("expected status 416, got %d", rangeErr.Status)
+			}
+			if rangeErr.Tail != nil {
+				t.Fatalf("expected Tail to be nil for JSON body without a tail field %q, got %+v", tt.body, rangeErr.Tail)
+			}
+			if rangeErr.Message != string(tt.body) {
+				t.Fatalf("expected Message to preserve the body %q, got %q", tt.body, rangeErr.Message)
+			}
+		})
+	}
+}
+
+// TestDecodeAPIError_RangeNotSatisfiable_ZeroValueTail confirms that a
+// legitimate tail for an empty stream (`{"tail":{"seq_num":0,"timestamp":0}}`)
+// is preserved as a non-nil Tail. This guards against the tempting but incorrect
+// fix of comparing the tail to the zero value, which would drop the real tail
+// for exactly the empty-stream case where a reset to 0 is the correct recovery.
+func TestDecodeAPIError_RangeNotSatisfiable_ZeroValueTail(t *testing.T) {
+	body := []byte(`{"tail":{"seq_num":0,"timestamp":0}}`)
+	err := decodeAPIError(http.StatusRequestedRangeNotSatisfiable, body)
+
+	var rangeErr *RangeNotSatisfiableError
+	if !errors.As(err, &rangeErr) {
+		t.Fatalf("expected RangeNotSatisfiableError, got %T", err)
+	}
+	if rangeErr.Tail == nil {
+		t.Fatal("expected Tail to be set for an explicit zero-value tail")
+	}
+	if rangeErr.Tail.SeqNum != 0 || rangeErr.Tail.Timestamp != 0 {
+		t.Fatalf("expected zero-value tail, got seq_num=%d timestamp=%d", rangeErr.Tail.SeqNum, rangeErr.Tail.Timestamp)
+	}
+	if rangeErr.Message != http.StatusText(http.StatusRequestedRangeNotSatisfiable) {
+		t.Fatalf("expected default message to be preserved, got %q", rangeErr.Message)
+	}
+}
+
 func TestS2Error_HasNoSideEffects(t *testing.T) {
 	tests := []struct {
 		name string

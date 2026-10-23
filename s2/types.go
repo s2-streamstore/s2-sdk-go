@@ -273,7 +273,10 @@ type StreamPosition struct {
 
 type TailResponse struct {
 	// Sequence number that will be assigned to the next record on the stream, and timestamp of the last record.
-	Tail StreamPosition `json:"tail"`
+	// Tail is non-nil only when the response body actually carried a `tail` field, so callers can
+	// distinguish a genuine tail (including the zero-value tail of an empty stream) from a body that
+	// is merely valid JSON without one.
+	Tail *StreamPosition `json:"tail"`
 }
 
 type BasinReconfiguration struct {
