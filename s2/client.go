@@ -11,8 +11,6 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
-
-	"golang.org/x/net/http2"
 )
 
 const (
@@ -201,8 +199,8 @@ func newUnaryHTTPTransport(base http.RoundTripper, connectionTimeout time.Durati
 }
 
 type schemeAwareTransport struct {
-	https *http2.Transport
-	h2c   *http2.Transport
+	https *http.Transport
+	h2c   *http.Transport
 }
 
 func (t *schemeAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -241,48 +239,43 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 		tlsConfig: tlsConfig,
 	}
 
-	h2cTransport := &http2.Transport{
-		AllowHTTP:                  true,
-		MaxReadFrameSize:           http2MaxReadFrameSize,
-		MaxHeaderListSize:          http2MaxHeaderListSize,
-		ReadIdleTimeout:            http2ReadIdleTimeout,
-		PingTimeout:                http2PingTimeout,
-		WriteByteTimeout:           http2WriteByteTimeout,
-		IdleConnTimeout:            http2IdleConnTimeout,
-		StrictMaxConcurrentStreams: false,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+	newHTTP2Config := func() *http.HTTP2Config {
+		return &http.HTTP2Config{
+			MaxReadFrameSize:            http2MaxReadFrameSize,
+			SendPingTimeout:             http2ReadIdleTimeout,
+			PingTimeout:                 http2PingTimeout,
+			WriteByteTimeout:            http2WriteByteTimeout,
+			StrictMaxConcurrentRequests: false,
+		}
+	}
+	dialContext := func(scheme string) func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return func(ctx context.Context, network, addr string) (net.Conn, error) {
 			ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
 			defer cancel()
-			return dialer.dial(ctx, schemeHTTP, network, addr)
-		},
+			return dialer.dial(ctx, scheme, network, addr)
+		}
 	}
 
-	httpsTransport := &http2.Transport{
-		AllowHTTP:                  false,
-		MaxReadFrameSize:           http2MaxReadFrameSize,
-		MaxHeaderListSize:          http2MaxHeaderListSize,
-		ReadIdleTimeout:            http2ReadIdleTimeout,
-		PingTimeout:                http2PingTimeout,
-		WriteByteTimeout:           http2WriteByteTimeout,
-		IdleConnTimeout:            http2IdleConnTimeout,
-		StrictMaxConcurrentStreams: false,
-		// http2.Transport derives cfg from TLSClientConfig per connection.
-		TLSClientConfig: tlsConfig,
-		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-			ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
-			defer cancel()
+	h2cProtocols := new(http.Protocols)
+	h2cProtocols.SetUnencryptedHTTP2(true)
+	h2cTransport := &http.Transport{
+		Protocols:              h2cProtocols,
+		HTTP2:                  newHTTP2Config(),
+		MaxResponseHeaderBytes: http2MaxHeaderListSize,
+		IdleConnTimeout:        http2IdleConnTimeout,
+		DialContext:            dialContext(schemeHTTP),
+	}
 
-			conn, err := dialer.dial(ctx, schemeHTTPS, network, addr)
-			if err != nil {
-				return nil, err
-			}
-			tlsConn := tls.Client(conn, cfg)
-			if err := tlsConn.HandshakeContext(ctx); err != nil {
-				conn.Close()
-				return nil, err
-			}
-			return tlsConn, nil
-		},
+	httpsProtocols := new(http.Protocols)
+	httpsProtocols.SetHTTP2(true)
+	httpsTransport := &http.Transport{
+		Protocols:              httpsProtocols,
+		HTTP2:                  newHTTP2Config(),
+		MaxResponseHeaderBytes: http2MaxHeaderListSize,
+		IdleConnTimeout:        http2IdleConnTimeout,
+		TLSClientConfig:        tlsConfig,
+		TLSHandshakeTimeout:    connectionTimeout,
+		DialContext:            dialContext(schemeHTTPS),
 	}
 
 	return &schemeAwareTransport{https: httpsTransport, h2c: h2cTransport}

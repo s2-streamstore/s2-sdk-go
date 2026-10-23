@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"strings"
 
-	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/s2-streamstore/s2-sdk-go/generated"
@@ -432,13 +431,7 @@ func isRetryableReadError(ctx context.Context, err error) bool {
 		return true
 	}
 
-	var streamErr http2.StreamError
-	if errors.As(err, &streamErr) {
-		return true
-	}
-
-	var goAwayErr http2.GoAwayError
-	if errors.As(err, &goAwayErr) {
+	if isStreamResetError(err) || isGoAwayError(err) {
 		return true
 	}
 
@@ -457,9 +450,13 @@ func isRetryableReadError(ctx context.Context, err error) bool {
 	return false
 }
 
+// net/http's HTTP/2 error types are unexported, so match on their messages.
 func isStreamResetError(err error) bool {
-	var se http2.StreamError
-	return errors.As(err, &se)
+	return err != nil && strings.Contains(err.Error(), "stream error: stream ID")
+}
+
+func isGoAwayError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "server sent GOAWAY")
 }
 
 func shouldRetryError(err error, config *RetryConfig) bool {
