@@ -37,6 +37,7 @@ type ReadOptions struct {
 	// Duration in seconds to wait for new records.
 	// The default duration is 0 if there is a bound on `count`, `bytes`, or `until`, and otherwise infinite.
 	// Non-streaming reads are always bounded on `count` and `bytes`, so you can achieve long poll semantics by specifying a non-zero duration up to 60 seconds.
+	// For non-streaming reads, the client extends the request timeout to accommodate the wait, so long-poll reads work with the default [ClientOptions.RequestTimeout].
 	// In the context of an SSE or S2S streaming read, the duration will bound how much time can elapse between records throughout the lifetime of the session.
 	Wait *int32 `json:"wait,omitempty"`
 	// Exclusive timestamp to read until.
@@ -102,9 +103,31 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		streamConfig = opts.StreamConfig
 	}
 
-	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
+	// Long-poll reads (Wait > 0) block on the server for up to the requested
+	// wait duration, which can far exceed the unary request timeout. The
+	// default http.Client.Timeout would cancel such a request before the
+	// server can respond. Bound the exchange by the wait plus the normal
+	// request timeout budget via a context deadline, and use a client with no
+	// overall timeout so the deadline (not Client.Timeout) governs the wait.
+	// Bounding the retry loop with the same deadline also prevents retrying a
+	// deterministic long-poll timeout. Reads without a Wait keep the
+	// configured RequestTimeout.
+	callCtx := ctx
+	client := s.basinClient.httpClient
+	if opts != nil && opts.Wait != nil && *opts.Wait > 0 {
+		wait := time.Duration(*opts.Wait) * time.Second
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, wait+s.basinClient.requestTimeout)
+		defer cancel()
+
+		noTimeoutClient := *client // shallow copy; shares the transport
+		noTimeoutClient.Timeout = 0
+		client = &noTimeoutClient
+	}
+
+	batch, err := withRetries(callCtx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
 		httpClient := &httpClient{
-			client:      s.basinClient.httpClient,
+			client:      client,
 			baseURL:     s.basinClient.baseURL,
 			accessToken: s.basinClient.accessToken,
 			logger:      s.logger,
@@ -114,7 +137,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 
 		var pbBatch pb.ReadBatch
 		if err := httpClient.requestProto(
-			ctx,
+			callCtx,
 			"GET",
 			path,
 			nil,
