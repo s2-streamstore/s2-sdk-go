@@ -36,7 +36,7 @@ jobs:
           submodules: true
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.23"
+          go-version: "1.26"
       - uses: arduino/setup-task@b91d5d2c96a56797b48ac1e0e89220bf64044611 # v2.0.0
         with:
           version: 3.40.x
@@ -63,7 +63,7 @@ jobs:
           submodules: true
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.23"
+          go-version: "1.26"
       - uses: arduino/setup-task@b91d5d2c96a56797b48ac1e0e89220bf64044611 # v2.0.0
         with:
           version: 3.40.x
@@ -86,7 +86,7 @@ jobs:
           submodules: true
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.23"
+          go-version: "1.26"
       - uses: arduino/setup-task@b91d5d2c96a56797b48ac1e0e89220bf64044611 # v2.0.0
         with:
           version: 3.40.x
@@ -123,7 +123,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.23"
+          go-version: "1.26"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: server-binary
@@ -154,7 +154,7 @@ jobs:
             "repo": "${{ github.repository }}",
             "ref": "${{ github.ref }}",
             "lang": "go",
-            "go-version": "1.23",
+            "go-version": "1.26",
             "test_cmd": "go test -v -timeout 10m -count=1 -skip 'Locations|WithLocation|WithDefaultLocation|Metrics|AccessToken|Client_InvalidToken' ./s2/..."
           },
           {
@@ -162,7 +162,7 @@ jobs:
             "repo": "${{ github.repository }}",
             "ref": "${{ github.ref }}",
             "lang": "go",
-            "go-version": "1.23",
+            "go-version": "1.26",
             "test_cmd": "go test -v -timeout 5m -count=1 ./s2-bentobox/..."
           }
         ]
@@ -176,11 +176,12 @@ jobs:
           submodules: true
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.23"
+          go-version: "1.26"
       - name: Lint
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           version: v2.1.6
+          install-mode: goinstall
 
   bento-integration:
     name: Bento Integration
@@ -197,7 +198,7 @@ jobs:
           path: bento
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.23"
+          go-version: "1.26"
       - name: Setup bento with local s2-sdk-go
         working-directory: bento
         env:
