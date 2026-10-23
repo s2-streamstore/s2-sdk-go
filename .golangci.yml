@@ -45,3 +45,9 @@ linters:
     - usestdlibvars
     - wastedassign
     - whitespace
+
+  exclusions:
+    rules:
+      # x/net/http2 deprecated its Transport in favor of net/http's built-in HTTP/2.
+      - linters: [staticcheck]
+        text: 'SA1019: .*(deprecated: Use \[http\.|h2c|GoAwayError)'
