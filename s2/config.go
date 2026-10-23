@@ -177,7 +177,10 @@ func newEndpointTemplate(endpoint string) (*endpointTemplate, error) {
 
 	pathTemplate := defaultAPIPath
 	if explicitPathProvided {
-		pathTemplate = parsedPath + parsedQuery + parsedFragment
+		pathTemplate = strings.TrimRight(parsedPath+parsedQuery+parsedFragment, "/")
+		if pathTemplate == "" {
+			pathTemplate = defaultAPIPath
+		}
 	}
 
 	return &endpointTemplate{

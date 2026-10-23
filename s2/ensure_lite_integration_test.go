@@ -3,7 +3,6 @@ package s2_test
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +14,6 @@ func TestEnsureAgainstS2Lite(t *testing.T) {
 	if !ok || endpoint == "" {
 		t.Skip("S2_LITE_ENDPOINT not set")
 	}
-	endpoint = strings.TrimRight(endpoint, "/")
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
