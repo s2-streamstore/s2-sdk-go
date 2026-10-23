@@ -766,15 +766,28 @@ func (r *AppendSession) handleClaimedSessionError(failedSession *transportAppend
 
 	if isServerDraining(err) {
 		r.stateMu.Lock()
+		ok := r.advisedReconnects.shouldReconnect(time.Now())
 		r.advisedReconnects.record(time.Now())
 		advisedReconnects := r.advisedReconnects.count
 		r.stateMu.Unlock()
-		r.resetInflightAttemptStarts()
-		logInfo(r.streamClient.logger, "append session reconnecting while server drains",
+		if ok {
+			// A drain is a planned, side-effect-free handover: reconnect
+			// immediately and resubmit without consuming the retry budget.
+			// This is the intended fast path for a transient drain.
+			r.resetInflightAttemptStarts()
+			logInfo(r.streamClient.logger, "append session reconnecting while server drains",
+				"stream", string(r.streamClient.name),
+				"advised_reconnects", advisedReconnects)
+			r.wakeupPump()
+			return
+		}
+		// Persistent draining: the advised-reconnect cap is exhausted, so
+		// stop hot-looping and degrade to the bounded retry path below.
+		// Backoff is armed and the retry budget is consumed so inflight
+		// appends eventually resolve and Close() can complete.
+		logInfo(r.streamClient.logger, "append session draining persistently, degrading to bounded retry",
 			"stream", string(r.streamClient.name),
 			"advised_reconnects", advisedReconnects)
-		r.wakeupPump()
-		return
 	}
 
 	logError(r.streamClient.logger, "append session transport error",
