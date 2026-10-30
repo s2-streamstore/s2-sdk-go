@@ -118,14 +118,33 @@ func (tam *toAckMap) MarkDone(ctx context.Context, records []s2.SequencedRecord,
 
 type streamInput struct {
 	Stream       string
-	session      *s2.ReadSession
+	session      readSession
 	cache        *seqNumCache
 	toAck        *toAckMap
 	nacks        chan []s2.SequencedRecord
+	records      chan []s2.SequencedRecord
 	Logger       Logger
 	closeSession func()
 	closedCh     chan struct{}
 	closeOnce    sync.Once
+
+	// sessionDone is closed when the read pump exits, signalling that no more
+	// records will be produced. terminalErr holds the session's terminal
+	// error (if any); it is only read after sessionDone is closed. A nil
+	// terminalErr means the session ended cleanly, which ReadBatch surfaces as
+	// ErrInputClosed.
+	sessionDone chan struct{}
+	terminalErr error
+}
+
+// readSession is the surface of *s2.ReadSession that streamInput drives from a
+// background pump goroutine. It is an interface so tests can substitute a fake
+// session; *s2.ReadSession satisfies it.
+type readSession interface {
+	Next() bool
+	Record() s2.SequencedRecord
+	Err() error
+	Close() error
 }
 
 func connectStreamInput(
@@ -173,46 +192,75 @@ func connectStreamInput(
 		return nil, err
 	}
 
-	return &streamInput{
+	si := &streamInput{
 		Stream:       stream,
 		session:      session,
 		cache:        cache,
 		toAck:        newToAckMap(stream, cache, gen, logger),
 		nacks:        make(chan []s2.SequencedRecord, maxInflight),
+		records:      make(chan []s2.SequencedRecord),
 		Logger:       logger,
 		closeSession: closeSession,
 		closedCh:     make(chan struct{}),
-	}, nil
+		sessionDone:  make(chan struct{}),
+	}
+	// Pump the read session on its own goroutine so ReadBatch can block on
+	// the records and nacks channels together. Without this, a nack arriving
+	// while ReadBatch is parked inside session.Next() (an idle stream) is
+	// never surfaced until a new record or error arrives.
+	go si.pump()
+	return si, nil
 }
 
 func (si *streamInput) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, AckFunc, error) {
-	// Check for nacks first
+	// Block on every source of a batch in a single select so a nack can wake a
+	// parked read even while the session pump is idle. Previously the nack
+	// drain was a non-blocking pre-check and ReadBatch parked inside
+	// session.Next(); a nack arriving during that park was never surfaced
+	// until a new record or session error arrived, breaking at-least-once
+	// redelivery liveness on idle streams.
 	select {
+	case batch := <-si.records:
+		return si.handleBatch(ctx, batch)
 	case records := <-si.nacks:
 		return si.handleBatch(ctx, records)
-	default:
-	}
-
-	// Check context
-	select {
-	case <-ctx.Done():
-		return nil, nil, ctx.Err()
+	case <-si.sessionDone:
+		err := si.terminalErr
+		if err == nil {
+			err = ErrInputClosed
+		}
+		return nil, nil, err
 	case <-si.closedCh:
 		return nil, nil, ErrInputClosed
-	default:
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
 	}
+}
 
-	// Try reading from session (blocking)
-	if si.session.Next() {
+// pump drains the read session on a dedicated goroutine, forwarding each
+// record to the records channel. It exists so ReadBatch can select on the
+// records and nacks channels together: a nack arriving while the pump is
+// parked inside session.Next() (an idle stream) can be redelivered promptly
+// without waiting for a new record. When the session ends (Next returns
+// false), pump records the terminal error and closes sessionDone so a parked
+// ReadBatch wakes immediately instead of blocking forever.
+func (si *streamInput) pump() {
+	defer close(si.sessionDone)
+	for {
+		if !si.session.Next() {
+			si.terminalErr = si.session.Err()
+			if si.terminalErr == nil {
+				si.terminalErr = ErrInputClosed
+			}
+			return
+		}
 		record := si.session.Record()
-		return si.handleBatch(ctx, []s2.SequencedRecord{record})
+		select {
+		case si.records <- []s2.SequencedRecord{record}:
+		case <-si.closedCh:
+			return
+		}
 	}
-
-	if err := si.session.Err(); err != nil {
-		return nil, nil, err
-	}
-
-	return nil, nil, ErrInputClosed
 }
 
 func (si *streamInput) handleBatch(_ context.Context, records []s2.SequencedRecord) ([]s2.SequencedRecord, AckFunc, error) {
@@ -294,10 +342,17 @@ func (si *streamInput) Close(ctx context.Context) error {
 		si.session.Close()
 	})
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return nil
+	// Wait for the pump goroutine to exit so a closed input leaves no reading
+	// goroutine behind. closeSession cancels the stream context, which unblocks
+	// the park inside session.Next(); ctx provides the escape if the pump is
+	// slow to observe it.
+	if si.sessionDone != nil {
+		select {
+		case <-si.sessionDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+	return nil
 }
