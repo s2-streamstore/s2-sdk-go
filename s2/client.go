@@ -36,12 +36,20 @@ const (
 type ClientOptions struct {
 	// Endpoint to connect to S2.
 	// Defaults to "https://a.s2.dev/v1".
+	//
+	// When MakeBasinBaseURL is not set, basin-scoped requests are routed through this
+	// endpoint (the same host serves both account and basin APIs) and the "s2-basin"
+	// HTTP header carries the basin name. This is the typical configuration for
+	// self-hosted deployments (e.g. s2-lite). When both BaseURL and MakeBasinBaseURL
+	// are unset, basins are addressed via the default cloud subdomain
+	// "https://<basin>.b.s2.dev/v1" instead.
 	BaseURL string
 	// HTTP client used for requests.
 	HTTPClient *http.Client
 	// Allows customizing how basin endpoints are constructed.
-	// If provided, this function is used to derive the endpoint for a given basin.
-	// When provided, the "s2-basin" HTTP header is automatically included in basin-scoped requests.
+	// If provided, this function is used to derive the endpoint for a given basin
+	// and the "s2-basin" HTTP header is automatically included in basin-scoped
+	// requests so the server can route to the requested basin.
 	MakeBasinBaseURL func(basin string) string
 	// Retry configuration.
 	RetryConfig *RetryConfig
@@ -135,8 +143,19 @@ func New(accessToken string, opts *ClientOptions) *Client {
 
 	makeBasinBaseURL := opts.MakeBasinBaseURL
 	if makeBasinBaseURL == nil {
-		makeBasinBaseURL = func(basin string) string {
-			return fmt.Sprintf("https://%s.b.s2.dev/v1", basin)
+		if opts.BaseURL != "" {
+			// A custom account endpoint was supplied without an explicit basin
+			// endpoint. Treat the account endpoint as a shared basin endpoint:
+			// basin-scoped requests go to the same host and the basin name is
+			// carried via the "s2-basin" header. This matches the documented
+			// self-hosted usage and avoids silently routing basin traffic to the
+			// public cloud.
+			endpoint := baseURL
+			makeBasinBaseURL = func(string) string { return endpoint }
+		} else {
+			makeBasinBaseURL = func(basin string) string {
+				return fmt.Sprintf("https://%s.b.s2.dev/v1", basin)
+			}
 		}
 	} else {
 		makeBasinBaseURL = func(basin string) string {
@@ -167,7 +186,7 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		makeBasinBaseURL:   makeBasinBaseURL,
 		retryConfig:        retryConfig,
 		logger:             opts.Logger,
-		includeBasinHeader: opts.MakeBasinBaseURL != nil,
+		includeBasinHeader: opts.MakeBasinBaseURL != nil || opts.BaseURL != "",
 		connectionTimeout:  connectionTimeout,
 		requestTimeout:     requestTimeout,
 		compression:        opts.Compression,
