@@ -1,5 +1,7 @@
 package framing
 
+import "strings"
+
 // CompressionType describes the frame-level compression encoding used for payloads.
 type CompressionType uint8
 
@@ -30,13 +32,21 @@ func (c CompressionType) AcceptEncoding() string {
 	return "zstd, gzip"
 }
 
+// ParseContentEncoding parses a Content-Encoding header value into a
+// CompressionType. Matching is case-insensitive, as HTTP content codings are
+// case-insensitive (RFC 9110). For comma-separated lists, the first
+// recognized coding wins; this protects callers that pair an explicit
+// Accept-Encoding with raw error-body decoding, where a server may respond
+// with a single coding in any casing. Unrecognized or absent codings yield
+// CompressionNone, leaving the body untouched for the caller to surface.
 func ParseContentEncoding(encoding string) CompressionType {
-	switch encoding {
-	case "zstd":
-		return CompressionZstd
-	case "gzip":
-		return CompressionGzip
-	default:
-		return CompressionNone
+	for _, token := range strings.Split(encoding, ",") {
+		switch strings.ToLower(strings.TrimSpace(token)) {
+		case "zstd":
+			return CompressionZstd
+		case "gzip":
+			return CompressionGzip
+		}
 	}
+	return CompressionNone
 }

@@ -122,6 +122,25 @@ func provisionResultFromResponse(meta *responseMeta) ProvisionResult {
 	return ProvisionResultUpdated
 }
 
+// decompressBody decompresses an HTTP response body according to the
+// response's Content-Encoding header. It is a no-op when the header is
+// absent or names an encoding the SDK does not support, in which case the
+// body is returned untouched for the caller to surface.
+//
+// Requests that explicitly set Accept-Encoding (e.g. "zstd, gzip") disable
+// net/http's transparent gzip decoding, so any path that reads a response
+// body directly must decompress it itself. This helper centralizes that
+// treatment for the unary and session error/success paths so they cannot
+// drift out of sync.
+func decompressBody(resp *http.Response, data []byte) ([]byte, error) {
+	encoding := resp.Header.Get("Content-Encoding")
+	if encoding == "" {
+		return data, nil
+	}
+	compression := internalframing.ParseContentEncoding(encoding)
+	return internalframing.Decompress(data, compression)
+}
+
 func (h *httpClient) requestProto(
 	ctx context.Context,
 	method, path string,
@@ -201,15 +220,11 @@ func (h *httpClient) requestProto(
 			logError(h.logger, "s2 http proto error response body read failed", "method", method, "path", path, "status", resp.StatusCode, "error", readErr)
 			return bodyErr
 		}
-		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
-			respCompression := internalframing.ParseContentEncoding(encoding)
-			decompressed, err := internalframing.Decompress(body, respCompression)
-			if err != nil {
-				return fmt.Errorf("decompress error response body: %w", err)
-			}
-			body = decompressed
+		decompressed, decErr := decompressBody(resp, body)
+		if decErr != nil {
+			return fmt.Errorf("decompress error response body: %w", decErr)
 		}
-		apiErr := decodeAPIError(resp.StatusCode, body)
+		apiErr := decodeAPIError(resp.StatusCode, decompressed)
 		logError(h.logger, "s2 http proto error response", "method", method, "path", path, "status", resp.StatusCode, "message", apiErr.Error())
 		return apiErr
 	}
@@ -220,12 +235,9 @@ func (h *httpClient) requestProto(
 			return fmt.Errorf("read proto response: %w", err)
 		}
 
-		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
-			respCompression := internalframing.ParseContentEncoding(encoding)
-			data, err = internalframing.Decompress(data, respCompression)
-			if err != nil {
-				return fmt.Errorf("decompress response body: %w", err)
-			}
+		data, err = decompressBody(resp, data)
+		if err != nil {
+			return fmt.Errorf("decompress response body: %w", err)
 		}
 
 		if err := proto.Unmarshal(data, result); err != nil {

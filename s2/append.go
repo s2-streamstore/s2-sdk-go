@@ -180,7 +180,12 @@ func (p *transportAppendSession) connectAndRead(req *http.Request, pipeWriter *i
 		if readErr != nil {
 			apiErr = newBodyReadError(resp.StatusCode, body, readErr)
 		} else {
-			apiErr = decodeAPIError(resp.StatusCode, body)
+			decompressed, decErr := decompressBody(resp, body)
+			if decErr != nil {
+				apiErr = fmt.Errorf("decompress error response body: %w", decErr)
+			} else {
+				apiErr = decodeAPIError(resp.StatusCode, decompressed)
+			}
 		}
 		if isServerDraining(apiErr) {
 			p.poisonCapture.poison()

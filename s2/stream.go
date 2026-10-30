@@ -118,7 +118,11 @@ func parseHTTPError(resp *http.Response) error {
 	if readErr != nil {
 		return newBodyReadError(resp.StatusCode, body, readErr)
 	}
-	return decodeAPIError(resp.StatusCode, body)
+	decompressed, decErr := decompressBody(resp, body)
+	if decErr != nil {
+		return fmt.Errorf("decompress error response body: %w", decErr)
+	}
+	return decodeAPIError(resp.StatusCode, decompressed)
 }
 
 func parseReadBatch(data []byte) (*ReadBatch, error) {

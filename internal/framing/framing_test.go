@@ -386,6 +386,35 @@ func TestAcceptEncoding(t *testing.T) {
 	}
 }
 
+func TestParseContentEncoding(t *testing.T) {
+	cases := []struct {
+		name     string
+		encoding string
+		want     CompressionType
+	}{
+		{"empty", "", CompressionNone},
+		{"gzip", "gzip", CompressionGzip},
+		{"zstd", "zstd", CompressionZstd},
+		{"unknown", "br", CompressionNone},
+		{"gzip uppercase", "GZIP", CompressionGzip},
+		{"gzip mixed case", "GzIp", CompressionGzip},
+		{"zstd uppercase", "ZSTD", CompressionZstd},
+		{"gzip with surrounding whitespace", "  gzip  ", CompressionGzip},
+		{"multi token gzip first", "gzip, zstd", CompressionGzip},
+		{"multi token zstd first", "zstd, gzip", CompressionZstd},
+		{"multi token unknown first", "br, gzip", CompressionGzip},
+		{"multi token whitespace", "zstd, gzip", CompressionZstd},
+		{"multi token all unknown", "br, deflate", CompressionNone},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ParseContentEncoding(tc.encoding); got != tc.want {
+				t.Errorf("ParseContentEncoding(%q) = %v, want %v", tc.encoding, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFrameReaderReportsTruncatedFrameAsUnexpectedEOF(t *testing.T) {
 	frame := CreateFrame([]byte("hello"), false, CompressionNone)
 	fr := NewFrameReader(bytes.NewReader(append(frame, frame[:5]...)))
