@@ -168,5 +168,7 @@ func applyAppendSessionDefaults(opts *AppendSessionOptions, baseRetry *RetryConf
 	cfgCopy := effective
 	opts.RetryConfig = &cfgCopy
 
+	opts.StreamConfig = cloneStreamConfigPtr(opts.StreamConfig)
+
 	return opts, nil
 }
