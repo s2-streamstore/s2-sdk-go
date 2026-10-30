@@ -93,17 +93,19 @@ func streamsManager(
 		}
 		existingWorkers[stream] = worker
 
+		connect := func(ctx context.Context) (recvBatchSource, error) {
+			return connectStreamInput(ctx, basin, cache, config.Logger, stream, config.MaxInFlight, config.StartSeqNum)
+		}
+
 		go streamSource(
 			workerCtx,
-			basin,
 			config.Logger,
 			cache,
 			stream,
-			config.MaxInFlight,
 			backoffDuration,
-			config.StartSeqNum,
 			inputStream,
 			workerCloser,
+			connect,
 		)
 	}
 
@@ -168,17 +170,29 @@ managerLoop:
 	close(inputStream)
 }
 
+// reconnectBackoff returns a channel that fires after the configured
+// reconnect backoff plus up to 10ms of random jitter. Pacing reconnects
+// prevents a persistently failing stream from hot-looping open-session→fail
+// and storming the endpoint with requests.
+func reconnectBackoff(backoffDuration time.Duration) <-chan time.Time {
+	jitter := time.Duration(rand.Int63n(int64(10 * time.Millisecond)))
+	return time.After(backoffDuration + jitter)
+}
+
+// streamConnectFn opens a fresh read session for one reconnect cycle. It is
+// passed in (rather than reaching for the basin directly inside streamSource)
+// so the reconnect/backoff loop can be driven with a fake source in tests.
+type streamConnectFn func(ctx context.Context) (recvBatchSource, error)
+
 func streamSource(
 	ctx context.Context,
-	basin *s2.BasinClient,
 	logger Logger,
 	cache *seqNumCache,
 	stream string,
-	maxInflight int,
 	backoffDuration time.Duration,
-	inputStartSeqNum InputStartSeqNum,
 	inputStream chan<- recvOutput,
 	closer chan<- struct{},
+	connect streamConnectFn,
 ) {
 	defer close(closer)
 
@@ -200,17 +214,24 @@ func streamSource(
 		default:
 		}
 
-		input, err := connectStreamInput(ctx, basin, cache, logger, stream, maxInflight, inputStartSeqNum)
+		input, err := connect(ctx)
 		if err != nil {
 			logger.With("error", err, "stream", stream).Error("Failed to connect, retrying.")
 
-			jitter := time.Duration(rand.Int63n(int64(10 * time.Millisecond)))
-			backoff = time.After(backoffDuration + jitter)
+			backoff = reconnectBackoff(backoffDuration)
 
 			continue
 		}
 
-		streamSourceRecvLoop(ctx, input, cache, stream, inputStream, logger)
+		// streamSourceRecvLoop returns true when it exited due to a read-level
+		// failure (session error, non-retryable HTTP status, or a 416 with no
+		// tail). Pace those reconnects with the configured backoff so a
+		// persistently failing stream can't hot-loop. Intentional restarts
+		// (ErrInputClosed, a successful 416 tail reset) return false and
+		// reconnect immediately.
+		if streamSourceRecvLoop(ctx, input, cache, stream, inputStream, logger) {
+			backoff = reconnectBackoff(backoffDuration)
+		}
 	}
 }
 
@@ -221,6 +242,11 @@ type recvBatchSource interface {
 	Close(ctx context.Context) error
 }
 
+// streamSourceRecvLoop reads batches from input into inputStream until the
+// session ends. The bool return is true when the loop exited due to a
+// read-level error that the caller should pace with backoff before
+// reconnecting, and false for intentional exits (context cancellation,
+// ErrInputClosed restart, a successful 416 tail reset).
 func streamSourceRecvLoop(
 	ctx context.Context,
 	input recvBatchSource,
@@ -228,13 +254,13 @@ func streamSourceRecvLoop(
 	stream string,
 	inputStream chan<- recvOutput,
 	logger Logger,
-) {
+) bool {
 	defer input.Close(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		default:
 		}
 
@@ -243,7 +269,7 @@ func streamSourceRecvLoop(
 			if errors.Is(err, ErrInputClosed) {
 				logger.With("stream", stream).Debug("Restarting source")
 
-				return
+				return false
 			}
 
 			var rangeErr *s2.RangeNotSatisfiableError
@@ -257,22 +283,22 @@ func streamSourceRecvLoop(
 					logger.With("stream", stream, "error", setErr).
 						Error("Failed to durably reset cached sequence number after 416")
 				}
-				return
+				return false
 			}
 
 			select {
 			case inputStream <- recvOutput{Stream: stream, Err: err}:
 			case <-ctx.Done():
-				return
+				return false
 			}
 
-			return
+			return true
 		}
 
 		select {
 		case inputStream <- recvOutput{Stream: stream, Batch: batch, AckFunc: aFn}:
 		case <-ctx.Done():
-			return
+			return false
 		}
 	}
 }

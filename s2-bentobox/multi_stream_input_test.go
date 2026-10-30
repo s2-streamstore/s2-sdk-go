@@ -44,17 +44,17 @@ func (f *fakeBatchSource) Close(context.Context) error {
 
 type silentLogger struct{}
 
-func (silentLogger) Tracef(string, ...any)            {}
-func (silentLogger) Trace(string)                     {}
-func (silentLogger) Debugf(string, ...any)            {}
-func (silentLogger) Debug(string)                     {}
-func (silentLogger) Infof(string, ...any)             {}
-func (silentLogger) Info(string)                      {}
-func (silentLogger) Warnf(string, ...any)             {}
-func (silentLogger) Warn(string)                      {}
-func (silentLogger) Errorf(string, ...any)            {}
-func (silentLogger) Error(string)                     {}
-func (silentLogger) With(...any) Logger               { return silentLogger{} }
+func (silentLogger) Tracef(string, ...any) {}
+func (silentLogger) Trace(string)          {}
+func (silentLogger) Debugf(string, ...any) {}
+func (silentLogger) Debug(string)          {}
+func (silentLogger) Infof(string, ...any)  {}
+func (silentLogger) Info(string)           {}
+func (silentLogger) Warnf(string, ...any)  {}
+func (silentLogger) Warn(string)           {}
+func (silentLogger) Errorf(string, ...any) {}
+func (silentLogger) Error(string)          {}
+func (silentLogger) With(...any) Logger    { return silentLogger{} }
 
 func TestStreamSourceRecvLoopResetsCacheOn416(t *testing.T) {
 	const stream = "demo"
@@ -80,7 +80,9 @@ func TestStreamSourceRecvLoopResetsCacheOn416(t *testing.T) {
 	inputStream := make(chan recvOutput, 1)
 	done := make(chan struct{})
 	go func() {
-		streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{})
+		if streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{}) {
+			t.Error("416 with tail should not report a read-level error")
+		}
 		close(done)
 	}()
 
@@ -139,7 +141,9 @@ func TestStaleAckDoesNotOverwrite416TailReset(t *testing.T) {
 		Tail:    &s2.StreamPosition{SeqNum: tailSeqNum},
 	}
 	src := &fakeBatchSource{results: []readResult{{err: rangeErr}}}
-	streamSourceRecvLoop(context.Background(), src, cache, stream, make(chan recvOutput, 1), silentLogger{})
+	if streamSourceRecvLoop(context.Background(), src, cache, stream, make(chan recvOutput, 1), silentLogger{}) {
+		t.Fatal("416 with tail should not report a read-level error")
+	}
 
 	if got, ok := cache.mem.Get(stream); !ok || got != tailSeqNum {
 		t.Fatalf("after 416, expected mem at tail %d, got %d (present=%v)", tailSeqNum, got, ok)
@@ -210,7 +214,9 @@ func TestStreamSourceRecvLoopForwardsOtherErrors(t *testing.T) {
 	inputStream := make(chan recvOutput, 1)
 	done := make(chan struct{})
 	go func() {
-		streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{})
+		if !streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{}) {
+			t.Error("forwarded read error should report a read-level error")
+		}
 		close(done)
 	}()
 
@@ -256,7 +262,9 @@ func TestStreamSourceRecvLoopForwards416WhenTailMissing(t *testing.T) {
 	inputStream := make(chan recvOutput, 1)
 	done := make(chan struct{})
 	go func() {
-		streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{})
+		if !streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{}) {
+			t.Error("forwarded 416 without tail should report a read-level error")
+		}
 		close(done)
 	}()
 
@@ -370,7 +378,9 @@ func TestStreamSourceRecvLoopKeepsTailInMemWhenSetFails(t *testing.T) {
 	src := &fakeBatchSource{results: []readResult{{err: rangeErr}}}
 	inputStream := make(chan recvOutput, 1)
 
-	streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{})
+	if streamSourceRecvLoop(context.Background(), src, cache, stream, inputStream, silentLogger{}) {
+		t.Fatal("416 with tail should not report a read-level error")
+	}
 
 	// The durable write failed, but the in-memory position must still be reset
 	// to the tail so the next reconnect doesn't fall back to the stale value.
@@ -433,4 +443,291 @@ func TestSeqNumCacheGetMissLogging(t *testing.T) {
 			t.Fatalf("backend error should warn once; got %d warnings", warns)
 		}
 	})
+}
+
+// collectConnectTimes runs streamSource with the given connect func, draining
+// inputStream so the recv loop's send never blocks, and returns the timestamps
+// at which the first want connect attempts happened. It cancels the source and
+// waits for it to exit once want attempts have been observed.
+//
+// The returned timestamps let callers assert the gap between reconnects: with
+// a working backoff each gap is >= backoff; an unthrottled loop produces gaps
+// near zero.
+func collectConnectTimes(t *testing.T, cache *seqNumCache, backoff time.Duration, connect streamConnectFn, want int) []time.Time {
+	t.Helper()
+
+	if cache == nil {
+		cache = newSeqNumCache(nil, silentLogger{})
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	inputStream := make(chan recvOutput, 1024)
+	closer := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-inputStream:
+				if !ok {
+					return
+				}
+			}
+		}
+	}()
+
+	calls := make(chan time.Time, want)
+	wrapped := func(ctx context.Context) (recvBatchSource, error) {
+		select {
+		case calls <- time.Now():
+		case <-ctx.Done():
+		}
+		return connect(ctx)
+	}
+
+	go streamSource(ctx, silentLogger{}, cache, "demo", backoff, inputStream, closer, wrapped)
+
+	times := make([]time.Time, 0, want)
+	for len(times) < want {
+		select {
+		case ts := <-calls:
+			times = append(times, ts)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %d connects, got %d", want, len(times))
+		}
+	}
+	cancel()
+	select {
+	case <-closer:
+	case <-time.After(2 * time.Second):
+		t.Fatal("streamSource did not exit after cancel")
+	}
+	return times
+}
+
+func assertGapsAtLeast(t *testing.T, backoff time.Duration, times []time.Time) {
+	t.Helper()
+	for i := 1; i < len(times); i++ {
+		if gap := times[i].Sub(times[i-1]); gap < backoff {
+			t.Fatalf("reconnect #%d happened after %v, want >= backoff %v (unthrottled reconnect loop)", i, gap, backoff)
+		}
+	}
+}
+
+func assertReconnectsImmediate(t *testing.T, backoff time.Duration, times []time.Time) {
+	t.Helper()
+	total := times[len(times)-1].Sub(times[0])
+	if total >= backoff {
+		t.Fatalf("%d reconnects took %v total, want immediate (no backoff)", len(times)-1, total)
+	}
+}
+
+// Regression for the backoff bug: streamSource only applied BackoffDuration on
+// a connectStreamInput error, which is unreachable since ReadSession became
+// lazy and returns the session immediately. A read-level failure must also
+// pace the reconnect so a persistently failing stream can't hot-loop
+// open-session→fail against the endpoint.
+func TestStreamSourceBacksOffOnReadLevelError(t *testing.T) {
+	const backoff = 40 * time.Millisecond
+	readErr := errors.New("boom")
+	connect := func(ctx context.Context) (recvBatchSource, error) {
+		return &fakeBatchSource{results: []readResult{{err: readErr}}}, nil
+	}
+	times := collectConnectTimes(t, nil, backoff, connect, 3)
+	assertGapsAtLeast(t, backoff, times)
+}
+
+// The connect-error path must continue to back off (regression guard for the
+// original, reachable-only-in-theory backoff hook).
+func TestStreamSourceBacksOffOnConnectError(t *testing.T) {
+	const backoff = 40 * time.Millisecond
+	connect := func(ctx context.Context) (recvBatchSource, error) {
+		return nil, errors.New("dial failed")
+	}
+	times := collectConnectTimes(t, nil, backoff, connect, 3)
+	assertGapsAtLeast(t, backoff, times)
+}
+
+// A 416 with no tail is forwarded to the consumer and the recv loop reports a
+// read-level error, so reconnects must be paced to avoid a tight 416 loop
+// reconnecting from the stale cached position.
+func TestStreamSourceBacksOffOn416WithoutTail(t *testing.T) {
+	const backoff = 40 * time.Millisecond
+	rangeErr := &s2.RangeNotSatisfiableError{
+		S2Error: &s2.S2Error{Status: 416, Code: "RANGE_NOT_SATISFIABLE", Origin: "server"},
+	}
+	connect := func(ctx context.Context) (recvBatchSource, error) {
+		return &fakeBatchSource{results: []readResult{{err: rangeErr}}}, nil
+	}
+	times := collectConnectTimes(t, nil, backoff, connect, 3)
+	assertGapsAtLeast(t, backoff, times)
+}
+
+// ErrInputClosed is an intentional restart (the session ended cleanly), so
+// streamSource must reconnect immediately rather than pacing with backoff.
+func TestStreamSourceReconnectsImmediatelyOnErrInputClosed(t *testing.T) {
+	const backoff = 2 * time.Second
+	connect := func(ctx context.Context) (recvBatchSource, error) {
+		return &fakeBatchSource{results: nil}, nil // returns ErrInputClosed immediately
+	}
+	times := collectConnectTimes(t, nil, backoff, connect, 5)
+	assertReconnectsImmediate(t, backoff, times)
+}
+
+// A 416 with a tail is an intentional tail reset, so streamSource must
+// reconnect immediately and the cached position must move to the tail.
+func TestStreamSourceReconnectsImmediatelyOn416WithTail(t *testing.T) {
+	const backoff = 2 * time.Second
+	const tail uint64 = 100
+	rangeErr := &s2.RangeNotSatisfiableError{
+		S2Error: &s2.S2Error{Status: 416, Code: "RANGE_NOT_SATISFIABLE", Origin: "server"},
+		Tail:    &s2.StreamPosition{SeqNum: tail},
+	}
+	cache := newSeqNumCache(nil, silentLogger{})
+	if err := cache.Set(context.Background(), "demo", 42, 0); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	connect := func(ctx context.Context) (recvBatchSource, error) {
+		return &fakeBatchSource{results: []readResult{{err: rangeErr}}}, nil
+	}
+	times := collectConnectTimes(t, cache, backoff, connect, 5)
+	assertReconnectsImmediate(t, backoff, times)
+
+	got, err := cache.Get(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("cache.Get: %v", err)
+	}
+	if got != tail {
+		t.Fatalf("expected cache reset to tail %d, got %d", tail, got)
+	}
+}
+
+// The backoff must not swallow read errors: the consumer still receives one
+// error per (paced) reconnect cycle, and the rate is bounded by the backoff
+// rather than spinning unthrottled.
+func TestStreamSourcePacesAndForwardsReadErrors(t *testing.T) {
+	const backoff = 30 * time.Millisecond
+	readErr := errors.New("boom")
+	connect := func(ctx context.Context) (recvBatchSource, error) {
+		return &fakeBatchSource{results: []readResult{{err: readErr}}}, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	inputStream := make(chan recvOutput, 64)
+	closer := make(chan struct{})
+	go streamSource(ctx, silentLogger{}, newSeqNumCache(nil, silentLogger{}), "demo", backoff, inputStream, closer, connect)
+
+	deadline := time.After(150 * time.Millisecond)
+	var errs int
+loop:
+	for {
+		select {
+		case out := <-inputStream:
+			if !errors.Is(out.Err, readErr) {
+				t.Fatalf("expected forwarded readErr, got %v", out.Err)
+			}
+			errs++
+		case <-deadline:
+			break loop
+		}
+	}
+	cancel()
+	select {
+	case <-closer:
+	case <-time.After(2 * time.Second):
+		t.Fatal("streamSource did not exit after cancel")
+	}
+
+	if errs == 0 {
+		t.Fatal("no read errors forwarded to the consumer")
+	}
+	if errs > 20 {
+		t.Fatalf("expected a backoff-paced error count (<20) over 150ms with 30ms backoff, got %d (unthrottled)", errs)
+	}
+}
+
+type ctxBlockingBatchSource struct {
+	closed bool
+}
+
+func (s *ctxBlockingBatchSource) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, AckFunc, error) {
+	<-ctx.Done()
+	return nil, nil, ctx.Err()
+}
+
+func (s *ctxBlockingBatchSource) Close(context.Context) error {
+	s.closed = true
+	return nil
+}
+
+// Cancelling the context while the recv loop is blocked on ReadBatch must
+// unwind the loop, close the source, and let streamSource exit.
+func TestStreamSourceExitsOnContextCancelDuringRead(t *testing.T) {
+	src := &ctxBlockingBatchSource{}
+	connected := make(chan struct{})
+	connect := func(ctx context.Context) (recvBatchSource, error) {
+		select {
+		case connected <- struct{}{}:
+		default:
+		}
+		return src, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	closer := make(chan struct{})
+	go streamSource(ctx, silentLogger{}, newSeqNumCache(nil, silentLogger{}), "demo", time.Minute, make(chan recvOutput, 1), closer, connect)
+
+	select {
+	case <-connected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("connect was never attempted")
+	}
+
+	// The recv loop is now blocked in ctxBlockingBatchSource.ReadBatch on
+	// ctx.Done. Cancel must unwind it and close the source.
+	cancel()
+	select {
+	case <-closer:
+	case <-time.After(2 * time.Second):
+		t.Fatal("streamSource did not exit during a blocked read after context cancel")
+	}
+	if !src.closed {
+		t.Fatal("streamSourceRecvLoop should have closed the input on exit")
+	}
+}
+
+// Cancelling the context while streamSource is sleeping in the backoff timer
+// must wake it and let it exit promptly rather than waiting out the backoff.
+func TestStreamSourceExitsOnContextCancelDuringBackoff(t *testing.T) {
+	connects := make(chan struct{}, 1)
+	connect := func(ctx context.Context) (recvBatchSource, error) {
+		select {
+		case connects <- struct{}{}:
+		default:
+		}
+		return nil, errors.New("dial failed")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	closer := make(chan struct{})
+	go streamSource(ctx, silentLogger{}, newSeqNumCache(nil, silentLogger{}), "demo", time.Minute, make(chan recvOutput, 1), closer, connect)
+
+	select {
+	case <-connects:
+	case <-time.After(2 * time.Second):
+		t.Fatal("connect was never attempted")
+	}
+
+	// streamSource is now sleeping in the 1-minute backoff. Cancel must wake it.
+	cancel()
+	select {
+	case <-closer:
+	case <-time.After(2 * time.Second):
+		t.Fatal("streamSource did not exit during backoff after context cancel")
+	}
 }
