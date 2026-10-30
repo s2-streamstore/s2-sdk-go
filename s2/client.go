@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -108,8 +109,9 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		}
 
 		httpClient = &http.Client{
-			Timeout:   requestTimeout,
-			Transport: newUnaryHTTPTransport(http.DefaultTransport, connectionTimeout),
+			Timeout:       requestTimeout,
+			Transport:     newUnaryHTTPTransport(http.DefaultTransport, connectionTimeout),
+			CheckRedirect: checkRedirect,
 		}
 	}
 	baseTransport := httpClient.Transport
@@ -227,7 +229,8 @@ func createStreamingClient(connectionTimeout time.Duration, tlsConfig *tls.Confi
 			base:      newSpreadTransport(newTransport),
 			userAgent: defaultUserAgent(),
 		},
-		Timeout: 0, // No timeout for streaming
+		Timeout:       0, // No timeout for streaming
+		CheckRedirect: checkRedirect,
 	}
 }
 
@@ -286,6 +289,50 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 	}
 
 	return &schemeAwareTransport{https: httpsTransport, h2c: h2cTransport}
+}
+
+// checkRedirect is the redirect policy for the SDK-managed HTTP clients.
+//
+// Go's default policy only strips a fixed set of sensitive headers
+// (Authorization, WWW-Authenticate, Cookie, Cookie2) on cross-host hops and,
+// because its host comparison ignores ports, forwards them—and every other
+// header—to a different port of the same host. The stream encryption key
+// travels in the custom s2-encryption-key header, which the default policy
+// copies verbatim onto each redirected request, including those targeting a
+// different origin. To ensure key material never leaves the configured
+// service's origin, the header is dropped whenever a redirect crosses the
+// request origin (the scheme's default host:port). Same-origin redirects,
+// which target the same service, are followed unchanged.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) > 0 {
+		prev := via[len(via)-1]
+		if !sameOrigin(prev.URL, req.URL) {
+			req.Header.Del(s2EncryptionKeyHeader)
+		}
+	}
+	return nil
+}
+
+// sameOrigin reports whether two URLs target the same origin: the host
+// (case-insensitive) and port, with default ports inferred from the scheme so
+// that, for example, "https://example.com" and "https://example.com:443" are
+// considered the same origin.
+func sameOrigin(u1, u2 *url.URL) bool {
+	return canonicalOrigin(u1) == canonicalOrigin(u2)
+}
+
+func canonicalOrigin(u *url.URL) string {
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case schemeHTTP:
+			port = "80"
+		case schemeHTTPS:
+			port = "443"
+		}
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // Create a client using configuration from environment variables.
