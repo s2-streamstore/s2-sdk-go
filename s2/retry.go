@@ -218,7 +218,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 		lastError = err
 
 		if isNetworkError(ctx, err) {
-			if attemptNo == maxAttempts || !shouldRetryNetworkError(config) {
+			if attemptNo == maxAttempts || !shouldRetryNetworkError(config, err) {
 				logError(logger, "s2 append network error, max attempts exhausted or not retryable",
 					"attempts", maxAttempts,
 					"error", err)
@@ -264,6 +264,14 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 	return nil, withPriorUncertainty(lastError, priorUncertainty)
 }
 
-func shouldRetryNetworkError(config *RetryConfig) bool {
-	return config.AppendRetryPolicy != AppendRetryPolicyNoSideEffects
+func shouldRetryNetworkError(config *RetryConfig, err error) bool {
+	if config.AppendRetryPolicy != AppendRetryPolicyNoSideEffects {
+		return true
+	}
+	return isPreConnectionError(err)
+}
+
+func isPreConnectionError(err error) bool {
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
 }

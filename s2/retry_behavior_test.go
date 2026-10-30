@@ -361,3 +361,124 @@ func TestIsNetworkError_NetError(t *testing.T) {
 		t.Fatalf("expected urlErr to be treated as network error")
 	}
 }
+
+func newDialOpError(op string) *net.OpError {
+	return &net.OpError{Op: op, Net: "tcp", Err: errors.New("connection refused")}
+}
+
+func TestIsPreConnectionError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"bare dial op error", newDialOpError("dial"), true},
+		{"url-wrapped dial op error", &url.Error{Err: newDialOpError("dial")}, true},
+		{"write op error", newDialOpError("write"), false},
+		{"read op error", newDialOpError("read"), false},
+		{"ambiguous net error", fakeNetErr{}, false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isPreConnectionError(tc.err); got != tc.want {
+				t.Fatalf("isPreConnectionError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWithAppendRetries_NoSideEffectsRetriesURLErrWrappedDialError(t *testing.T) {
+	ctx := context.Background()
+	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
+
+	dialErr := &url.Error{Err: newDialOpError("dial")}
+
+	attempts := 0
+	ack, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, dialErr
+		}
+		return &AppendAck{}, nil
+	})
+	if err != nil || ack == nil {
+		t.Fatalf("expected success after retrying url-wrapped dial errors, got ack=%v err=%v", ack, err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 attempts, got %d", attempts)
+	}
+}
+
+func TestWithAppendRetries_NoSideEffectsExhaustsDialRetries(t *testing.T) {
+	ctx := context.Background()
+	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
+
+	dialErr := &url.Error{Err: newDialOpError("dial")}
+
+	attempts := 0
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		attempts++
+		return nil, dialErr
+	})
+	if err == nil {
+		t.Fatalf("expected error after exhausting dial retries")
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 attempts, got %d", attempts)
+	}
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("expected the original dial error to be surfaced, got %v", err)
+	}
+	var indefinite *AppendIndefiniteFailureError
+	if errors.As(err, &indefinite) {
+		t.Fatalf("dial-only history must not be wrapped as indefinite, got %v", err)
+	}
+}
+
+func TestWithAppendRetries_NoSideEffectsDoesNotRetryWriteError(t *testing.T) {
+	ctx := context.Background()
+	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
+
+	attempts := 0
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		attempts++
+		return nil, newDialOpError("write")
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if attempts != 1 {
+		t.Fatalf("post-write network error must not retry under noSideEffects, got %d attempts", attempts)
+	}
+}
+
+func TestWithAppendRetries_AllRetriesEveryNetworkError(t *testing.T) {
+	ctx := context.Background()
+	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyAll}
+
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"dial", newDialOpError("dial")},
+		{"write", newDialOpError("write")},
+		{"ambiguous", fakeNetErr{}},
+		{"url-wrapped dial", &url.Error{Err: newDialOpError("dial")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			attempts := 0
+			_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+				attempts++
+				return nil, tc.err
+			})
+			if err == nil {
+				t.Fatalf("expected error")
+			}
+			if attempts != 3 {
+				t.Fatalf("all policy should retry every network error until max attempts, got %d attempts", attempts)
+			}
+		})
+	}
+}
