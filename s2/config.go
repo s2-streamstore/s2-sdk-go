@@ -92,7 +92,8 @@ func hasExplicitPath(input string) bool {
 			authorityStart = idx + len("://")
 		}
 	}
-	return firstDelimiterIndex(trimmed, authorityStart) != -1
+	delim := firstDelimiterIndex(trimmed, authorityStart)
+	return delim != -1 && trimmed[delim] == '/'
 }
 
 func firstDelimiterIndex(value string, fromIndex int) int {
@@ -162,22 +163,16 @@ func newEndpointTemplate(endpoint string) (*endpointTemplate, error) {
 		return nil, fmt.Errorf("unsupported scheme: %s", parsed.Scheme)
 	}
 
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, fmt.Errorf("endpoint cannot include query string or hash fragment: %q. Use headers for authentication or path prefixes for routing", raw)
+	}
+
 	hostTemplate := strings.ReplaceAll(parsed.Hostname(), basinPlaceholderSentinel, basinPlaceholder)
 	port := parsed.Port()
 
-	parsedPath := strings.ReplaceAll(parsed.EscapedPath(), basinPlaceholderSentinel, basinPlaceholder)
-	parsedQuery := ""
-	if parsed.RawQuery != "" {
-		parsedQuery = "?" + strings.ReplaceAll(parsed.RawQuery, basinPlaceholderSentinel, basinPlaceholder)
-	}
-	parsedFragment := ""
-	if parsed.Fragment != "" {
-		parsedFragment = "#" + strings.ReplaceAll(parsed.Fragment, basinPlaceholderSentinel, basinPlaceholder)
-	}
-
 	pathTemplate := defaultAPIPath
 	if explicitPathProvided {
-		pathTemplate = parsedPath + parsedQuery + parsedFragment
+		pathTemplate = strings.ReplaceAll(parsed.EscapedPath(), basinPlaceholderSentinel, basinPlaceholder)
 	}
 
 	return &endpointTemplate{

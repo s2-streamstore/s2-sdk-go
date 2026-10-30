@@ -1,6 +1,10 @@
 package s2
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestEndpointTemplate_DefaultsToV1(t *testing.T) {
 	template, err := newEndpointTemplate("aws.s2.dev:8443")
@@ -98,13 +102,37 @@ func TestEndpointTemplate_IPv6WithoutPort(t *testing.T) {
 	}
 }
 
-func TestEndpointTemplate_QueryParamsPreserved(t *testing.T) {
-	template, err := newEndpointTemplate("https://aws.s2.dev?foo=bar")
+func TestEndpointTemplate_RejectsQueryOrFragment(t *testing.T) {
+	testCases := []struct {
+		name     string
+		endpoint string
+	}{
+		{name: "query string", endpoint: "https://aws.s2.dev?foo=bar"},
+		{name: "query string without scheme", endpoint: "aws.s2.dev?foo=bar"},
+		{name: "query string with explicit path", endpoint: "https://aws.s2.dev/basins?foo=bar"},
+		{name: "fragment", endpoint: "https://aws.s2.dev#frag"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			template, err := newEndpointTemplate(tc.endpoint)
+			if err == nil {
+				t.Fatalf("expected error for endpoint %q, got template %#v", tc.endpoint, template)
+			}
+			if !strings.Contains(err.Error(), "query string or hash fragment") {
+				t.Fatalf("expected error to mention query string or hash fragment, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestEndpointTemplate_AcceptsBareQuerySeparator(t *testing.T) {
+	template, err := newEndpointTemplate("https://aws.s2.dev?")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error for bare query separator: %v", err)
 	}
 	got := template.baseURL("")
-	want := "https://aws.s2.dev?foo=bar"
+	want := "https://aws.s2.dev/v1"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
@@ -151,4 +179,61 @@ func TestLoadConfigFromEnv_IgnoresEmptyEndpoints(t *testing.T) {
 	if cfg.BasinTemplate != nil {
 		t.Fatal("expected empty basin endpoint env var to be ignored")
 	}
+}
+
+func TestLoadConfigFromEnv_RejectsQueryOrFragmentEndpoints(t *testing.T) {
+	testCases := []struct {
+		name     string
+		envName  string
+		endpoint string
+	}{
+		{name: "account endpoint with query", envName: envAccountEndpoint, endpoint: "https://aws.s2.dev?foo=bar"},
+		{name: "basin endpoint with query", envName: envBasinEndpoint, endpoint: "https://aws.s2.dev?foo=bar"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.envName, tc.endpoint)
+
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Fatal("expected panic for endpoint with query string or fragment")
+				}
+				if !strings.Contains(fmt.Sprint(r), "query string or hash fragment") {
+					t.Fatalf("expected panic to mention query string or hash fragment, got %v", r)
+				}
+			}()
+
+			loadConfigFromEnv()
+		})
+	}
+}
+
+func TestNew_PanicsOnBaseURLWithQueryOrFragment(t *testing.T) {
+	t.Run("BaseURL with query", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected panic for BaseURL with query string")
+			}
+		}()
+
+		New("token", &ClientOptions{BaseURL: "https://aws.s2.dev?foo=bar"})
+	})
+
+	// MakeBasinBaseURL callback results are normalized lazily at Basin() time and must panic.
+	t.Run("MakeBasinBaseURL with query", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected panic for MakeBasinBaseURL returning query endpoint")
+			}
+		}()
+
+		client := New("token", &ClientOptions{
+			MakeBasinBaseURL: func(string) string {
+				return "https://aws.s2.dev?foo=bar"
+			},
+		})
+		client.Basin("demo")
+	})
 }
