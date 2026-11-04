@@ -283,7 +283,7 @@ func (c *checker) checkEnum(schemaName string, schema SchemaNode, goPosition str
 
 func (c *checker) checkAccepted() {
 	for _, accepted := range c.cfg.Accepted {
-		valid := false
+		var valid bool
 		switch accepted.Kind {
 		case "doc":
 			pair, exists := c.docPairs[accepted.Target]
