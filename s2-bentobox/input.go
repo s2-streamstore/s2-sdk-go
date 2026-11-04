@@ -164,36 +164,86 @@ func (s *seqNumCache) Forget(stream string) {
 }
 
 type InputStreams interface {
-	list(ctx context.Context, basin *s2.BasinClient) ([]string, error)
+	// Lists one page of streams starting after cursor. An empty next cursor
+	// means the scan is complete.
+	listPage(ctx context.Context, basin *s2.BasinClient, cursor string) (streams []string, next string, err error)
 }
 
 type StaticInputStreams struct {
 	Streams []string
 }
 
-func (s StaticInputStreams) list(context.Context, *s2.BasinClient) ([]string, error) {
-	return s.Streams, nil
+func (s StaticInputStreams) listPage(context.Context, *s2.BasinClient, string) ([]string, string, error) {
+	return s.Streams, "", nil
 }
 
 type PrefixedInputStreams struct {
 	Prefix string
 }
 
-func (p PrefixedInputStreams) list(ctx context.Context, basin *s2.BasinClient) ([]string, error) {
-	var streams []string
+const listStreamsPageLimit = 1000
 
-	iter := basin.Streams.Iter(ctx, &s2.ListStreamsArgs{Prefix: p.Prefix})
-	for iter.Next() {
-		info := iter.Value()
+func (p PrefixedInputStreams) listPage(ctx context.Context, basin *s2.BasinClient, cursor string) ([]string, string, error) {
+	limit := listStreamsPageLimit
+	resp, err := basin.Streams.List(ctx, &s2.ListStreamsArgs{
+		Prefix:     p.Prefix,
+		StartAfter: cursor,
+		Limit:      &limit,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+
+	streams := make([]string, 0, len(resp.Streams))
+	for _, info := range resp.Streams {
 		if info.DeletedAt == nil {
 			streams = append(streams, string(info.Name))
 		}
 	}
-	if err := iter.Err(); err != nil {
-		return nil, err
+
+	// Advance past the last returned entry even if it is being deleted.
+	next := ""
+	if resp.HasMore && len(resp.Streams) > 0 {
+		next = string(resp.Streams[len(resp.Streams)-1].Name)
 	}
 
-	return streams, nil
+	return streams, next, nil
+}
+
+// Walks InputStreams one page at a time, accumulating the streams seen in the
+// current scan so callers only prune once every page has been visited.
+type streamDiscovery struct {
+	streams InputStreams
+	cursor  string
+	seen    map[string]struct{}
+}
+
+func newStreamDiscovery(streams InputStreams) *streamDiscovery {
+	return &streamDiscovery{streams: streams, seen: make(map[string]struct{})}
+}
+
+// Fetches the next page. complete is non-nil only when the page ends a scan,
+// and holds every stream seen across the scan. On error the cursor is kept so
+// the same page is retried.
+func (d *streamDiscovery) next(ctx context.Context, basin *s2.BasinClient) (page []string, complete map[string]struct{}, err error) {
+	page, next, err := d.streams.listPage(ctx, basin, d.cursor)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, stream := range page {
+		d.seen[stream] = struct{}{}
+	}
+
+	if next != "" {
+		d.cursor = next
+		return page, nil, nil
+	}
+
+	complete = d.seen
+	d.cursor = ""
+	d.seen = make(map[string]struct{})
+	return page, complete, nil
 }
 
 type InputStartSeqNum uint
@@ -205,13 +255,19 @@ const (
 
 type InputConfig struct {
 	*Config
-	Streams               InputStreams
-	MaxInFlight           int
+	Streams     InputStreams
+	MaxInFlight int
+	// Wait between the end of one stream discovery scan and the start of the
+	// next. Defaults to 1 minute.
 	UpdateStreamsInterval time.Duration
-	Cache                 SeqNumCache
-	Logger                Logger
-	BackoffDuration       time.Duration
-	StartSeqNum           InputStartSeqNum
+	// Wait between listing pages within a single discovery scan, and before
+	// retrying a failed page. Readers start as each page arrives, but are only
+	// stopped once a full scan completes. Defaults to 1 second.
+	ListStreamsPageInterval time.Duration
+	Cache                   SeqNumCache
+	Logger                  Logger
+	BackoffDuration         time.Duration
+	StartSeqNum             InputStartSeqNum
 }
 
 type recvOutput struct {
