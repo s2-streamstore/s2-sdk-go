@@ -181,7 +181,7 @@ type PrefixedInputStreams struct {
 	Prefix string
 }
 
-const listStreamsPageLimit = 1000
+var listStreamsPageLimit = 1000
 
 func (p PrefixedInputStreams) listPage(ctx context.Context, basin *s2.BasinClient, cursor string) ([]string, string, error) {
 	limit := listStreamsPageLimit
