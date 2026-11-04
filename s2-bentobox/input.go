@@ -225,7 +225,7 @@ func newStreamDiscovery(streams InputStreams) *streamDiscovery {
 // Fetches the next page. complete is non-nil only when the page ends a scan,
 // and holds every stream seen across the scan. On error the cursor is kept so
 // the same page is retried.
-func (d *streamDiscovery) next(ctx context.Context, basin *s2.BasinClient) (page []string, complete map[string]struct{}, err error) {
+func (d *streamDiscovery) next(ctx context.Context, basin *s2.BasinClient) ([]string, map[string]struct{}, error) {
 	page, next, err := d.streams.listPage(ctx, basin, d.cursor)
 	if err != nil {
 		return nil, nil, err
@@ -240,7 +240,7 @@ func (d *streamDiscovery) next(ctx context.Context, basin *s2.BasinClient) (page
 		return page, nil, nil
 	}
 
-	complete = d.seen
+	complete := d.seen
 	d.cursor = ""
 	d.seen = make(map[string]struct{})
 	return page, complete, nil
