@@ -55,20 +55,6 @@
   "accepted": [
     {
       "kind": "doc",
-      "target": "BasinConfig.CreateStreamOnAppend",
-      "spec": "Create stream on append if it doesn't exist, using the default stream configuration.",
-      "go": "Create stream on append if it doesn't exist, using the default stream configuration. Defaults to false.",
-      "reason": "The Go pointer distinguishes an unset setting from an explicit false; the default is useful SDK guidance."
-    },
-    {
-      "kind": "doc",
-      "target": "BasinConfig.CreateStreamOnRead",
-      "spec": "Create stream on read if it doesn't exist, using the default stream configuration.",
-      "go": "Create stream on read if it doesn't exist, using the default stream configuration. Defaults to false.",
-      "reason": "The Go pointer distinguishes an unset setting from an explicit false; the default is useful SDK guidance."
-    },
-    {
-      "kind": "doc",
       "target": "BasinConfig.StreamCipher",
       "spec": "Encryption algorithm to apply to newly created streams in the basin.",
       "go": "Encryption algorithm to apply to newly created streams in the basin. Appends and reads to encrypted streams require a client-supplied encryption key.",
@@ -76,24 +62,10 @@
     },
     {
       "kind": "doc",
-      "target": "BasinInfo.Location",
-      "spec": "Basin location.",
-      "go": "Basin location, if returned by the service.",
-      "reason": "The Go docs clarify that the field is optional in service responses."
-    },
-    {
-      "kind": "doc",
       "target": "CreateBasinArgs.Location",
       "spec": "Basin location. If omitted when creating, uses the default location for the account.",
-      "go": "Basin location. If omitted, the service uses the account's default location. Use [LocationsClient.List] or [LocationsClient.GetDefault] to discover valid values.",
-      "reason": "The Go docs explain defaulting and point callers to the SDK methods for valid values."
-    },
-    {
-      "kind": "doc",
-      "target": "LocationInfo.IsPrivate",
-      "spec": "Location represents a private placement, limited by account.",
-      "go": "IsPrivate is true for account-private placements.",
-      "reason": "The Go phrasing describes the boolean field and uses the SDK's established account-private terminology."
+      "go": "Basin location. If omitted when creating, uses the default location for the account. Use [LocationsClient.List] or [LocationsClient.GetDefault] to discover valid values.",
+      "reason": "Adds SDK discovery methods for valid location values."
     },
     {
       "kind": "doc",
@@ -101,20 +73,6 @@
       "spec": "[Storage class](https://s2.dev/docs/storage-classes) for recent writes.",
       "go": "Storage class for recent writes. Discover available values with [LocationsClient.List].",
       "reason": "The Go docs link to the SDK method callers use to discover available storage classes."
-    },
-    {
-      "kind": "doc",
-      "target": "ListStreamsArgs.StartAfter",
-      "spec": "Filter to streams whose names lexicographically start after this string. It must not contain NUL bytes.",
-      "go": "Filter to streams whose names lexicographically start after this string. It must be greater than or equal to the `prefix` if specified. It must not contain NUL bytes.",
-      "reason": "The Go docs retain SDK-level parameter validation guidance absent from the OpenAPI description."
-    },
-    {
-      "kind": "doc",
-      "target": "ListBasinsArgs.StartAfter",
-      "spec": "Filter to basins whose names lexicographically start after this string.",
-      "go": "Filter to basins whose names lexicographically start after this string. It must be greater than or equal to the `prefix` if specified.",
-      "reason": "The Go docs retain SDK-level parameter validation guidance absent from the OpenAPI description."
     }
   ]
 }
