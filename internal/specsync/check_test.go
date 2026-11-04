@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +29,11 @@ type Widget struct {
 type Color string
 
 const ColorRed Color = "red"
+
+const (
+	OperationFirst = "first"
+	OperationExtra = "extra"
+)
 `
 	if err := os.WriteFile(filepath.Join(goDir, "types.go"), []byte(goSourceText), 0o600); err != nil {
 		t.Fatal(err)
@@ -46,7 +52,11 @@ const ColorRed Color = "red"
 							"missing":  map[string]any{"type": "string"},
 						},
 					},
-					"Color":    map[string]any{"type": "string", "enum": []string{"red", "blue"}},
+					"Color": map[string]any{"type": "string", "enum": []string{"red", "blue"}},
+					"Operation": map[string]any{
+						"type": "string",
+						"enum": []string{"first", "missing"},
+					},
 					"Unmapped": map[string]any{"type": "string"},
 				},
 			},
@@ -67,6 +77,7 @@ const ColorRed Color = "red"
 	cfg := Config{
 		Spec:         specPath,
 		GoPackageDir: goDir,
+		UntypedEnums: map[string]string{"Operation": "Operation"},
 		Accepted: []Accepted{{
 			Kind:   "doc",
 			Target: "Widget.Accepted",
@@ -89,16 +100,35 @@ const ColorRed Color = "red"
 		return check(cfg, spec, goSource)
 	}
 
-	initial := findingKeys(loadFindings("accepted spec"))
+	initialFindings := loadFindings("accepted spec")
+	initial := findingKeys(initialFindings)
 	wantInitial := []string{
 		"doc:Widget.Known",
 		"enum:Color.blue",
+		"enum:Operation.extra",
+		"enum:Operation.missing",
 		"extra-field:Widget.Extra",
 		"missing-field:Widget.missing",
 		"unmapped-schema:Unmapped",
 	}
 	if !reflect.DeepEqual(initial, wantInitial) {
 		t.Fatalf("initial findings = %v, want %v", initial, wantInitial)
+	}
+	for target, suffix := range map[string]string{
+		"Color.blue":        filepath.Join("s2", "types.go") + ":11:6",
+		"Operation.extra":   filepath.Join("s2", "types.go") + ":16:2",
+		"Operation.missing": filepath.Join("s2", "types.go") + ":16:2",
+	} {
+		found := false
+		for _, finding := range initialFindings {
+			if finding.Kind == "enum" && finding.Target == target {
+				found = strings.HasSuffix(finding.Pos, suffix)
+				break
+			}
+		}
+		if !found {
+			t.Errorf("enum %s position does not end with %q", target, suffix)
+		}
 	}
 
 	changed := findingKeys(loadFindings("changed spec"))

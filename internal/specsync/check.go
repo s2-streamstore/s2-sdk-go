@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const configPos = "internal/specsync/config.json"
+
 type Finding struct {
 	Kind   string
 	Target string
@@ -121,10 +123,10 @@ func (c *checker) checkSchemas() {
 		goType, hasGoType := c.goSource.Types[goName]
 		if !hasGoType {
 			if _, untypedEnum := c.cfg.UntypedEnums[schemaName]; untypedEnum {
-				c.checkEnum(schemaName, schema)
+				c.checkEnum(schemaName, schema, "")
 				continue
 			}
-			c.add(Finding{Kind: "unmapped-schema", Target: schemaName, Pos: "internal/specsync/config.json:1"})
+			c.add(Finding{Kind: "unmapped-schema", Target: schemaName, Pos: configPos + ":1"})
 			continue
 		}
 		if _, skipped := c.cfg.SkipTypes[goName]; skipped {
@@ -133,8 +135,8 @@ func (c *checker) checkSchemas() {
 		if schema.Description != "" {
 			c.compareDoc(goName, schema.Description, goType.Doc, "", false, goType.Pos)
 		}
-		c.checkFields(goName, schema.properties(), goType.Fields, positionString(goType.Pos))
-		c.checkEnum(schemaName, schema)
+		c.checkFields(goName, schema.properties(), goType.Fields, goType.Pos.String())
+		c.checkEnum(schemaName, schema, goType.Pos.String())
 	}
 }
 
@@ -161,7 +163,7 @@ func (c *checker) checkFields(typeName string, properties map[string]SchemaNode,
 		if _, accepted := c.acceptedByKey["extra-field\x00"+target]; accepted {
 			continue
 		}
-		c.add(Finding{Kind: "extra-field", Target: target, Pos: positionString(field.Pos)})
+		c.add(Finding{Kind: "extra-field", Target: target, Pos: field.Pos.String()})
 	}
 }
 
@@ -183,7 +185,7 @@ func (c *checker) checkOperations() {
 		goName, mapped := c.cfg.Operations[operation.ID]
 		if !mapped {
 			if _, ignored := c.cfg.IgnoreOperations[operation.ID]; !ignored {
-				c.add(Finding{Kind: "unmapped-operation", Target: operation.ID, Pos: "internal/specsync/config.json:1"})
+				c.add(Finding{Kind: "unmapped-operation", Target: operation.ID, Pos: configPos + ":1"})
 			}
 			continue
 		}
@@ -197,7 +199,7 @@ func (c *checker) checkOperations() {
 			field, exists := goType.Fields[parameter.Name]
 			target := goName + "." + parameter.Name
 			if !exists {
-				c.add(Finding{Kind: "missing-field", Target: target, Pos: positionString(goType.Pos)})
+				c.add(Finding{Kind: "missing-field", Target: target, Pos: goType.Pos.String()})
 				continue
 			}
 			if parameter.Description != "" {
@@ -213,7 +215,7 @@ func (c *checker) checkOperations() {
 			if _, accepted := c.acceptedByKey["extra-field\x00"+target]; accepted {
 				continue
 			}
-			c.add(Finding{Kind: "extra-field", Target: target, Pos: positionString(field.Pos)})
+			c.add(Finding{Kind: "extra-field", Target: target, Pos: field.Pos.String()})
 		}
 	}
 }
@@ -238,7 +240,7 @@ func (c *checker) compareDoc(target, specText, goText, format string, isTime boo
 	})
 }
 
-func (c *checker) checkEnum(schemaName string, schema SchemaNode) {
+func (c *checker) checkEnum(schemaName string, schema SchemaNode, goPosition string) {
 	if len(schema.Enum) == 0 {
 		return
 	}
@@ -251,6 +253,9 @@ func (c *checker) checkEnum(schemaName string, schema SchemaNode) {
 		for _, constant := range c.goSource.Constants {
 			if constant.Type == "" && strings.HasPrefix(constant.Name, prefix) {
 				goValues[constant.Value] = true
+				if goPosition == "" {
+					goPosition = constant.Pos.String()
+				}
 			}
 		}
 	} else {
@@ -261,14 +266,17 @@ func (c *checker) checkEnum(schemaName string, schema SchemaNode) {
 			}
 		}
 	}
+	if goPosition == "" {
+		goPosition = configPos + ":1"
+	}
 	for _, value := range sortedKeys(specValues) {
 		if !goValues[value] {
-			c.add(Finding{Kind: "enum", Target: schemaName + "." + value, Spec: value, Pos: "internal/specsync/config.json:1"})
+			c.add(Finding{Kind: "enum", Target: schemaName + "." + value, Spec: value, Pos: goPosition})
 		}
 	}
 	for _, value := range sortedKeys(goValues) {
 		if !specValues[value] {
-			c.add(Finding{Kind: "enum", Target: schemaName + "." + value, Go: value, Pos: "internal/specsync/config.json:1"})
+			c.add(Finding{Kind: "enum", Target: schemaName + "." + value, Go: value, Pos: goPosition})
 		}
 	}
 }
@@ -281,7 +289,7 @@ func (c *checker) checkAccepted() {
 			pair, exists := c.docPairs[accepted.Target]
 			valid = exists && sameText(pair.spec, accepted.Spec) && sameText(pair.goText, accepted.Go)
 			if !valid {
-				finding := Finding{Kind: "stale-config", Target: "accepted." + accepted.Kind + "." + accepted.Target, Pos: "internal/specsync/config.json:1"}
+				finding := Finding{Kind: "stale-config", Target: "accepted." + accepted.Kind + "." + accepted.Target, Pos: configPos + ":1"}
 				if exists {
 					finding.Spec = collapse(pair.spec)
 					finding.Go = collapse(pair.goText)
@@ -326,7 +334,7 @@ func (c *checker) hasConstantPrefix(prefix string) bool {
 }
 
 func (c *checker) configFinding(kind, target string) {
-	c.add(Finding{Kind: kind, Target: target, Pos: "internal/specsync/config.json:1"})
+	c.add(Finding{Kind: kind, Target: target, Pos: configPos + ":1"})
 }
 
 func (c *checker) add(finding Finding) {
@@ -359,10 +367,6 @@ func normalize(text, format string, isTime bool, formatPhrases map[string][]stri
 
 func sameText(left, right string) bool {
 	return collapse(left) == collapse(right)
-}
-
-func positionString(position interface{ String() string }) string {
-	return position.String()
 }
 
 func (n SchemaNode) format() string {

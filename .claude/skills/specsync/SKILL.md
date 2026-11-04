@@ -43,6 +43,8 @@ wording difference as an `accepted` entry with the exact current spec and Go tex
 Record SDK-owned schemas and operations in the corresponding `skipTypes`, `ignoreSchemas`, or
 `ignoreOperations` map. Review those entries when the spec or SDK model changes.
 
+If you are unsure whether a divergence is intentional, ask before changing it.
+
 ## Steps
 
 1. Update the spec if asked. Bump the submodule and confirm what changed:
