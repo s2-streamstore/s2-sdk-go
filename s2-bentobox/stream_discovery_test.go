@@ -24,7 +24,7 @@ func TestPrefixedDiscoveryPagesAcrossCalls(t *testing.T) {
 	const total = 2500
 	deleted := fmt.Sprintf("%s%05d", prefix, listStreamsPageLimit-1)
 
-	var names []string
+	names := make([]string, 0, total+1)
 	for i := range total {
 		names = append(names, fmt.Sprintf("%s%05d", prefix, i))
 	}
