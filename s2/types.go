@@ -244,7 +244,8 @@ type DeleteOnEmptyConfig struct {
 }
 
 type RetentionPolicy struct {
-	// Age limits records to a specific age window (seconds).
+	// Age in seconds for automatic trimming of records older than this threshold.
+	// This must be set to a value greater than 0 seconds.
 	Age *int64 `json:"age,omitempty"`
 	// Retain records unless explicitly trimmed.
 	Infinite *InfiniteRetention `json:"infinite,omitempty"`
@@ -671,7 +672,7 @@ type ListBasinsArgs struct {
 
 type CreateBasinArgs struct {
 	// Basin name which must be globally unique.
-	// It can be between 8 and 48 characters in length, and comprise lowercase letters, numbers and hyphens.
+	// It can be between 8 and 48 bytes in length, and comprise lowercase letters, numbers and hyphens.
 	// It cannot begin or end with a hyphen.
 	Basin BasinName `json:"basin"`
 	// Basin configuration.
