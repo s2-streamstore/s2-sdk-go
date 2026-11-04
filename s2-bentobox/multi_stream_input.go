@@ -72,13 +72,15 @@ func streamsManager(
 		updateStreamsInterval = config.UpdateStreamsInterval
 	}
 
+	listStreamsPageInterval := time.Second
+	if config.ListStreamsPageInterval != 0 {
+		listStreamsPageInterval = config.ListStreamsPageInterval
+	}
+
 	backoffDuration := 100 * time.Millisecond
 	if config.BackoffDuration != 0 {
 		backoffDuration = config.BackoffDuration
 	}
-
-	updateList := make(chan struct{}, 1)
-	updateList <- struct{}{}
 
 	existingWorkers := make(map[string]streamWorker)
 
@@ -107,49 +109,44 @@ func streamsManager(
 		)
 	}
 
+	discovery := newStreamDiscovery(config.Streams)
+	var wait time.Duration
+
 managerLoop:
 	for {
-		select {
-		case <-ctx.Done():
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				break managerLoop
+			case <-time.After(wait):
+			}
+		} else if ctx.Err() != nil {
 			break managerLoop
-
-		case <-time.After(updateStreamsInterval):
-		case <-updateList:
 		}
 
-		// Clear the update list notifier
-		select {
-		case <-updateList:
-		default:
-		}
-
-		newStreams, err := config.Streams.list(ctx, basin)
+		page, complete, err := discovery.next(ctx, basin)
 		if err != nil {
 			config.Logger.
 				With("error", err).
 				Error("Failed to list streams")
-
-			// Try updating the update list notifier for retry
-			select {
-			case updateList <- struct{}{}:
-			default:
-			}
-
+			wait = listStreamsPageInterval
 			continue
 		}
 
-		newStreamsSet := make(map[string]struct{})
-		for _, stream := range newStreams {
-			newStreamsSet[stream] = struct{}{}
-
+		for _, stream := range page {
 			if _, found := existingWorkers[stream]; !found {
 				config.Logger.With("stream", stream).Info("Reading from S2 source")
 				spawnWorker(stream)
 			}
 		}
 
+		if complete == nil {
+			wait = listStreamsPageInterval
+			continue
+		}
+
 		for stream, worker := range existingWorkers {
-			if _, found := newStreamsSet[stream]; !found {
+			if _, found := complete[stream]; !found {
 				config.Logger.With("stream", stream).Warn("Not reading from S2 source anymore")
 				worker.Close()
 				worker.Wait()
@@ -157,6 +154,8 @@ managerLoop:
 				cache.Forget(stream)
 			}
 		}
+
+		wait = updateStreamsInterval
 	}
 
 	// Close and wait for all workers to exit
