@@ -14,6 +14,7 @@ type AccountMetricsArgs struct {
 	// Metric set to return.
 	Set AccountMetricSet `json:"set"`
 	// Start timestamp as Unix epoch seconds, if applicable for the metric set.
+	// Time ranges may span at most 90 days.
 	Start *int64 `json:"start,omitempty"`
 	// End timestamp as Unix epoch seconds, if applicable for the metric set.
 	End *int64 `json:"end,omitempty"`
@@ -27,6 +28,7 @@ type BasinMetricsArgs struct {
 	// Metric set to return.
 	Set BasinMetricSet `json:"set"`
 	// Start timestamp as Unix epoch seconds, if applicable for the metric set.
+	// Time ranges may span at most 90 days.
 	Start *int64 `json:"start,omitempty"`
 	// End timestamp as Unix epoch seconds, if applicable for the metric set.
 	End *int64 `json:"end,omitempty"`
@@ -42,6 +44,7 @@ type StreamMetricsArgs struct {
 	// Metric set to return.
 	Set StreamMetricSet `json:"set"`
 	// Start timestamp as Unix epoch seconds, if applicable for the metric set.
+	// Time ranges may span at most 90 days.
 	Start *int64 `json:"start,omitempty"`
 	// End timestamp as Unix epoch seconds, if applicable for metric set.
 	End *int64 `json:"end,omitempty"`

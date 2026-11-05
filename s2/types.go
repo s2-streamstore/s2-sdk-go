@@ -177,7 +177,7 @@ type ReadWritePermissions struct {
 type BasinInfo struct {
 	// Basin name.
 	Name BasinName `json:"name"`
-	// Basin location, if returned by the service.
+	// Basin location.
 	Location *LocationName `json:"location,omitempty"`
 	// Creation time.
 	CreatedAt time.Time `json:"created_at"`
@@ -191,7 +191,7 @@ type BasinInfo struct {
 type LocationInfo struct {
 	// Location name.
 	Name LocationName `json:"name"`
-	// IsPrivate is true for account-private placements.
+	// Location represents a private placement, limited by account.
 	IsPrivate bool `json:"is_private"`
 	// Storage classes available to the account in this location.
 	StorageClasses []string `json:"storage_classes,omitempty"`
@@ -201,10 +201,8 @@ type LocationInfo struct {
 
 type BasinConfig struct {
 	// Create stream on append if it doesn't exist, using the default stream configuration.
-	// Defaults to false.
 	CreateStreamOnAppend *bool `json:"create_stream_on_append,omitempty"`
 	// Create stream on read if it doesn't exist, using the default stream configuration.
-	// Defaults to false.
 	CreateStreamOnRead *bool `json:"create_stream_on_read,omitempty"`
 	// Encryption algorithm to apply to newly created streams in the basin.
 	// Appends and reads to encrypted streams require a client-supplied encryption key.
@@ -244,7 +242,8 @@ type DeleteOnEmptyConfig struct {
 }
 
 type RetentionPolicy struct {
-	// Age limits records to a specific age window (seconds).
+	// Age in seconds for automatic trimming of records older than this threshold.
+	// This must be set to a value greater than 0 seconds.
 	Age *int64 `json:"age,omitempty"`
 	// Retain records unless explicitly trimmed.
 	Infinite *InfiniteRetention `json:"infinite,omitempty"`
@@ -660,7 +659,6 @@ type ListBasinsArgs struct {
 	// Filter to basins whose names begin with this prefix.
 	Prefix string `json:"prefix,omitempty"`
 	// Filter to basins whose names lexicographically start after this string.
-	// It must be greater than or equal to the `prefix` if specified.
 	StartAfter string `json:"start_after,omitempty"`
 	// Number of results, up to a maximum of 1000.
 	Limit *int `json:"limit,omitempty"`
@@ -671,13 +669,13 @@ type ListBasinsArgs struct {
 
 type CreateBasinArgs struct {
 	// Basin name which must be globally unique.
-	// It can be between 8 and 48 characters in length, and comprise lowercase letters, numbers and hyphens.
+	// It can be between 8 and 48 bytes in length, and comprise lowercase letters, numbers and hyphens.
 	// It cannot begin or end with a hyphen.
 	Basin BasinName `json:"basin"`
 	// Basin configuration.
 	Config *BasinConfig `json:"config,omitempty"`
 	// Basin location.
-	// If omitted, the service uses the account's default location.
+	// If omitted when creating, uses the default location for the account.
 	// Use [LocationsClient.List] or [LocationsClient.GetDefault] to discover valid values.
 	Location *LocationName `json:"location,omitempty"`
 }
@@ -697,8 +695,8 @@ type EnsureBasinArgs struct {
 	// If omitted, the basin is ensured with the default configuration.
 	Config *BasinConfig
 	// Basin location.
-	// If omitted when creating, the service uses the account's default location.
-	// Cannot be changed once the basin exists.
+	// If omitted when creating, uses the default location for the account.
+	// This cannot be changed.
 	Location *LocationName
 }
 
@@ -715,7 +713,6 @@ type ListStreamsArgs struct {
 	// It must not contain NUL bytes.
 	Prefix string `json:"prefix,omitempty"`
 	// Filter to streams whose names lexicographically start after this string.
-	// It must be greater than or equal to the `prefix` if specified.
 	// It must not contain NUL bytes.
 	StartAfter string `json:"start_after,omitempty"`
 	// Number of results, up to a maximum of 1000.

@@ -31,36 +31,17 @@ Report them, do not guess.
 
 ## How things map
 
-- Schema to Go type: same name, except the branded scalar renames:
-  `AccessTokenIdStr` to `AccessTokenID`, `BasinNameStr` to `BasinName`, `StreamNameStr` to
-  `StreamName`.
-- Property to Go field: match by the `json:"..."` tag (strip `,omitempty`), not the field
-  name. `id` becomes `ID`, `seq_num` becomes `SeqNum`, and so on.
-- Query param to Go field: list and metrics operations map to `…Args` structs. Match each
-  `in: query` parameter to the field by its JSON tag:
-  - `list_streams` to `ListStreamsArgs`
-  - `list_basins` to `ListBasinsArgs`
-  - `list_access_tokens` to `ListAccessTokensArgs`
-- Doc comparison: ignore line-wrapping. Go reflows comments across multiple `//` lines.
-  Compare the collapsed text, and only treat a real wording change as drift.
+- `internal/specsync/config.json` is the source of truth for schema renames, operation-to-Args
+  mappings, intentional skips, and accepted doc differences.
+- Properties and query parameters map to Go fields by the `json:"..."` tag, with
+  `,omitempty` ignored. The checker applies generic whitespace and Markdown normalization.
 
-## Intentional divergences: keep these, do not change them
+## Intentional divergences
 
-These are deliberate. If the only difference is one of the following, leave the Go doc as is:
-
-- `time.Time` fields drop "in RFC 3339 format". The spec says e.g. "Creation time in RFC
-  3339 format.". The SDK uses `time.Time`, so the Go doc is just "Creation time.".
-- `*bool` config fields. `BasinConfig.CreateStreamOnAppend` and `CreateStreamOnRead` are
-  `*bool` though the spec marks them plain `boolean`. The pointer distinguishes unset from
-  false.
-- Extra SDK guidance. `StartAfter` docs carry "It must be greater than or equal to the
-  `prefix` if specified.", which the spec omits.
-- Reshaped or hand-owned types, skip entirely: `Metric` (spec `oneOf`, modeled as a flat
-  struct), `Header` (spec `[2]string`, modeled as a struct), `SequencedRecord`,
-  `AppendRecord`, `AppendInput` (binary `[]byte` bodies), `GaugeMetric` and
-  `AccumulationMetric` tuple values, the four `*Reconfiguration` types (Clear* fields plus
-  custom MarshalJSON), and all `…Args`, `…Options`, and `…Response` types that have no
-  schema. Their docs are SDK-authored, not spec-derived.
+`internal/specsync/config.json` is the source of truth for deliberate differences. Record a
+wording difference as an `accepted` entry with the exact current spec and Go text and a reason.
+Record SDK-owned schemas and operations in the corresponding `skipTypes`, `ignoreSchemas`, or
+`ignoreOperations` map. Review those entries when the spec or SDK model changes.
 
 If you are unsure whether a divergence is intentional, ask before changing it.
 
@@ -74,17 +55,14 @@ If you are unsure whether a divergence is intentional, ask before changing it.
    Proto is only regenerated when `s2-specs/s2/v1/s2.proto` changes (`task gen`). An
    `openapi.json`-only change leaves `generated/` untouched.
 
-2. Diff docs. For each non-excluded schema, read the `description` for every property
-   (prefer the property description, then a `oneOf` branch description). Do the same for the
-   mapped query parameters. Compare against the matching Go field's doc comment, ignoring
-   wrapping.
+2. Run `task specsync:check`. It compares docs, fields, query parameters, enums, mappings,
+   and configured exceptions. Resolve genuine doc drift and investigate structural findings.
 
-3. Inject the spec wording for every genuine doc drift that is not one of the intentional
-   divergences above. Edit the `//` comment lines in `s2/types.go`. Keep the existing field
-   order, types, and tags. Re-wrap long comments to match the surrounding style.
+3. Inject the spec wording for every genuine doc drift that is not an accepted divergence.
+   Edit the relevant `//` comment lines. Keep field order, types, and tags unchanged.
 
-4. Flag structural drift (missing or extra fields, type or enum changes) in your summary and
-   ask how to handle it. Do not edit struct fields yourself.
+4. Do not edit structural drift automatically. Flag any unexplained field or enum changes
+   for a human decision.
 
 5. Verify:
    ```bash

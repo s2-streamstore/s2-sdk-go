@@ -14,6 +14,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # PRs opened with the default GITHUB_TOKEN don't trigger CI, so use the
+      # app token when it's available.
+      - name: Generate GitHub token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Checkout Repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,6 +72,7 @@ jobs:
         with:
           committer: s2-helper[bot] <194906454+s2-helper[bot]@users.noreply.github.com>
           author: s2-helper[bot] <194906454+s2-helper[bot]@users.noreply.github.com>
+          token: ${{ steps.app-token.outputs.token || github.token }}
           sign-commits: true
           title: "chore: update s2-specs to ${{ steps.submodules.outputs['s2-specs--latestShortCommitSha'] }}"
           branch: "specs/update-s2-specs-${{ steps.submodules.outputs['s2-specs--latestShortCommitSha'] }}"

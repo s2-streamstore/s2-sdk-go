@@ -41,6 +41,11 @@ tasks:
           echo "golangci-lint not installed; skip lint" >&2; \
         fi
 
+  specsync:check:
+    desc: "Check hand-written Go docs against the OpenAPI spec"
+    cmds:
+      - go run ./internal/specsync
+
   eg:
     desc: "Run an example. Usage: task eg NAME=readsession"
     requires:

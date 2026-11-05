@@ -1,0 +1,78 @@
+{
+  "spec": "s2-specs/s2/v1/openapi.json",
+  "goPackageDir": "s2",
+  "renames": {
+    "AccessTokenIdStr": "AccessTokenID",
+    "BasinNameStr": "BasinName",
+    "StreamNameStr": "StreamName",
+    "CreateBasinRequest": "CreateBasinArgs",
+    "CreateStreamRequest": "CreateStreamArgs",
+    "IssueAccessTokenRequest": "IssueAccessTokenArgs"
+  },
+  "operations": {
+    "list_streams": "ListStreamsArgs",
+    "list_basins": "ListBasinsArgs",
+    "list_access_tokens": "ListAccessTokensArgs",
+    "account_metrics": "AccountMetricsArgs",
+    "basin_metrics": "BasinMetricsArgs",
+    "stream_metrics": "StreamMetricsArgs"
+  },
+  "ignoreOperations": {
+    "read": "Read query parameters are modeled by ReadOptions rather than a query-Args struct."
+  },
+  "skipTypes": {
+    "Metric": "Spec oneOf is represented as a flat SDK struct.",
+    "Header": "Spec fixed-length string tuple is represented as a struct with byte slices.",
+    "SequencedRecord": "The SDK uses byte slices and applies stream-specific decoding.",
+    "AppendRecord": "The SDK uses byte slices and optional timestamp semantics.",
+    "AppendInput": "The SDK request shape exposes bytes and custom append behavior.",
+    "GaugeMetric": "Spec tuple values are represented by the SDK MetricSample type.",
+    "AccumulationMetric": "Spec tuple values are represented by the SDK MetricSample type.",
+    "BasinReconfiguration": "SDK clear-field flags and custom JSON marshaling are not spec properties.",
+    "StreamReconfiguration": "SDK clear-field flags and custom JSON marshaling are not spec properties.",
+    "DeleteOnEmptyReconfiguration": "SDK clear-field flags and custom JSON marshaling are not spec properties.",
+    "TimestampingReconfiguration": "SDK clear-field flags and custom JSON marshaling are not spec properties."
+  },
+  "ignoreSchemas": {
+    "AppendConditionFailed": "The SDK translates this wire error union into typed append errors rather than exposing the schema.",
+    "BasinState": "Not referenced by any schema or operation in the spec.",
+    "EnsureBasinRequest": "EnsureBasinArgs combines this body with its basin path parameter and therefore has an extra field.",
+    "FencingToken": "The SDK represents fencing tokens as ordinary strings within its SDK-owned append and error models.",
+    "Format": "The SDK's record API uses byte bodies and its protobuf transport rather than exposing the HTTP s2-format header.",
+    "PingEventData": "This is nested in the SDK-owned ReadEvent union; the Go read API exposes records and tails instead.",
+    "ReadEvent": "Read events are decoded into the SDK read stream API rather than modeled as a schema union.",
+    "RequestToken": "The SDK generates request tokens internally for idempotent retries instead of exposing the header value.",
+    "u64": "The SDK uses native integer fields instead of a dedicated scalar type."
+  },
+  "untypedEnums": {
+    "Operation": "Operation"
+  },
+  "formatPhrases": {
+    "date-time": [
+      " in RFC 3339 format"
+    ]
+  },
+  "accepted": [
+    {
+      "kind": "doc",
+      "target": "BasinConfig.StreamCipher",
+      "spec": "Encryption algorithm to apply to newly created streams in the basin.",
+      "go": "Encryption algorithm to apply to newly created streams in the basin. Appends and reads to encrypted streams require a client-supplied encryption key.",
+      "reason": "The Go docs add the client encryption-key requirement needed to use encrypted streams."
+    },
+    {
+      "kind": "doc",
+      "target": "CreateBasinArgs.Location",
+      "spec": "Basin location. If omitted when creating, uses the default location for the account.",
+      "go": "Basin location. If omitted when creating, uses the default location for the account. Use [LocationsClient.List] or [LocationsClient.GetDefault] to discover valid values.",
+      "reason": "Adds SDK discovery methods for valid location values."
+    },
+    {
+      "kind": "doc",
+      "target": "StreamConfig.StorageClass",
+      "spec": "[Storage class](https://s2.dev/docs/storage-classes) for recent writes.",
+      "go": "Storage class for recent writes. Discover available values with [LocationsClient.List].",
+      "reason": "The Go docs link to the SDK method callers use to discover available storage classes."
+    }
+  ]
+}
