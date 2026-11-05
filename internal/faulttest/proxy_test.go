@@ -1,7 +1,6 @@
 package faulttest
 
 import (
-	"context"
 	"crypto/tls"
 	"io"
 	"net"
@@ -12,15 +11,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 type faultProxy struct {
 	endpoint  string
 	upstream  *url.URL
-	transport *http2.Transport
+	transport *http.Transport
 	ops       int
 }
 
@@ -31,13 +27,16 @@ func newFaultProxy(t *testing.T, endpoint string, operations int) *faultProxy {
 		t.Fatal(err)
 	}
 	p := &faultProxy{upstream: u, ops: operations}
-	p.transport = &http2.Transport{AllowHTTP: true, DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-		if u.Scheme == "https" {
-			return (&tls.Dialer{Config: cfg}).DialContext(ctx, network, addr)
-		}
-		return (&net.Dialer{}).DialContext(ctx, network, addr)
-	}}
-	server := httptest.NewUnstartedServer(h2c.NewHandler(http.HandlerFunc(p.serveHTTP), &http2.Server{}))
+	protocols := new(http.Protocols)
+	protocols.SetHTTP2(true)
+	protocols.SetUnencryptedHTTP2(true)
+	p.transport = &http.Transport{Protocols: protocols, TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(p.serveHTTP))
+	serverProtocols := new(http.Protocols)
+	serverProtocols.SetHTTP1(true)
+	serverProtocols.SetHTTP2(true)
+	serverProtocols.SetUnencryptedHTTP2(true)
+	server.Config.Protocols = serverProtocols
 	var conns []net.Conn
 	var connMu sync.Mutex
 	server.Config.ConnState = func(conn net.Conn, state http.ConnState) {
