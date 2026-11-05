@@ -628,6 +628,16 @@ func TestCheckRules(t *testing.T) {
 			goSrc: goFile(),
 		},
 		{
+			name: "mapped operation without query params reports extra fields",
+			spec: operationSpec("get_widget", operationParameter("widget", "path", "")),
+			goSrc: goFile(goStruct("GetWidgetArgs", "",
+				goField("Widget", "string", "widget", ""),
+				goField("Other", "string", "other", ""),
+			)),
+			cfg:  Config{Operations: map[string]string{"get_widget": "GetWidgetArgs"}},
+			want: []string{"extra-field:GetWidgetArgs.Other"},
+		},
+		{
 			name: "typed enum values match",
 			spec: apiSpec(map[string]any{
 				"Color": map[string]any{"type": "string", "enum": []string{"red", "blue"}},

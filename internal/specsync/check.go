@@ -179,10 +179,10 @@ func (c *checker) checkOperations() {
 				pathParams[parameter.Name] = true
 			}
 		}
-		if len(queryParams) == 0 {
+		goName, mapped := c.cfg.Operations[operation.ID]
+		if len(queryParams) == 0 && !mapped {
 			continue
 		}
-		goName, mapped := c.cfg.Operations[operation.ID]
 		if !mapped {
 			if _, ignored := c.cfg.IgnoreOperations[operation.ID]; !ignored {
 				c.add(Finding{Kind: "unmapped-operation", Target: operation.ID, Pos: configPos + ":1"})
