@@ -19,7 +19,7 @@ func TestLocationsClientList(t *testing.T) {
 			t.Fatalf("unexpected URL: %s", req.URL.String())
 		}
 
-		return jsonResponse(http.StatusOK, "", `[{"name":"default","is_private":false},{"name":"private-a","is_private":true}]`), nil
+		return jsonResponse(http.StatusOK, "", `[{"name":"default","is_private":false},{"name":"private-a","is_private":true,"private_net":{"aws":{"service_name":"com.amazonaws.vpce.us-east-1.vpce-svc-0123456789abcdef0"}}}]`), nil
 	})
 
 	client := New("token", &ClientOptions{
@@ -39,6 +39,12 @@ func TestLocationsClientList(t *testing.T) {
 	}
 	if locations[1].Name != "private-a" || !locations[1].IsPrivate {
 		t.Fatalf("unexpected second location: %#v", locations[1])
+	}
+	if locations[0].PrivateNet != nil {
+		t.Fatalf("unexpected private_net on first location: %#v", locations[0].PrivateNet)
+	}
+	if pn := locations[1].PrivateNet; pn == nil || pn.Aws == nil || pn.Aws.ServiceName != "com.amazonaws.vpce.us-east-1.vpce-svc-0123456789abcdef0" {
+		t.Fatalf("unexpected private_net on second location: %#v", pn)
 	}
 }
 

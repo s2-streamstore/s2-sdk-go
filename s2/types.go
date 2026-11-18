@@ -203,6 +203,23 @@ type LocationInfo struct {
 	StorageClasses []string `json:"storage_classes,omitempty"`
 	// Default storage class for this location.
 	DefaultStorageClass *string `json:"default_storage_class,omitempty"`
+	// [Private networking](https://s2.dev/docs/platform/private-networking) details for the
+	// account in this location, which can differ between accounts.
+	// Omitted until the account has a basin in this location, and when the location cannot be
+	// reached over a private network.
+	PrivateNet *PrivateNet `json:"private_net,omitempty"`
+}
+
+// How the account can reach a location over a private network. Exactly one kind applies.
+// A kind this SDK version does not know leaves every field unset.
+type PrivateNet struct {
+	// AWS PrivateLink.
+	Aws *AwsPrivateNet `json:"aws,omitempty"`
+}
+
+type AwsPrivateNet struct {
+	// AWS PrivateLink endpoint service name, for creating a VPC endpoint.
+	ServiceName string `json:"service_name"`
 }
 
 type BasinConfig struct {

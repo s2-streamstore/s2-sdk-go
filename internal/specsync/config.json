@@ -73,6 +73,13 @@
     },
     {
       "kind": "doc",
+      "target": "PrivateNet",
+      "spec": "How the account can reach a location over a private network. Exactly one kind applies.",
+      "go": "How the account can reach a location over a private network. Exactly one kind applies. A kind this SDK version does not know leaves every field unset.",
+      "reason": "The Go docs describe how the flat struct represents a kind added by the service later."
+    },
+    {
+      "kind": "doc",
       "target": "PublicNetPolicy",
       "spec": "What a token may be used from over the public path. Exactly one kind applies.",
       "go": "What a token may be used from over the public path. Exactly one kind applies. A kind this SDK version does not know leaves every field unset.",
