@@ -20,6 +20,8 @@ type AccountMetricsArgs struct {
 	End *int64 `json:"end,omitempty"`
 	// Interval to aggregate over for timeseries metric sets.
 	Interval *TimeseriesInterval `json:"interval,omitempty"`
+	// Access token IDs, as a repeated parameter. Between 1 and 50 are required for the `token-activity` metric set.
+	TokenIDs []AccessTokenID `json:"token_id,omitempty"`
 }
 
 type BasinMetricsArgs struct {
@@ -67,7 +69,7 @@ func (m *MetricsClient) Account(ctx context.Context, args *AccountMetricsArgs) (
 	if err := validateMetricsInterval(args.Interval); err != nil {
 		return nil, err
 	}
-	return m.fetchMetrics(ctx, fmt.Sprintf("%s/metrics", m.client.baseURL), string(args.Set), args.Start, args.End, args.Interval)
+	return m.fetchMetrics(ctx, fmt.Sprintf("%s/metrics", m.client.baseURL), string(args.Set), args.Start, args.End, args.Interval, args.TokenIDs)
 }
 
 func (m *MetricsClient) Basin(ctx context.Context, args *BasinMetricsArgs) (*MetricSetResponse, error) {
@@ -87,7 +89,7 @@ func (m *MetricsClient) Basin(ctx context.Context, args *BasinMetricsArgs) (*Met
 		return nil, fmt.Errorf("basin storage metrics only support hour interval")
 	}
 	endpoint := fmt.Sprintf("%s/metrics/%s", m.client.baseURL, url.PathEscape(args.Basin))
-	return m.fetchMetrics(ctx, endpoint, string(args.Set), args.Start, args.End, args.Interval)
+	return m.fetchMetrics(ctx, endpoint, string(args.Set), args.Start, args.End, args.Interval, nil)
 }
 
 func (m *MetricsClient) Stream(ctx context.Context, args *StreamMetricsArgs) (*MetricSetResponse, error) {
@@ -114,10 +116,10 @@ func (m *MetricsClient) Stream(ctx context.Context, args *StreamMetricsArgs) (*M
 		url.PathEscape(args.Basin),
 		url.PathEscape(args.Stream),
 	)
-	return m.fetchMetrics(ctx, endpoint, string(args.Set), args.Start, args.End, args.Interval)
+	return m.fetchMetrics(ctx, endpoint, string(args.Set), args.Start, args.End, args.Interval, nil)
 }
 
-func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set string, start, end *int64, interval *TimeseriesInterval) (*MetricSetResponse, error) {
+func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set string, start, end *int64, interval *TimeseriesInterval, tokenIDs []AccessTokenID) (*MetricSetResponse, error) {
 	if set == "" {
 		return nil, fmt.Errorf("metrics set must be provided")
 	}
@@ -141,6 +143,9 @@ func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set s
 		}
 		if interval != nil && *interval != "" {
 			q.Set("interval", string(*interval))
+		}
+		for _, id := range tokenIDs {
+			q.Add("token_id", string(id))
 		}
 		req.URL.RawQuery = q.Encode()
 

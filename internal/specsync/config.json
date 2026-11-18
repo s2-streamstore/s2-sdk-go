@@ -7,12 +7,14 @@
     "StreamNameStr": "StreamName",
     "CreateBasinRequest": "CreateBasinArgs",
     "CreateStreamRequest": "CreateStreamArgs",
-    "IssueAccessTokenRequest": "IssueAccessTokenArgs"
+    "IssueAccessTokenRequest": "IssueAccessTokenArgs",
+    "CreateNetworkPolicyRequest": "CreateNetworkPolicyArgs"
   },
   "operations": {
     "list_streams": "ListStreamsArgs",
     "list_basins": "ListBasinsArgs",
     "list_access_tokens": "ListAccessTokensArgs",
+    "list_network_policies": "ListNetworkPoliciesArgs",
     "account_metrics": "AccountMetricsArgs",
     "basin_metrics": "BasinMetricsArgs",
     "stream_metrics": "StreamMetricsArgs"
@@ -37,11 +39,16 @@
     "AppendConditionFailed": "The SDK translates this wire error union into typed append errors rather than exposing the schema.",
     "BasinState": "Not referenced by any schema or operation in the spec.",
     "EnsureBasinRequest": "EnsureBasinArgs combines this body with its basin path parameter and therefore has an extra field.",
+    "Cidr": "The SDK represents CIDRs as ordinary strings within its network policy model.",
     "FencingToken": "The SDK represents fencing tokens as ordinary strings within its SDK-owned append and error models.",
     "Format": "The SDK's record API uses byte bodies and its protobuf transport rather than exposing the HTTP s2-format header.",
+    "NetworkPolicyRef": "The SDK represents network policy references as ordinary strings.",
+    "NetworkPolicySelector": "The SDK represents network policy selectors as ordinary strings.",
+    "NetworkPolicySlugStr": "The SDK represents network policy slugs as ordinary strings.",
     "PingEventData": "This is nested in the SDK-owned ReadEvent union; the Go read API exposes records and tails instead.",
     "ReadEvent": "Read events are decoded into the SDK read stream API rather than modeled as a schema union.",
     "RequestToken": "The SDK generates request tokens internally for idempotent retries instead of exposing the header value.",
+    "VpcEndpointId": "The SDK represents VPC endpoint IDs as ordinary strings within its network policy model.",
     "u64": "The SDK uses native integer fields instead of a dedicated scalar type."
   },
   "untypedEnums": {
@@ -53,6 +60,20 @@
     ]
   },
   "accepted": [
+    {
+      "kind": "doc",
+      "target": "PublicNetPolicy",
+      "spec": "What a token may be used from over the public path. Exactly one kind applies.",
+      "go": "What a token may be used from over the public path. Exactly one kind applies. A kind this SDK version does not know leaves every field unset.",
+      "reason": "The Go docs describe how the flat struct represents a kind added by the service later."
+    },
+    {
+      "kind": "doc",
+      "target": "PrivateNetPolicy",
+      "spec": "Private networks a token may be used through. Exactly one kind applies.",
+      "go": "Private networks a token may be used through. Exactly one kind applies. A kind this SDK version does not know leaves every field unset.",
+      "reason": "The Go docs describe how the flat struct represents a kind added by the service later."
+    },
     {
       "kind": "doc",
       "target": "BasinConfig.StreamCipher",
