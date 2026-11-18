@@ -47,6 +47,7 @@
     "NetworkPolicySlugStr": "The SDK represents network policy slugs as ordinary strings.",
     "PingEventData": "This is nested in the SDK-owned ReadEvent union; the Go read API exposes records and tails instead.",
     "ReadEvent": "Read events are decoded into the SDK read stream API rather than modeled as a schema union.",
+    "RecordMetric": "Token activity metrics are not modeled yet.",
     "RequestToken": "The SDK generates request tokens internally for idempotent retries instead of exposing the header value.",
     "VpcEndpointId": "The SDK represents VPC endpoint IDs as ordinary strings within its network policy model.",
     "u64": "The SDK uses native integer fields instead of a dedicated scalar type."
@@ -60,6 +61,16 @@
     ]
   },
   "accepted": [
+    {
+      "kind": "missing",
+      "target": "AccountMetricsArgs.token_id",
+      "reason": "Token activity metrics are not modeled yet."
+    },
+    {
+      "kind": "missing",
+      "target": "AccountMetricSet.token-activity",
+      "reason": "Token activity metrics are not modeled yet."
+    },
     {
       "kind": "doc",
       "target": "PublicNetPolicy",

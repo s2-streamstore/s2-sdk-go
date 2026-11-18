@@ -33,6 +33,7 @@ type checker struct {
 	findings      []Finding
 	docPairs      map[string]docPair
 	extraFields   map[string]bool
+	missing       map[string]bool
 	acceptedByKey map[string]Accepted
 }
 
@@ -45,6 +46,7 @@ func check(cfg Config, spec Spec, goSource GoSource) []Finding {
 		goSource:      goSource,
 		docPairs:      make(map[string]docPair),
 		extraFields:   make(map[string]bool),
+		missing:       make(map[string]bool),
 		acceptedByKey: make(map[string]Accepted),
 	}
 	for _, accepted := range cfg.Accepted {
@@ -302,6 +304,11 @@ func (c *checker) checkAccepted() {
 			if !valid {
 				c.configFinding("stale-config", "accepted."+accepted.Kind+"."+accepted.Target)
 			}
+		case "missing":
+			valid = c.missing[accepted.Target]
+			if !valid {
+				c.configFinding("stale-config", "accepted."+accepted.Kind+"."+accepted.Target)
+			}
 		default:
 			c.configFinding("stale-config", "accepted."+accepted.Kind+"."+accepted.Target)
 		}
@@ -338,6 +345,14 @@ func (c *checker) configFinding(kind, target string) {
 }
 
 func (c *checker) add(finding Finding) {
+	// Spec fields and enum values the SDK does not model yet can be deferred.
+	if finding.Kind == "missing-field" || (finding.Kind == "enum" && finding.Go == "") {
+		key := "missing\x00" + finding.Target
+		if _, accepted := c.acceptedByKey[key]; accepted {
+			c.missing[finding.Target] = true
+			return
+		}
+	}
 	c.findings = append(c.findings, finding)
 }
 

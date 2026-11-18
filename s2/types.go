@@ -65,7 +65,6 @@ const (
 	AccountMetricSetActiveBasins           AccountMetricSet = "active-basins"
 	AccountMetricSetAccountOps             AccountMetricSet = "account-ops"
 	AccountMetricSetEstimatedBillableUsage AccountMetricSet = "estimated-billable-usage"
-	AccountMetricSetTokenActivity          AccountMetricSet = "token-activity"
 )
 
 const (
@@ -476,17 +475,6 @@ type Metric struct {
 	Gauge *GaugeMetric `json:"gauge,omitempty"`
 	// Set of string labels.
 	Label *LabelMetric `json:"label,omitempty"`
-	// Named set of string attributes observed at a point in time.
-	Record *RecordMetric `json:"record,omitempty"`
-}
-
-type RecordMetric struct {
-	// Record name.
-	Name string `json:"name"`
-	// Timestamp of the record in Unix epoch seconds.
-	Timestamp uint32 `json:"timestamp"`
-	// Named string attributes of the record.
-	Fields map[string]string `json:"fields"`
 }
 
 type MetricSetResponse struct {
