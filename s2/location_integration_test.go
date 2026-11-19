@@ -2,6 +2,7 @@ package s2_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/s2-streamstore/s2-sdk-go/s2"
@@ -23,6 +24,10 @@ func TestLocations_List(t *testing.T) {
 	for _, location := range locations {
 		if location.Name == "" {
 			t.Fatalf("Expected non-empty location name: %#v", location)
+		}
+		// Only present where the account has a basin and the location can be reached privately.
+		if pn := location.PrivateNet; pn != nil && (pn.Aws == nil || !strings.HasPrefix(pn.Aws.ServiceName, "com.amazonaws.vpce.")) {
+			t.Fatalf("Unexpected private_net for %s: %#v", location.Name, pn)
 		}
 	}
 }
