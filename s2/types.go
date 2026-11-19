@@ -104,6 +104,8 @@ type AccessTokenInfo struct {
 	AutoPrefixStreams bool `json:"auto_prefix_streams,omitempty"`
 	// Expiration time.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// Network policy the token is restricted by, if any.
+	NetworkPolicy *string `json:"network_policy,omitempty"`
 }
 
 // Access token scope.
@@ -122,30 +124,34 @@ type AccessTokenScope struct {
 }
 
 const (
-	OperationListBasins         = "list-basins"
-	OperationCreateBasin        = "create-basin"
-	OperationDeleteBasin        = "delete-basin"
-	OperationReconfigureBasin   = "reconfigure-basin"
-	OperationGetBasinConfig     = "get-basin-config"
-	OperationIssueAccessToken   = "issue-access-token"
-	OperationRevokeAccessToken  = "revoke-access-token"
-	OperationListAccessTokens   = "list-access-tokens"
-	OperationListStreams        = "list-streams"
-	OperationCreateStream       = "create-stream"
-	OperationDeleteStream       = "delete-stream"
-	OperationGetStreamConfig    = "get-stream-config"
-	OperationReconfigureStream  = "reconfigure-stream"
-	OperationCheckTail          = "check-tail"
-	OperationAppend             = "append"
-	OperationRead               = "read"
-	OperationTrim               = "trim"
-	OperationFence              = "fence"
-	OperationAccountMetrics     = "account-metrics"
-	OperationBasinMetrics       = "basin-metrics"
-	OperationStreamMetrics      = "stream-metrics"
-	OperationListLocations      = "list-locations"
-	OperationGetDefaultLocation = "get-default-location"
-	OperationSetDefaultLocation = "set-default-location"
+	OperationListBasins          = "list-basins"
+	OperationCreateBasin         = "create-basin"
+	OperationDeleteBasin         = "delete-basin"
+	OperationReconfigureBasin    = "reconfigure-basin"
+	OperationGetBasinConfig      = "get-basin-config"
+	OperationIssueAccessToken    = "issue-access-token"
+	OperationRevokeAccessToken   = "revoke-access-token"
+	OperationListAccessTokens    = "list-access-tokens"
+	OperationListStreams         = "list-streams"
+	OperationCreateStream        = "create-stream"
+	OperationDeleteStream        = "delete-stream"
+	OperationGetStreamConfig     = "get-stream-config"
+	OperationReconfigureStream   = "reconfigure-stream"
+	OperationCheckTail           = "check-tail"
+	OperationAppend              = "append"
+	OperationRead                = "read"
+	OperationTrim                = "trim"
+	OperationFence               = "fence"
+	OperationAccountMetrics      = "account-metrics"
+	OperationBasinMetrics        = "basin-metrics"
+	OperationStreamMetrics       = "stream-metrics"
+	OperationListLocations       = "list-locations"
+	OperationGetDefaultLocation  = "get-default-location"
+	OperationSetDefaultLocation  = "set-default-location"
+	OperationListNetworkPolicies = "list-network-policies"
+	OperationCreateNetworkPolicy = "create-network-policy"
+	OperationGetNetworkPolicy    = "get-network-policy"
+	OperationDeleteNetworkPolicy = "delete-network-policy"
 )
 
 type ResourceSet struct {
@@ -648,6 +654,75 @@ type IssueAccessTokenArgs struct {
 	AutoPrefixStreams bool `json:"auto_prefix_streams,omitempty"`
 	// Expiration time. If not set, the expiration will be set to that of the requestor's token.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// Slug or full `<slug>.<nonce>` reference of a network policy to restrict the token by.
+	// A slug binds the token to the policy that currently holds it.
+	// If the requestor's token is itself restricted, this must be omitted or name the same
+	// policy, which the new token inherits.
+	NetworkPolicy string `json:"network_policy,omitempty"`
+}
+
+// What a token may be used from, per path. At least one of `public_net` and `private_net` must
+// be set.
+type NetworkPolicy struct {
+	// Governs requests arriving over the public path.
+	// When omitted, the token cannot be used over the public path.
+	PublicNet *PublicNetPolicy `json:"public_net,omitempty"`
+	// Governs requests arriving through a private network.
+	// When omitted, the token cannot be used through a private network.
+	PrivateNet *PrivateNetPolicy `json:"private_net,omitempty"`
+}
+
+// What a token may be used from over the public path. Exactly one kind applies.
+// A kind this SDK version does not know leaves every field unset.
+type PublicNetPolicy struct {
+	// Source addresses that may use the token. Between 1 and 32.
+	Cidrs []string `json:"cidrs,omitempty"`
+}
+
+// Private networks a token may be used through. Exactly one kind applies.
+// A kind this SDK version does not know leaves every field unset.
+type PrivateNetPolicy struct {
+	// AWS PrivateLink.
+	Aws *AwsPrivateNetPolicy `json:"aws,omitempty"`
+}
+
+type AwsPrivateNetPolicy struct {
+	// AWS VPC endpoint IDs through which the token may be used.
+	VpceIDs []string `json:"vpce_ids"`
+}
+
+type NetworkPolicyInfo struct {
+	// Full reference, `<slug>.<nonce>`, which access tokens are bound to.
+	ID string `json:"id"`
+	// Slug chosen at creation.
+	Slug string `json:"slug"`
+	// Creation time.
+	CreatedAt time.Time `json:"created_at"`
+	// The restriction.
+	Policy NetworkPolicy `json:"policy"`
+}
+
+type ListNetworkPoliciesArgs struct {
+	// Filter to policies whose slugs begin with this prefix.
+	Prefix string `json:"prefix,omitempty"`
+	// Filter to policies whose slugs lexicographically start after this string.
+	StartAfter string `json:"start_after,omitempty"`
+	// Number of results, up to a maximum of 1000.
+	Limit *int `json:"limit,omitempty"`
+}
+
+type ListNetworkPoliciesResponse struct {
+	// Matching network policies.
+	NetworkPolicies []NetworkPolicyInfo `json:"network_policies"`
+	// Indicates that there are more network policies that match the criteria.
+	HasMore bool `json:"has_more"`
+}
+
+type CreateNetworkPolicyArgs struct {
+	// Slug, unique to the account. Up to 96 characters of letters, digits, `-` and `_`.
+	Slug string `json:"slug"`
+	// The restriction. Policies are immutable; create a new one to change it.
+	Policy NetworkPolicy `json:"policy"`
 }
 
 type RevokeAccessTokenArgs struct {

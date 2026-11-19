@@ -242,6 +242,17 @@ You can create scoped tokens for your applications:
 	// Revoke
 	client.AccessTokens.Revoke(ctx, s2.RevokeAccessTokenArgs{ID: "my-service"})
 
+A network policy restricts where a token may be used from:
+
+	policy, err := client.NetworkPolicies.Create(ctx, s2.CreateNetworkPolicyArgs{
+		Slug: "office",
+		Policy: s2.NetworkPolicy{
+			PublicNet: &s2.PublicNetPolicy{Cidrs: []string{"203.0.113.0/24"}},
+		},
+	})
+
+	// Then set NetworkPolicy: policy.ID in IssueAccessTokenArgs.
+
 # Error Handling
 
 Errors from the SDK are typically [*S2Error] which includes the status code and

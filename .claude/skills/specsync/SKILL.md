@@ -40,6 +40,8 @@ Report them, do not guess.
 
 `internal/specsync/config.json` is the source of truth for deliberate differences. Record a
 wording difference as an `accepted` entry with the exact current spec and Go text and a reason.
+Record a spec field, query parameter, or enum value the SDK deliberately does not model yet as
+an `accepted` entry of kind `missing`; it turns stale once the SDK models it.
 Record SDK-owned schemas and operations in the corresponding `skipTypes`, `ignoreSchemas`, or
 `ignoreOperations` map. Review those entries when the spec or SDK model changes.
 

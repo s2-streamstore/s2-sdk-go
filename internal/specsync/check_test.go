@@ -562,6 +562,21 @@ func TestCheckRules(t *testing.T) {
 			want: []string{"stale-config:accepted.extra-field.Thing.Value"},
 		},
 		{
+			name: "accepted missing field becomes stale once modeled",
+			spec: apiSpec(map[string]any{
+				"Thing": objectSchema("", map[string]any{
+					"value": map[string]any{"type": "string"},
+					"later": map[string]any{"type": "string"},
+				}),
+			}, nil),
+			goSrc: goFile(goStruct("Thing", "", goField("Value", "string", "value", ""))),
+			cfg: Config{Accepted: []Accepted{
+				{Kind: "missing", Target: "Thing.later", Reason: "Not modeled yet."},
+				{Kind: "missing", Target: "Thing.value", Reason: "Not modeled yet."},
+			}},
+			want: []string{"stale-config:accepted.missing.Thing.value"},
+		},
+		{
 			name: "mapped query parameter matches",
 			spec: operationSpec("list_widgets", operationParameter("limit", "query", "Maximum results.")),
 			goSrc: goFile(goStruct("ListWidgetsArgs", "",
