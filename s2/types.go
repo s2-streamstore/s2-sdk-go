@@ -220,6 +220,10 @@ type PrivateNet struct {
 type AwsPrivateNet struct {
 	// AWS PrivateLink endpoint service name, for creating a VPC endpoint.
 	ServiceName string `json:"service_name"`
+	// Private DNS name of the endpoint service. With private DNS enabled on the VPC endpoint,
+	// it resolves to the endpoint, and can be used as the account endpoint so that account
+	// requests also go over PrivateLink.
+	PrivateDnsName *string `json:"private_dns_name,omitempty"`
 }
 
 type BasinConfig struct {
