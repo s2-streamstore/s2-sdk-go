@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.26.0] - 2026-11-22
+
+### Features
+
+- *(bentobox)* Page prefixed stream discovery across paced list calls ([#443](https://github.com/s2-streamstore/s2-sdk-go/issues/443))
+- Add OpenAPI doc drift check for package s2 ([#444](https://github.com/s2-streamstore/s2-sdk-go/issues/444))
+- Network policies ([#451](https://github.com/s2-streamstore/s2-sdk-go/issues/451))
+- Expose private networking details on locations ([#452](https://github.com/s2-streamstore/s2-sdk-go/issues/452))
+- Expose private DNS name for AWS PrivateLink on locations ([#455](https://github.com/s2-streamstore/s2-sdk-go/issues/455))
+
+### Bug Fixes
+
+- *(deps)* Require Go 1.26 and bump x/net, x/text, klauspost/compress ([#427](https://github.com/s2-streamstore/s2-sdk-go/issues/427))
+- *(deps)* Bump klauspost/compress to v1.20.5 for CVE-2026-116591 ([#458](https://github.com/s2-streamstore/s2-sdk-go/issues/458))
+
+### Miscellaneous Tasks
+
+- Pin GitHub Actions to latest stable release SHAs ([#445](https://github.com/s2-streamstore/s2-sdk-go/issues/445))
+
 ## [v0.25.0] - 2026-10-16
 
 ### Features
