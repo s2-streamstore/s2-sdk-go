@@ -22,6 +22,7 @@ type Batcher struct {
 	nextMatchSeqNum *uint64
 
 	batchesCh chan *BatchOutput
+	closeDone chan struct{}
 	ctx       context.Context
 	cancel    context.CancelFunc
 }
@@ -116,6 +117,7 @@ func NewBatcher(ctx context.Context, opts *BatchingOptions) *Batcher {
 	return &Batcher{
 		opts:            opts,
 		batchesCh:       make(chan *BatchOutput, opts.ChannelBuffer),
+		closeDone:       make(chan struct{}),
 		ctx:             batchCtx,
 		cancel:          cancel,
 		nextMatchSeqNum: nextMatchSeqNum,
@@ -134,6 +136,9 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 	if b.closed {
 		return ErrSessionClosed
 	}
+	if err := b.ctx.Err(); err != nil {
+		return err
+	}
 
 	cloned := cloneAppendRecords([]AppendRecord{record})
 	rec := cloned[0]
@@ -144,7 +149,9 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 	}
 
 	if len(b.buffer) > 0 && (len(b.buffer)+1 > b.opts.MaxRecords || b.bufferBytes+recordBytes > b.opts.MaxMeteredBytes) {
-		b.flushLocked()
+		if err := b.flushLocked(); err != nil {
+			return err
+		}
 	}
 
 	index := len(b.buffer)
@@ -156,7 +163,7 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 	}
 
 	if len(b.buffer) >= b.opts.MaxRecords || b.bufferBytes >= b.opts.MaxMeteredBytes {
-		b.flushLocked()
+		return b.flushLocked()
 	} else if b.opts.Linger > 0 && b.timer == nil {
 		b.timerSeq++
 		timerSeq := b.timerSeq
@@ -169,6 +176,23 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 }
 
 func (b *Batcher) flushLocked() error {
+	output := b.takeBatchLocked()
+	if output == nil {
+		return nil
+	}
+	if err := b.send(output); err != nil {
+		if b.closeErr == nil {
+			b.closeErr = err
+		}
+		return err
+	}
+	if b.nextMatchSeqNum != nil {
+		*b.nextMatchSeqNum += uint64(len(output.Input.Records))
+	}
+	return nil
+}
+
+func (b *Batcher) takeBatchLocked() *BatchOutput {
 	if len(b.buffer) == 0 {
 		return nil
 	}
@@ -199,19 +223,17 @@ func (b *Batcher) flushLocked() error {
 	meta := b.recordMeta
 	b.recordMeta = nil
 
+	return &BatchOutput{Input: input, recordMeta: meta}
+}
+
+func (b *Batcher) send(output *BatchOutput) error {
 	select {
-	case b.batchesCh <- &BatchOutput{Input: input, recordMeta: meta}:
-		if b.nextMatchSeqNum != nil {
-			*b.nextMatchSeqNum += uint64(len(records))
-		}
+	case b.batchesCh <- output:
 		return nil
 	case <-b.ctx.Done():
 		err := b.ctx.Err()
-		if b.closeErr == nil {
-			b.closeErr = err
-		}
-		releaseProducerPermits(meta)
-		for _, m := range meta {
+		releaseProducerPermits(output.recordMeta)
+		for _, m := range output.recordMeta {
 			m.resolve(&producerOutcome{err: err})
 		}
 		return err
@@ -256,7 +278,8 @@ func (b *Batcher) flushFromTimer(timerSeq uint64) {
 	b.mu.Unlock()
 }
 
-// Batches returns a receive-only channel of flushed batches.
+// Batches returns a receive-only channel of flushed batches. It is closed after
+// [Batcher.Close] once the final batch has been received.
 func (b *Batcher) Batches() <-chan *BatchOutput {
 	return b.batchesCh
 }
@@ -269,28 +292,55 @@ func (b *Batcher) Flush() {
 	b.mu.Unlock()
 }
 
+// Waits until the final batch is received or dropped and Batches is closed.
 func (b *Batcher) close() error {
+	b.startClose()
+	<-b.closeDone
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.closeErr
+}
+
+func (b *Batcher) startClose() {
 	b.mu.Lock()
 	if b.closed {
-		err := b.closeErr
 		b.mu.Unlock()
-		return err
+		return
 	}
 	b.closed = true
-	_ = b.flushLocked()
+	output := b.takeBatchLocked()
 	if b.timer != nil {
 		b.timer.Stop()
 		b.timer = nil
 	}
-	err := b.closeErr
 	b.mu.Unlock()
 
-	b.cancel()
-	close(b.batchesCh)
-	return err
+	// Send outside mu and off the caller's goroutine: the consumer may be the
+	// goroutine calling Close, or may have stopped draining.
+	go func() {
+		defer close(b.closeDone)
+		if output != nil {
+			if err := b.send(output); err != nil {
+				b.mu.Lock()
+				if b.closeErr == nil {
+					b.closeErr = err
+				}
+				b.mu.Unlock()
+			}
+		}
+		b.cancel()
+		close(b.batchesCh)
+	}()
 }
 
-// Flushes any remaining records and closes the batcher.
+// Flushes any remaining records and closes the batcher. Later calls to Add
+// fail.
+//
+// Close does not wait for the consumer. The final batch is sent on Batches in
+// the background, and Batches is closed after it is received. If nothing
+// drains Batches, canceling the context passed to [NewBatcher] drops the final
+// batch and closes the channel.
 func (b *Batcher) Close() {
-	_ = b.close()
+	b.startClose()
 }
