@@ -742,6 +742,9 @@ func (r *AppendSession) handOverOnAdvice(session *transportAppendSession) {
 	r.sessionMu.Lock()
 	if r.currentSession != session {
 		r.sessionMu.Unlock()
+		// An earlier handover may have found the request still referenced
+		// by an entry the pump then unmarked.
+		r.closeSessionIfUnused(session)
 		return
 	}
 	r.currentSession = nil
