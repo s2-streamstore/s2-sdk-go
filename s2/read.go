@@ -102,9 +102,17 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		streamConfig = opts.StreamConfig
 	}
 
+	client := s.basinClient.httpClient
+	if opts != nil && opts.Wait != nil && *opts.Wait > 0 && client.Timeout > 0 {
+		// A long poll may legitimately hold the response for up to wait.
+		extended := *client
+		extended.Timeout += time.Duration(*opts.Wait) * time.Second
+		client = &extended
+	}
+
 	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
 		httpClient := &httpClient{
-			client:      s.basinClient.httpClient,
+			client:      client,
 			baseURL:     s.basinClient.baseURL,
 			accessToken: s.basinClient.accessToken,
 			logger:      s.logger,
