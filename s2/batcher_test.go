@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -410,7 +411,7 @@ func TestBatcher_AddReportsRecordsDroppedOnCancel(t *testing.T) {
 // e.g. when the consumer is the goroutine calling Close, whether the pending
 // batch is still buffered or a linger flush is already waiting to send it. The
 // final batch must still be delivered once the consumer drains.
-func TestBatcher_CloseDoesNotBlockOnFullChannel(t *testing.T) {
+func TestBatcher_CloseWaitsForConsumerWithoutBlockingOthers(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		linger time.Duration
@@ -442,11 +443,25 @@ func TestBatcher_CloseDoesNotBlockOnFullChannel(t *testing.T) {
 				batcher.Close()
 				close(closed)
 			}()
+
+			added := make(chan error, 1)
+			go func() {
+				time.Sleep(20 * time.Millisecond)
+				added <- batcher.Add(AppendRecord{Body: []byte("c")}, nil)
+			}()
 			select {
-			case <-closed:
+			case err := <-added:
+				if !errors.Is(err, ErrSessionClosed) {
+					t.Fatalf("expected ErrSessionClosed from Add during Close, got %v", err)
+				}
 			case <-time.After(time.Second):
 				cancel()
-				t.Fatal("Close blocked on a full, undrained batch channel")
+				t.Fatal("Add blocked behind Close")
+			}
+			select {
+			case <-closed:
+				t.Fatal("Close returned before the final batch was received")
+			default:
 			}
 
 			var bodies []string
@@ -455,6 +470,7 @@ func TestBatcher_CloseDoesNotBlockOnFullChannel(t *testing.T) {
 					bodies = append(bodies, string(r.Body))
 				}
 			}
+			<-closed
 			if len(bodies) != 2 || bodies[0] != "a" || bodies[1] != "b" {
 				t.Fatalf("expected records [a b], got %q", bodies)
 			}

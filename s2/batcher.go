@@ -27,7 +27,6 @@ type Batcher struct {
 	// Batches may hold until the consumer drains.
 	closing   atomic.Bool
 	closeOnce sync.Once
-	closeDone chan struct{}
 	ctx       context.Context
 	cancel    context.CancelFunc
 }
@@ -122,7 +121,6 @@ func NewBatcher(ctx context.Context, opts *BatchingOptions) *Batcher {
 	return &Batcher{
 		opts:            opts,
 		batchesCh:       make(chan *BatchOutput, opts.ChannelBuffer),
-		closeDone:       make(chan struct{}),
 		ctx:             batchCtx,
 		cancel:          cancel,
 		nextMatchSeqNum: nextMatchSeqNum,
@@ -135,6 +133,10 @@ func (b *Batcher) Add(record AppendRecord, resultCh chan *producerOutcome) error
 }
 
 func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutcome, permit *producerPermit) error {
+	// Checked before mu, which a flush blocked on a full Batches may hold.
+	if b.closing.Load() {
+		return ErrSessionClosed
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -299,26 +301,19 @@ func (b *Batcher) Flush() {
 
 // Waits until the final batch is received or dropped and Batches is closed.
 func (b *Batcher) close() error {
-	b.startClose()
-	<-b.closeDone
+	b.closeOnce.Do(func() {
+		// Set before mu, which a flush blocked on a full Batches may hold, so
+		// that Add fails fast instead of queuing behind it.
+		b.closing.Store(true)
+		b.finishClose()
+	})
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.closeErr
 }
 
-// Runs off the caller's goroutine: the consumer may be the goroutine calling
-// Close, and a flush blocked on a full Batches holds mu until it drains.
-func (b *Batcher) startClose() {
-	b.closeOnce.Do(func() {
-		b.closing.Store(true)
-		go b.finishClose()
-	})
-}
-
 func (b *Batcher) finishClose() {
-	defer close(b.closeDone)
-
 	b.mu.Lock()
 	b.closed = true
 	output := b.takeBatchLocked()
@@ -341,13 +336,14 @@ func (b *Batcher) finishClose() {
 	close(b.batchesCh)
 }
 
-// Flushes any remaining records and closes the batcher. Later calls to Add
-// fail.
+// Flushes any remaining records and closes the batcher. Calls to Add after
+// Close starts fail.
 //
-// Close does not wait for the consumer. The final batch is sent on Batches in
-// the background, and Batches is closed after it is received. If nothing
-// drains Batches, canceling the context passed to [NewBatcher] drops the final
-// batch and closes the channel.
+// Close returns once the final batch has been received from Batches (or fits
+// in its buffer), and Batches is then closed. Close holds no lock while it
+// waits, so other calls do not block behind it. To abandon a batcher whose
+// consumer has stopped, cancel the context passed to [NewBatcher]: the final
+// batch is then dropped and Close returns.
 func (b *Batcher) Close() {
-	b.startClose()
+	_ = b.close()
 }
