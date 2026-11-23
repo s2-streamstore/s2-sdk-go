@@ -203,7 +203,7 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 					}, nil
 				}
 				status := http.StatusOK
-				var respBody io.ReadCloser = io.NopCloser(bytes.NewReader(nil))
+				respBody := io.NopCloser(bytes.NewReader(nil))
 				switch operation {
 				case "append session":
 					status = http.StatusInternalServerError
