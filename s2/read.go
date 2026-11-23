@@ -566,8 +566,17 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		}
 
 		if fr.err != nil {
-			if fr.err == io.EOF || isExpectedFrameReadError(fr.err) {
+			if fr.err == io.EOF && hasReadStopOption(opts) {
 				return nil
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			// The server ends a response cleanly only on a stop condition,
+			// so any other end means the connection was lost.
+			if fr.err == io.EOF || isExpectedFrameReadError(fr.err) {
+				logError(r.logger, "s2 read session response ended early", "stream", string(r.streamClient.name), "error", fr.err)
+				return makeConnectionLostError(fr.err, "read session")
 			}
 			logError(r.logger, "s2 read session frame error", "stream", string(r.streamClient.name), "error", fr.err)
 			return fmt.Errorf("read frame error: %w", fr.err)
@@ -697,6 +706,10 @@ func readBatchCaughtUp(batch *ReadBatch) bool {
 	}
 	n := len(batch.Records)
 	return n == 0 || batch.Records[n-1].SeqNum+1 == batch.Tail.SeqNum
+}
+
+func hasReadStopOption(opts *ReadOptions) bool {
+	return opts != nil && (opts.Count != nil || opts.Bytes != nil || opts.Until != nil || opts.Wait != nil)
 }
 
 func (r *streamReader) limitsReached() bool {

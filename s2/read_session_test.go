@@ -725,3 +725,41 @@ func TestReadSessionDeliversBufferedRecordsBeforeFatalError(t *testing.T) {
 		t.Fatalf("expected next read position %d, got %+v", batches, pos)
 	}
 }
+
+func TestReadSessionCleanEndRetriesWithoutStopOption(t *testing.T) {
+	tests := []struct {
+		name      string
+		opts      *ReadOptions
+		wantCalls int
+		wantErr   bool
+	}{
+		{name: "no stop option", opts: nil, wantCalls: 2, wantErr: true},
+		{name: "count", opts: &ReadOptions{Count: Uint64(10)}, wantCalls: 1},
+		{name: "wait", opts: &ReadOptions{Wait: Int32(5)}, wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt := &staticStatusRoundTripper{status: http.StatusOK}
+			session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), tt.opts)
+			if err != nil {
+				t.Fatalf("open read session: %v", err)
+			}
+			defer session.Close()
+
+			if session.Next() {
+				t.Fatal("unexpected record")
+			}
+			err = session.Err()
+			var s2Err *S2Error
+			if tt.wantErr && (!errors.As(err, &s2Err) || !s2Err.IsRetryable()) {
+				t.Fatalf("expected retryable connection error, got %v", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected session error: %v", err)
+			}
+			if rt.calls != tt.wantCalls {
+				t.Fatalf("expected %d requests, got %d", tt.wantCalls, rt.calls)
+			}
+		})
+	}
+}

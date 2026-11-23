@@ -9,8 +9,12 @@ import (
 	"time"
 
 	pb "github.com/s2-streamstore/s2-sdk-go/generated"
+	internalframing "github.com/s2-streamstore/s2-sdk-go/internal/framing"
 	"google.golang.org/protobuf/proto"
 )
+
+// readSessionEndFrame ends a read session response cleanly whatever its options.
+var readSessionEndFrame = internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK)
 
 const testStreamConfigHeader = `{"delete_on_empty":{"min_age_secs":300},"retention_policy":{"age":3600}}`
 
@@ -111,13 +115,13 @@ func TestReadSessionStreamConfigAcrossAttempts(t *testing.T) {
 			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				requests <- req
 				attempts++
-				status := http.StatusOK
+				status, body := http.StatusOK, readSessionEndFrame
 				if attempts == 1 {
-					status = http.StatusInternalServerError
+					status, body = http.StatusInternalServerError, nil
 				}
 				return &http.Response{
 					StatusCode: status,
-					Body:       io.NopCloser(bytes.NewReader(nil)),
+					Body:       io.NopCloser(bytes.NewReader(body)),
 					Header:     make(http.Header),
 					Request:    req,
 				}, nil
@@ -178,7 +182,10 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				headers <- req.Header.Get(s2StreamConfigHeader)
 				attempts++
-				status := http.StatusOK
+				status, body := http.StatusOK, []byte(nil)
+				if operation == "read session" {
+					body = readSessionEndFrame
+				}
 				if attempts == 1 {
 					*config.DeleteOnEmpty.MinAgeSecs = 600
 					*config.RetentionPolicy.Age = 7200
@@ -190,11 +197,11 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 					config.Timestamping.Mode = nil
 					config.Timestamping.Uncapped = nil
 					*config = StreamConfig{}
-					status = http.StatusInternalServerError
+					status, body = http.StatusInternalServerError, nil
 				}
 				return &http.Response{
 					StatusCode: status,
-					Body:       io.NopCloser(bytes.NewReader(nil)),
+					Body:       io.NopCloser(bytes.NewReader(body)),
 					Header:     make(http.Header),
 					Request:    req,
 				}, nil
