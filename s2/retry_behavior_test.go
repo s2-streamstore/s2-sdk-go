@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -275,6 +276,30 @@ func TestWithAppendRetries_NoSideEffectsNetworkError(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Fatalf("expected 1 attempt, got %d", attempts)
+	}
+}
+
+func dialRefusedError() error {
+	return &url.Error{Op: "Post", URL: "http://example.com", Err: &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}}
+}
+
+func TestWithAppendRetries_NoSideEffectsRetriesDialError(t *testing.T) {
+	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
+
+	attempts := 0
+	_, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, dialRefusedError()
+		}
+		return nil, serverError(429, "rate_limited")
+	})
+	if attempts != 2 {
+		t.Fatalf("expected the refused dial to be retried, got %d attempts", attempts)
+	}
+	// The refused dial sent nothing, so the final error stays definite.
+	if !HasNoSideEffects(err) {
+		t.Fatalf("expected a definite final error, got %v", err)
 	}
 }
 

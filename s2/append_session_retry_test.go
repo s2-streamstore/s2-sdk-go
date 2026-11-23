@@ -3,6 +3,7 @@ package s2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -1002,5 +1003,60 @@ func TestAppendSession_PersistentDrainExhaustsRetries(t *testing.T) {
 	}
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAppendSession_NoSideEffectsRetriesRefusedConnection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       2,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyNoSideEffects,
+	}
+	stream := newTestStreamClientForAppend(retryCfg)
+	writes := make(chan struct{}, 2)
+	transports := make(chan *transportAppendSession, 2)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		transport := newTransportSession(stream, &signalWriteCloser{signal: writes})
+		transports <- transport
+		return transport, nil
+	}
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	next := func() *transportAppendSession {
+		select {
+		case transport := <-transports:
+			<-writes
+			return transport
+		case <-ctx.Done():
+			t.Fatal("batch was not retried on a new request")
+			return nil
+		}
+	}
+	// The batch was handed to the request body, but the connection was
+	// refused, so none of it left the client.
+	next().reportError(fmt.Errorf("failed to connect: %w", dialRefusedError()))
+	next().acksCh <- &AppendAck{
+		Start: StreamPosition{SeqNum: 0},
+		End:   StreamPosition{SeqNum: 1},
+		Tail:  StreamPosition{SeqNum: 1},
+	}
+	if _, err := ticket.Ack(ctx); err != nil {
+		t.Fatalf("expected the batch to be retried after a refused connection, got %v", err)
 	}
 }

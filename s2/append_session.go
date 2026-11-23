@@ -844,8 +844,10 @@ func (r *AppendSession) handleClaimedSessionError(failedSession *transportAppend
 		"stream", string(r.streamClient.name),
 		"error", err)
 
-	// Every batch a draining server did not acknowledge was never processed.
-	if r.requiresNoSideEffectsRetries() && !draining {
+	// Every batch a draining server did not acknowledge was never processed,
+	// and nothing was sent on a request that never connected.
+	connectErr := isConnectError(err)
+	if r.requiresNoSideEffectsRetries() && !draining && !connectErr {
 		if !r.canRetryUnderNoSideEffects(failedSession, err) {
 			logError(r.streamClient.logger, "append session cannot retry under noSideEffects policy",
 				"stream", string(r.streamClient.name),
@@ -888,7 +890,9 @@ func (r *AppendSession) handleClaimedSessionError(failedSession *transportAppend
 	r.currentAttempt++
 	r.stateMu.Unlock()
 
-	r.markInflightUncertainty(failedSession, err)
+	if !connectErr {
+		r.markInflightUncertainty(failedSession, err)
+	}
 	r.resetInflightAttemptStarts()
 
 	r.scheduleRetry()
