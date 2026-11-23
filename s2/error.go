@@ -230,24 +230,16 @@ type RangeNotSatisfiableError struct {
 	Tail *StreamPosition
 }
 
-func newRangeNotSatisfiableError(status int, body []byte) *RangeNotSatisfiableError {
-	err := &RangeNotSatisfiableError{
+func newRangeNotSatisfiableError(status int, tail *StreamPosition) *RangeNotSatisfiableError {
+	return &RangeNotSatisfiableError{
 		S2Error: &S2Error{
 			Message: http.StatusText(status),
 			Status:  status,
 			Code:    "RANGE_NOT_SATISFIABLE",
 			Origin:  "server",
 		},
+		Tail: tail,
 	}
-	if len(body) > 0 {
-		var tailResp TailResponse
-		if json.Unmarshal(body, &tailResp) == nil {
-			err.Tail = &tailResp.Tail
-		} else {
-			err.Message = string(body)
-		}
-	}
-	return err
 }
 
 func (e *RangeNotSatisfiableError) Unwrap() error {
@@ -274,8 +266,15 @@ func decodeAPIError(status int, body []byte) error {
 		}
 	}
 
-	if status == http.StatusRequestedRangeNotSatisfiable {
-		return newRangeNotSatisfiableError(status, trimmed)
+	// A 416 without a tail is a plain server error: callers rely on Tail
+	// to reposition, so it must never be fabricated.
+	if status == http.StatusRequestedRangeNotSatisfiable && len(trimmed) > 0 {
+		var payload struct {
+			Tail *StreamPosition `json:"tail"`
+		}
+		if json.Unmarshal(trimmed, &payload) == nil && payload.Tail != nil {
+			return newRangeNotSatisfiableError(status, payload.Tail)
+		}
 	}
 
 	if len(trimmed) > 0 {
