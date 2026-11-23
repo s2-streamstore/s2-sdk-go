@@ -134,6 +134,9 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 	if b.closed {
 		return ErrSessionClosed
 	}
+	if err := b.ctx.Err(); err != nil {
+		return err
+	}
 
 	cloned := cloneAppendRecords([]AppendRecord{record})
 	rec := cloned[0]
@@ -144,7 +147,9 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 	}
 
 	if len(b.buffer) > 0 && (len(b.buffer)+1 > b.opts.MaxRecords || b.bufferBytes+recordBytes > b.opts.MaxMeteredBytes) {
-		b.flushLocked()
+		if err := b.flushLocked(); err != nil {
+			return err
+		}
 	}
 
 	index := len(b.buffer)
@@ -156,7 +161,7 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 	}
 
 	if len(b.buffer) >= b.opts.MaxRecords || b.bufferBytes >= b.opts.MaxMeteredBytes {
-		b.flushLocked()
+		return b.flushLocked()
 	} else if b.opts.Linger > 0 && b.timer == nil {
 		b.timerSeq++
 		timerSeq := b.timerSeq

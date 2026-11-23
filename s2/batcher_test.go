@@ -368,3 +368,40 @@ func TestBatcher_FlushOnCtxCancelDoesNotAdvanceSeqNum(t *testing.T) {
 		t.Fatalf("seq num advanced to %d for a batch that was never sent, want 1", got)
 	}
 }
+
+// Add must not report success for a record that was never emitted: when the
+// context is canceled while Add is blocked flushing into a full channel, the
+// batch is dropped and Add has to say so.
+func TestBatcher_AddReportsRecordsDroppedOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	batcher := NewBatcher(ctx, &BatchingOptions{
+		MaxRecords:    1,
+		Linger:        time.Hour,
+		ChannelBuffer: 1,
+	})
+	if err := batcher.Add(AppendRecord{Body: []byte("a")}, nil); err != nil {
+		t.Fatalf("add 1: %v", err)
+	}
+
+	addErr := make(chan error, 1)
+	go func() { addErr <- batcher.Add(AppendRecord{Body: []byte("b")}, nil) }()
+
+	// Let the second Add block on the full channel before canceling.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-addErr:
+		if err == nil {
+			t.Fatal("Add returned nil for a record dropped on cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Add did not return after cancellation")
+	}
+
+	if n := len(batcher.Batches()); n != 1 {
+		t.Fatalf("expected only the first batch emitted, got %d batches", n)
+	}
+}
