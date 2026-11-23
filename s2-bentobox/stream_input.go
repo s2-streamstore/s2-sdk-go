@@ -116,9 +116,17 @@ func (tam *toAckMap) MarkDone(ctx context.Context, records []s2.SequencedRecord,
 	return nil
 }
 
+// Satisfied by *s2.ReadSession.
+type readSession interface {
+	Next() bool
+	Record() s2.SequencedRecord
+	Err() error
+	Close() error
+}
+
 type streamInput struct {
 	Stream       string
-	session      *s2.ReadSession
+	session      readSession
 	cache        *seqNumCache
 	toAck        *toAckMap
 	nacks        chan []s2.SequencedRecord
@@ -126,6 +134,48 @@ type streamInput struct {
 	closeSession func()
 	closedCh     chan struct{}
 	closeOnce    sync.Once
+
+	// Fed by pump so ReadBatch can wait on records and nacks together.
+	records     chan s2.SequencedRecord
+	sessionDone chan struct{}
+	sessionErr  error
+}
+
+func newStreamInput(
+	stream string,
+	session readSession,
+	closeSession func(),
+	cache *seqNumCache,
+	gen uint64,
+	maxInflight int,
+	logger Logger,
+) *streamInput {
+	si := &streamInput{
+		Stream:       stream,
+		session:      session,
+		cache:        cache,
+		toAck:        newToAckMap(stream, cache, gen, logger),
+		nacks:        make(chan []s2.SequencedRecord, maxInflight),
+		Logger:       logger,
+		closeSession: closeSession,
+		closedCh:     make(chan struct{}),
+		records:      make(chan s2.SequencedRecord),
+		sessionDone:  make(chan struct{}),
+	}
+	go si.pump()
+	return si
+}
+
+func (si *streamInput) pump() {
+	defer close(si.sessionDone)
+	for si.session.Next() {
+		select {
+		case si.records <- si.session.Record():
+		case <-si.closedCh:
+			return
+		}
+	}
+	si.sessionErr = si.session.Err()
 }
 
 func connectStreamInput(
@@ -147,7 +197,7 @@ func connectStreamInput(
 	startSeqNum, err := cache.Get(ctx, stream)
 	// After Get, so a 416 racing in only raises the generation we capture and
 	// this session's own acks are never dropped as stale.
-	gen := cache.generation(stream)
+	gen := cache.sessionGeneration(stream)
 	if errors.Is(err, ErrNoCacheEntry) {
 		// No cache entry: use the configured default start position.
 		if inputStartSeqNum == InputStartSeqNumLatest {
@@ -173,16 +223,7 @@ func connectStreamInput(
 		return nil, err
 	}
 
-	return &streamInput{
-		Stream:       stream,
-		session:      session,
-		cache:        cache,
-		toAck:        newToAckMap(stream, cache, gen, logger),
-		nacks:        make(chan []s2.SequencedRecord, maxInflight),
-		Logger:       logger,
-		closeSession: closeSession,
-		closedCh:     make(chan struct{}),
-	}, nil
+	return newStreamInput(stream, session, closeSession, cache, gen, maxInflight, logger), nil
 }
 
 func (si *streamInput) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, AckFunc, error) {
@@ -202,17 +243,23 @@ func (si *streamInput) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, Ack
 	default:
 	}
 
-	// Try reading from session (blocking)
-	if si.session.Next() {
-		record := si.session.Record()
+	// Wait on nacks too: an idle session may not yield a record for a long
+	// time, and a nacked batch must not wait for one.
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	case <-si.closedCh:
+		return nil, nil, ErrInputClosed
+	case records := <-si.nacks:
+		return si.handleBatch(ctx, records)
+	case record := <-si.records:
 		return si.handleBatch(ctx, []s2.SequencedRecord{record})
+	case <-si.sessionDone:
+		if si.sessionErr != nil {
+			return nil, nil, si.sessionErr
+		}
+		return nil, nil, ErrInputClosed
 	}
-
-	if err := si.session.Err(); err != nil {
-		return nil, nil, err
-	}
-
-	return nil, nil, ErrInputClosed
 }
 
 func (si *streamInput) handleBatch(_ context.Context, records []s2.SequencedRecord) ([]s2.SequencedRecord, AckFunc, error) {

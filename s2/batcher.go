@@ -2,7 +2,9 @@ package s2
 
 import (
 	"context"
+	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,6 +24,10 @@ type Batcher struct {
 	nextMatchSeqNum *uint64
 
 	batchesCh chan *BatchOutput
+	// Set by Close before it takes mu, which a flush blocked on a full
+	// Batches may hold until the consumer drains.
+	closing   atomic.Bool
+	closeOnce sync.Once
 	ctx       context.Context
 	cancel    context.CancelFunc
 }
@@ -66,7 +72,7 @@ func (b *Batcher) shutdownCause() error {
 	if b.closeErr != nil {
 		return b.closeErr
 	}
-	if b.closed {
+	if b.closed || b.closing.Load() {
 		return ErrSessionClosed
 	}
 	if err := b.ctx.Err(); err != nil {
@@ -128,11 +134,18 @@ func (b *Batcher) Add(record AppendRecord, resultCh chan *producerOutcome) error
 }
 
 func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutcome, permit *producerPermit) error {
+	// Checked before mu, which a flush blocked on a full Batches may hold.
+	if b.closing.Load() {
+		return ErrSessionClosed
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.closed {
+	if b.closed || b.closing.Load() {
 		return ErrSessionClosed
+	}
+	if err := b.ctx.Err(); err != nil {
+		return err
 	}
 
 	cloned := cloneAppendRecords([]AppendRecord{record})
@@ -140,11 +153,17 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 
 	recordBytes := MeteredPayloadBytes(rec)
 	if recordBytes > b.opts.MaxMeteredBytes {
-		return &S2Error{Message: "record exceeds max batch bytes"}
+		return newValidationError("record exceeds max batch bytes")
+	}
+
+	if b.nextMatchSeqNum != nil && uint64(len(b.buffer))+1 > math.MaxUint64-*b.nextMatchSeqNum {
+		return newValidationError("match_seq_num would overflow uint64")
 	}
 
 	if len(b.buffer) > 0 && (len(b.buffer)+1 > b.opts.MaxRecords || b.bufferBytes+recordBytes > b.opts.MaxMeteredBytes) {
-		b.flushLocked()
+		if err := b.flushLocked(); err != nil {
+			return err
+		}
 	}
 
 	index := len(b.buffer)
@@ -156,7 +175,7 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 	}
 
 	if len(b.buffer) >= b.opts.MaxRecords || b.bufferBytes >= b.opts.MaxMeteredBytes {
-		b.flushLocked()
+		return b.flushLocked()
 	} else if b.opts.Linger > 0 && b.timer == nil {
 		b.timerSeq++
 		timerSeq := b.timerSeq
@@ -169,6 +188,23 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 }
 
 func (b *Batcher) flushLocked() error {
+	output := b.takeBatchLocked()
+	if output == nil {
+		return nil
+	}
+	if err := b.send(output); err != nil {
+		if b.closeErr == nil {
+			b.closeErr = err
+		}
+		return err
+	}
+	if b.nextMatchSeqNum != nil {
+		*b.nextMatchSeqNum += uint64(len(output.Input.Records))
+	}
+	return nil
+}
+
+func (b *Batcher) takeBatchLocked() *BatchOutput {
 	if len(b.buffer) == 0 {
 		return nil
 	}
@@ -199,19 +235,17 @@ func (b *Batcher) flushLocked() error {
 	meta := b.recordMeta
 	b.recordMeta = nil
 
+	return &BatchOutput{Input: input, recordMeta: meta}
+}
+
+func (b *Batcher) send(output *BatchOutput) error {
 	select {
-	case b.batchesCh <- &BatchOutput{Input: input, recordMeta: meta}:
-		if b.nextMatchSeqNum != nil {
-			*b.nextMatchSeqNum += uint64(len(records))
-		}
+	case b.batchesCh <- output:
 		return nil
 	case <-b.ctx.Done():
 		err := b.ctx.Err()
-		if b.closeErr == nil {
-			b.closeErr = err
-		}
-		releaseProducerPermits(meta)
-		for _, m := range meta {
+		releaseProducerPermits(output.recordMeta)
+		for _, m := range output.recordMeta {
 			m.resolve(&producerOutcome{err: err})
 		}
 		return err
@@ -256,7 +290,8 @@ func (b *Batcher) flushFromTimer(timerSeq uint64) {
 	b.mu.Unlock()
 }
 
-// Batches returns a receive-only channel of flushed batches.
+// Batches returns a receive-only channel of flushed batches. It is closed after
+// [Batcher.Close] once the final batch has been received.
 func (b *Batcher) Batches() <-chan *BatchOutput {
 	return b.batchesCh
 }
@@ -269,28 +304,51 @@ func (b *Batcher) Flush() {
 	b.mu.Unlock()
 }
 
+// Waits until the final batch is received or dropped and Batches is closed.
 func (b *Batcher) close() error {
+	b.closeOnce.Do(func() {
+		// Set before mu, which a flush blocked on a full Batches may hold, so
+		// that Add fails fast instead of queuing behind it.
+		b.closing.Store(true)
+		b.finishClose()
+	})
+
 	b.mu.Lock()
-	if b.closed {
-		err := b.closeErr
-		b.mu.Unlock()
-		return err
-	}
+	defer b.mu.Unlock()
+	return b.closeErr
+}
+
+func (b *Batcher) finishClose() {
+	b.mu.Lock()
 	b.closed = true
-	_ = b.flushLocked()
+	output := b.takeBatchLocked()
 	if b.timer != nil {
 		b.timer.Stop()
 		b.timer = nil
 	}
-	err := b.closeErr
 	b.mu.Unlock()
 
+	if output != nil {
+		if err := b.send(output); err != nil {
+			b.mu.Lock()
+			if b.closeErr == nil {
+				b.closeErr = err
+			}
+			b.mu.Unlock()
+		}
+	}
 	b.cancel()
 	close(b.batchesCh)
-	return err
 }
 
-// Flushes any remaining records and closes the batcher.
+// Flushes any remaining records and closes the batcher. Calls to Add after
+// Close starts fail.
+//
+// Close returns once the final batch has been received from Batches (or fits
+// in its buffer), and Batches is then closed. Close holds no lock while it
+// waits, so other calls do not block behind it. To abandon a batcher whose
+// consumer has stopped, cancel the context passed to [NewBatcher]: the final
+// batch is then dropped and Close returns.
 func (b *Batcher) Close() {
 	_ = b.close()
 }

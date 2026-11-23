@@ -31,6 +31,19 @@ func NewEncryptionKey(key string) (EncryptionKey, error) {
 	if normalized == "" || len(normalized) > maxEncryptionKeyHeaderValueLen {
 		return EncryptionKey{}, invalidEncryptionKeyLength(len(normalized))
 	}
+	// base64.StdEncoding.Decode silently skips CR and LF, which are invalid
+	// inside an HTTP header value.
+	if strings.ContainsAny(normalized, "\r\n") {
+		return EncryptionKey{}, newValidationError("invalid encryption key: not valid base64")
+	}
+	// Only the encoding is checked; the required key length depends on the
+	// stream's cipher, so the server validates it.
+	var decoded [maxEncryptionKeyHeaderValueLen]byte
+	n, err := base64.StdEncoding.Decode(decoded[:], []byte(normalized))
+	clear(decoded[:])
+	if err != nil || n == 0 {
+		return EncryptionKey{}, newValidationError("invalid encryption key: not valid base64")
+	}
 
 	material := newEncryptionKeyMaterial(len(normalized))
 	copy(material.encoded[:], normalized)

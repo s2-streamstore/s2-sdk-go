@@ -148,9 +148,16 @@ func calculateRetryBackoff(config *RetryConfig, attempt int) time.Duration {
 		maxBaseDelay = defaultMaxBaseDelay
 	}
 
-	// baseDelay = min((minBaseDelay * 2^(n-1)), maxBaseDelay)
-	baseDelay := minBaseDelay << (attempt - 1)                // minBaseDelay * 2^(attempt-1)
-	if baseDelay > maxBaseDelay || baseDelay < minBaseDelay { // overflow check
+	// baseDelay = min((minBaseDelay * 2^(n-1)), maxBaseDelay) without int64 shift overflow.
+	baseDelay := minBaseDelay
+	for range attempt - 1 {
+		if baseDelay >= maxBaseDelay || baseDelay > maxBaseDelay/2 {
+			baseDelay = maxBaseDelay
+			break
+		}
+		baseDelay *= 2
+	}
+	if baseDelay > maxBaseDelay {
 		baseDelay = maxBaseDelay
 	}
 
@@ -167,6 +174,13 @@ func isNetworkError(ctx context.Context, err error) bool {
 	}
 
 	if ctx.Err() != nil {
+		return false
+	}
+
+	// A response error raised inside RoundTrip (see userAgentRoundTripper)
+	// arrives wrapped in *url.Error, which is itself a net.Error.
+	var s2Err *S2Error
+	if errors.As(err, &s2Err) {
 		return false
 	}
 
@@ -218,14 +232,17 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 		lastError = err
 
 		if isNetworkError(ctx, err) {
-			if attemptNo == maxAttempts || !shouldRetryNetworkError(config) {
+			sentNothing := isConnectError(err)
+			if attemptNo == maxAttempts || (!sentNothing && !shouldRetryNetworkError(config)) {
 				logError(logger, "s2 append network error, max attempts exhausted or not retryable",
 					"attempts", maxAttempts,
 					"error", err)
 
 				break
 			}
-			priorUncertainty = true
+			if !sentNothing {
+				priorUncertainty = true
+			}
 			delay := calculateRetryBackoff(config, attemptNo)
 			logInfo(logger, "s2 append retrying after network error",
 				"attempt", attemptNo,
@@ -266,4 +283,29 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 
 func shouldRetryNetworkError(config *RetryConfig) bool {
 	return config.AppendRetryPolicy != AppendRetryPolicyNoSideEffects
+}
+
+// connectError marks an error from connection establishment (TCP dial, proxy
+// CONNECT, or TLS handshake) before any request bytes were sent (spec E3, T7a).
+type connectError struct {
+	err error
+}
+
+func (e *connectError) Error() string {
+	return e.err.Error()
+}
+
+func (e *connectError) Unwrap() error {
+	return e.err
+}
+
+// isConnectError reports whether err came from establishing a connection,
+// so no request bytes were sent and the attempt had no side effects.
+func isConnectError(err error) bool {
+	var connErr *connectError
+	if errors.As(err, &connErr) {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
 }

@@ -35,3 +35,7 @@ func (f *fakeAppendSession) Submit(input *AppendInput) (*SubmitFuture, error) {
 func (f *fakeAppendSession) Close() error {
 	return nil
 }
+
+func testBasinBaseURL(string) string {
+	return "http://basin.test"
+}

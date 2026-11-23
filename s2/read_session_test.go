@@ -46,12 +46,11 @@ func TestReadSessionDeliversRecordsInOrderAcrossBatches(t *testing.T) {
 		{SeqNum: 3, Body: []byte("d")},
 		{SeqNum: 4, Body: []byte("e")},
 	}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
 	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
 	streamClient := newFrameServedStreamClient(rt)
 
-	session, err := streamClient.ReadSession(context.Background(), nil)
+	session, err := streamClient.ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
 	if err != nil {
 		t.Fatalf("failed to open read session: %v", err)
 	}
@@ -83,12 +82,11 @@ func TestReadSessionIgnoreCommandRecordsSkipsDelivery(t *testing.T) {
 		{SeqNum: 1, Body: []byte("token"), Headers: []*pb.Header{{Name: nil, Value: []byte("fence")}}},
 		{SeqNum: 2, Body: []byte("b")},
 	}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
 	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
 	streamClient := newFrameServedStreamClient(rt)
 
-	session, err := streamClient.ReadSession(context.Background(), &ReadOptions{IgnoreCommandRecords: true})
+	session, err := streamClient.ReadSession(context.Background(), &ReadOptions{Wait: Int32(0), IgnoreCommandRecords: true})
 	if err != nil {
 		t.Fatalf("failed to open read session: %v", err)
 	}
@@ -208,7 +206,7 @@ func newRetryRead(t *testing.T, first, second []byte) *retryRead {
 		releaseSecond: r.releaseSecond,
 	}
 	var err error
-	r.session, err = newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
+	r.session, err = newFrameServedStreamClient(rt).ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
 	if err != nil {
 		t.Fatalf("open read session: %v", err)
 	}
@@ -381,10 +379,9 @@ func TestReadSessionCaughtUpAfterFinalRecord(t *testing.T) {
 		{SeqNum: 0, Body: []byte("a")},
 		{SeqNum: 1, Body: []byte("b")},
 	}, &pb.StreamPosition{SeqNum: 2, Timestamp: 42}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
 	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
-	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
 	if err != nil {
 		t.Fatalf("failed to open read session: %v", err)
 	}
@@ -449,9 +446,8 @@ func TestReadSessionCaughtUpAfterFinalRecord(t *testing.T) {
 }
 
 func TestReadSessionCleanEndClosesCaughtUpFutureWithoutNext(t *testing.T) {
-	body := internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK)
-	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body}
-	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
+	rt := &staticStatusRoundTripper{status: http.StatusOK}
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
 	if err != nil {
 		t.Fatalf("failed to open read session: %v", err)
 	}
@@ -467,7 +463,6 @@ func TestReadSessionCleanEndClosesCaughtUpFutureWithoutNext(t *testing.T) {
 func TestReadSessionFallsBehindOnGap(t *testing.T) {
 	var body bytes.Buffer
 	body.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{{SeqNum: 1}}, &pb.StreamPosition{SeqNum: 5}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
 	reader := &streamReader{
 		streamClient: newFrameServedStreamClient(&staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}),
@@ -475,7 +470,7 @@ func TestReadSessionFallsBehindOnGap(t *testing.T) {
 	}
 	reader.caughtUp.setCaughtUp(StreamPosition{SeqNum: 1})
 
-	if err := reader.runOnce(context.Background(), nil); err != nil {
+	if err := reader.runOnce(context.Background(), &ReadOptions{Wait: Int32(0)}); err != nil {
 		t.Fatalf("read batch: %v", err)
 	}
 	if reader.caughtUp.isCaughtUp() {
@@ -519,10 +514,9 @@ func TestReadSessionFatalErrorRejectsCaughtUpFutureWithoutNext(t *testing.T) {
 func TestReadSessionHeartbeatMarksCaughtUpWithoutRecords(t *testing.T) {
 	var body bytes.Buffer
 	body.Write(buildReadBatchFrameWithTail(t, nil, &pb.StreamPosition{SeqNum: 5, Timestamp: 99}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
 	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
-	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
 	if err != nil {
 		t.Fatalf("failed to open read session: %v", err)
 	}
@@ -557,10 +551,9 @@ func TestReadSessionCaughtUpTailAdvancesAfterFilteredBatch(t *testing.T) {
 	body.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
 		{SeqNum: 1, Body: []byte("token"), Headers: []*pb.Header{{Name: nil, Value: []byte("fence")}}},
 	}, &pb.StreamPosition{SeqNum: 2, Timestamp: 20}))
-	body.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
 	rt := &staticStatusRoundTripper{status: http.StatusOK, body: body.Bytes()}
-	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), &ReadOptions{IgnoreCommandRecords: true})
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), &ReadOptions{Wait: Int32(0), IgnoreCommandRecords: true})
 	if err != nil {
 		t.Fatalf("failed to open read session: %v", err)
 	}
@@ -606,7 +599,6 @@ func TestReadSessionRetryMarksBehindBeforeNextAttempt(t *testing.T) {
 	}, &pb.StreamPosition{SeqNum: 1, Timestamp: 10})
 	var second bytes.Buffer
 	second.Write(buildReadBatchFrameWithTail(t, nil, &pb.StreamPosition{SeqNum: 2, Timestamp: 20}))
-	second.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
 	read := newRetryRead(t, first, second.Bytes())
 
@@ -647,7 +639,6 @@ func TestReadSessionCaughtUpFutureStaysPendingAcrossRetry(t *testing.T) {
 	}, &pb.StreamPosition{SeqNum: 5, Timestamp: 10})
 	var second bytes.Buffer
 	second.Write(buildReadBatchFrameWithTail(t, nil, &pb.StreamPosition{SeqNum: 1, Timestamp: 20}))
-	second.Write(internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK))
 
 	read := newRetryRead(t, first, second.Bytes())
 	future := read.session.CaughtUp()
@@ -723,5 +714,464 @@ func TestReadSessionDeliversBufferedRecordsBeforeFatalError(t *testing.T) {
 	}
 	if pos := session.NextReadPosition(); pos == nil || pos.SeqNum != batches {
 		t.Fatalf("expected next read position %d, got %+v", batches, pos)
+	}
+}
+
+func TestReadSessionCleanEndRetriesWithoutStopOption(t *testing.T) {
+	tests := []struct {
+		name      string
+		opts      *ReadOptions
+		wantCalls int
+		wantErr   bool
+	}{
+		{name: "no stop option", opts: nil, wantCalls: 2, wantErr: true},
+		{name: "count", opts: &ReadOptions{Count: Uint64(10)}, wantCalls: 1},
+		{name: "wait", opts: &ReadOptions{Wait: Int32(5)}, wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt := &staticStatusRoundTripper{status: http.StatusOK}
+			session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), tt.opts)
+			if err != nil {
+				t.Fatalf("open read session: %v", err)
+			}
+			defer session.Close()
+
+			if session.Next() {
+				t.Fatal("unexpected record")
+			}
+			err = session.Err()
+			var s2Err *S2Error
+			if tt.wantErr && (!errors.As(err, &s2Err) || !s2Err.IsRetryable()) {
+				t.Fatalf("expected retryable connection error, got %v", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected session error: %v", err)
+			}
+			if rt.calls != tt.wantCalls {
+				t.Fatalf("expected %d requests, got %d", tt.wantCalls, rt.calls)
+			}
+		})
+	}
+}
+
+func TestReadSessionDecodesCompressedErrorResponse(t *testing.T) {
+	body, err := internalframing.Compress([]byte(`{"code":"invalid","message":"bad stream config"}`), internalframing.CompressionGzip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		header := make(http.Header)
+		header.Set("Content-Encoding", "gzip")
+		return &http.Response{
+			StatusCode: http.StatusUnprocessableEntity,
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Header:     header,
+			Request:    req,
+		}, nil
+	})
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("open read session: %v", err)
+	}
+	defer session.Close()
+
+	if session.Next() {
+		t.Fatal("unexpected record")
+	}
+	var s2Err *S2Error
+	if !errors.As(session.Err(), &s2Err) || s2Err.Code != "invalid" || s2Err.Message != "bad stream config" {
+		t.Fatalf("expected decoded server error, got %v", session.Err())
+	}
+}
+
+func TestReadSession_ProtocolErrorsDoNotRetry(t *testing.T) {
+	oversizedPayload := make([]byte, internalframing.MaxDecompressedSize+1)
+	oversizedGzip, err := internalframing.Compress(oversizedPayload, internalframing.CompressionGzip)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		status int
+		header http.Header
+		body   []byte
+	}{
+		{
+			name:   "oversized s2s frame header",
+			status: http.StatusOK,
+			body:   []byte{0xFF, 0xFF, 0xFF, 0x00},
+		},
+		{
+			name:   "terminal frame with 2xx status",
+			status: http.StatusOK,
+			body:   internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK),
+		},
+		{
+			name:   "invalid protobuf ReadBatch",
+			status: http.StatusOK,
+			body:   internalframing.CreateFrame([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, false, internalframing.CompressionNone),
+		},
+		{
+			name:   "oversized compressed frame",
+			status: http.StatusOK,
+			body:   internalframing.CreateFrame(oversizedPayload, false, internalframing.CompressionGzip),
+		},
+		{
+			name:   "oversized compressed 500 error response",
+			status: http.StatusInternalServerError,
+			header: http.Header{"Content-Encoding": {"gzip"}},
+			body:   oversizedGzip,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				hdr := make(http.Header)
+				if tt.header != nil {
+					hdr = tt.header.Clone()
+				}
+				return &http.Response{
+					StatusCode: tt.status,
+					Header:     hdr,
+					Body:       io.NopCloser(bytes.NewReader(tt.body)),
+					Request:    req,
+				}, nil
+			})
+			stream := newFrameServedStreamClient(rt)
+			stream.basinClient.retryConfig.MaxAttempts = 3
+
+			session, err := stream.ReadSession(context.Background(), nil)
+			if err != nil {
+				t.Fatalf("open read session: %v", err)
+			}
+			defer session.Close()
+
+			if session.Next() {
+				t.Fatal("unexpected record")
+			}
+			var s2Err *S2Error
+			if !errors.As(session.Err(), &s2Err) || s2Err.Code != protocolErrorCode || s2Err.IsRetryable() {
+				t.Fatalf("expected non-retryable PROTOCOL S2Error, got %v", session.Err())
+			}
+			if calls != 1 {
+				t.Fatalf("expected protocol error not to retry, got %d requests", calls)
+			}
+		})
+	}
+}
+
+func TestReadSession_ServerDrainingRespectsProgress(t *testing.T) {
+	t.Run("persistent drain without progress exhausts retries", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		calls := 0
+		rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			calls++
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"code":"server_draining","message":"draining"}`))),
+				Request:    req,
+			}, nil
+		})
+		stream := newFrameServedStreamClient(rt)
+		stream.basinClient.retryConfig.MaxAttempts = 3
+
+		session, err := stream.ReadSession(ctx, nil)
+		if err != nil {
+			t.Fatalf("open read session: %v", err)
+		}
+		defer session.Close()
+
+		if session.Next() {
+			t.Fatal("unexpected record")
+		}
+		if !isServerDraining(session.Err()) {
+			t.Fatalf("expected server_draining error, got %v", session.Err())
+		}
+		if calls != 3 {
+			t.Fatalf("expected 3 attempts, got %d", calls)
+		}
+	})
+
+	t.Run("drain after heartbeat hands over without spending retry budget", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		var firstBody bytes.Buffer
+		firstBody.Write(buildReadBatchFrameWithTail(t, nil, &pb.StreamPosition{SeqNum: 0, Timestamp: 10}))
+		firstBody.Write(internalframing.CreateFrameWithStatus(
+			[]byte(`{"code":"server_draining","message":"draining"}`),
+			true,
+			internalframing.CompressionNone,
+			http.StatusServiceUnavailable,
+		))
+
+		var secondBody bytes.Buffer
+		secondBody.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
+			{SeqNum: 0, Body: []byte("after-drain")},
+		}, &pb.StreamPosition{SeqNum: 1, Timestamp: 20}))
+
+		calls := 0
+		rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			calls++
+			body := secondBody.Bytes()
+			if calls == 1 {
+				body = firstBody.Bytes()
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(bytes.NewReader(body)),
+				Request:    req,
+			}, nil
+		})
+		stream := newFrameServedStreamClient(rt)
+		stream.basinClient.retryConfig.MaxAttempts = 1
+
+		session, err := stream.ReadSession(ctx, &ReadOptions{Wait: Int32(0)})
+		if err != nil {
+			t.Fatalf("open read session: %v", err)
+		}
+		defer session.Close()
+
+		if !session.Next() {
+			t.Fatalf("expected record after drain handover, err=%v", session.Err())
+		}
+		if got := string(session.Record().Body); got != "after-drain" {
+			t.Fatalf("expected record body %q, got %q", "after-drain", got)
+		}
+		if session.Next() {
+			t.Fatal("unexpected second record")
+		}
+		if err := session.Err(); err != nil {
+			t.Fatalf("unexpected error after handover: %v", err)
+		}
+		if calls != 2 {
+			t.Fatalf("expected 2 requests, got %d", calls)
+		}
+	})
+}
+
+func TestReadSessionResumesBySeqNumAfterResolvingStart(t *testing.T) {
+	var firstBody bytes.Buffer
+	firstBody.Write(buildReadBatchFrameWithTail(t, nil, &pb.StreamPosition{SeqNum: 10, Timestamp: 100}))
+	firstBody.Write(internalframing.CreateFrameWithStatus(
+		[]byte(`{"code":"server_draining","message":"draining"}`),
+		true, internalframing.CompressionNone, http.StatusServiceUnavailable,
+	))
+	var secondBody bytes.Buffer
+	secondBody.Write(buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
+		{SeqNum: 10, Body: []byte("r10")},
+	}, &pb.StreamPosition{SeqNum: 11, Timestamp: 110}))
+
+	var queries []string
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		queries = append(queries, req.URL.RawQuery)
+		b := secondBody.Bytes()
+		if len(queries) == 1 {
+			b = firstBody.Bytes()
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(b)),
+			Request:    req,
+		}, nil
+	})
+	stream := newFrameServedStreamClient(rt)
+	session, err := stream.ReadSession(context.Background(), &ReadOptions{
+		Timestamp: Uint64(99),
+		Clamp:     Bool(true),
+		Wait:      Int32(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	if !session.Next() || session.Record().SeqNum != 10 {
+		t.Fatalf("expected record 10, err=%v", session.Err())
+	}
+	if session.Next() {
+		t.Fatal("expected clean end")
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(queries))
+	}
+	if got := queries[1]; got != "seq_num=10&wait=0" {
+		t.Fatalf("expected resumed query %q (no timestamp/clamp), got %q", "seq_num=10&wait=0", got)
+	}
+}
+
+func TestReadSessionMaxAttemptsOneDoesNotRetryAfterProgress(t *testing.T) {
+	var firstBody bytes.Buffer
+	firstBody.Write(buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("a")}}))
+	firstBody.Write(internalframing.CreateFrameWithStatus(
+		[]byte(`{"code":"unavailable","message":"boom"}`),
+		true, internalframing.CompressionNone, http.StatusServiceUnavailable,
+	))
+	calls := 0
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(firstBody.Bytes())),
+			Request:    req,
+		}, nil
+	})
+	stream := newFrameServedStreamClient(rt)
+	stream.basinClient.retryConfig.MaxAttempts = 1
+
+	session, err := stream.ReadSession(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	if !session.Next() || session.Record().SeqNum != 0 {
+		t.Fatalf("expected record 0, err=%v", session.Err())
+	}
+	if session.Next() {
+		t.Fatal("unexpected second record")
+	}
+	if session.Err() == nil {
+		t.Fatal("expected 503 error when MaxAttempts=1")
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 attempt with MaxAttempts=1 even after progress, got %d", calls)
+	}
+}
+
+func TestReadSessionStopCondition416ClosesCleanly(t *testing.T) {
+	firstBody := buildReadBatchFrameWithTail(t, []*pb.SequencedRecord{
+		{SeqNum: 0, Body: []byte("a")},
+	}, &pb.StreamPosition{SeqNum: 5, Timestamp: 10})
+	failFirst := make(chan struct{})
+	calls := 0
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       newFailingReadBody(firstBody, failFirst),
+				Request:    req,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusRequestedRangeNotSatisfiable,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"tail":{"seq_num":5,"timestamp":50}}`))),
+			Request:    req,
+		}, nil
+	})
+	stream := newFrameServedStreamClient(rt)
+	session, err := stream.ReadSession(context.Background(), &ReadOptions{Count: Uint64(10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	future := session.CaughtUp()
+
+	if !session.Next() || session.Record().SeqNum != 0 {
+		t.Fatalf("expected record 0, err=%v", session.Err())
+	}
+	close(failFirst)
+	if session.Next() {
+		t.Fatal("expected clean stop on resumed 416")
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("expected nil error on stop-condition 416, got %v", err)
+	}
+	tail := waitCaughtUp(t, future)
+	if tail.SeqNum != 5 || tail.Timestamp != 50 {
+		t.Fatalf("expected caught_up tail 5/50, got %+v", tail)
+	}
+	if pos := session.NextReadPosition(); pos == nil || pos.SeqNum != 5 {
+		t.Fatalf("expected NextReadPosition 5, got %+v", pos)
+	}
+}
+
+func TestReadSessionCountExhaustedClosesWithoutNewRequest(t *testing.T) {
+	firstBody := buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("a")}})
+	failFirst := make(chan struct{})
+	calls := 0
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       newFailingReadBody(firstBody, failFirst),
+			Request:    req,
+		}, nil
+	})
+	stream := newFrameServedStreamClient(rt)
+	// With no retry budget left, only the stop condition can end this cleanly.
+	stream.basinClient.retryConfig.MaxAttempts = 1
+	session, err := stream.ReadSession(context.Background(), &ReadOptions{Count: Uint64(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	if !session.Next() || session.Record().SeqNum != 0 {
+		t.Fatalf("expected record 0, err=%v", session.Err())
+	}
+	close(failFirst)
+	if session.Next() {
+		t.Fatal("expected clean end after count reached")
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("expected nil error after count reached, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected no second request after count reached, got %d", calls)
+	}
+}
+
+func TestReadSessionHotServerRetiresConnection(t *testing.T) {
+	var dialCount int
+	var connIDs []int
+	pool := newSpreadTransport(func() http.RoundTripper {
+		dialCount++
+		id := dialCount
+		return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			connIDs = append(connIDs, id)
+			if len(connIDs) == 1 {
+				return &http.Response{
+					StatusCode: http.StatusBadGateway,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(bytes.NewReader([]byte(`{"code":"hot_server","message":"hot"}`))),
+					Request:    req,
+				}, nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(bytes.NewReader(buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("ok")}}))),
+				Request:    req,
+			}, nil
+		})
+	})
+	stream := newFrameServedStreamClient(pool)
+	session, err := stream.ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	if !session.Next() || session.Record().SeqNum != 0 {
+		t.Fatalf("expected record 0 after hot_server retry, err=%v", session.Err())
+	}
+	if len(connIDs) != 2 || connIDs[0] == connIDs[1] {
+		t.Fatalf("expected hot_server to retire connection and dial a fresh one, got connIDs=%v", connIDs)
 	}
 }

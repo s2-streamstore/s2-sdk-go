@@ -1,5 +1,7 @@
 package framing
 
+import "strings"
+
 // CompressionType describes the frame-level compression encoding used for payloads.
 type CompressionType uint8
 
@@ -21,17 +23,13 @@ func (c CompressionType) ContentEncoding() string {
 }
 
 // AcceptEncoding returns the Accept-Encoding header value advertising
-// algorithms the client can decode, or "" when the client opted out via
-// CompressionNone.
+// only the configured compression algorithm, or "" when CompressionNone is set.
 func (c CompressionType) AcceptEncoding() string {
-	if c == CompressionNone {
-		return ""
-	}
-	return "zstd, gzip"
+	return c.ContentEncoding()
 }
 
 func ParseContentEncoding(encoding string) CompressionType {
-	switch encoding {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "zstd":
 		return CompressionZstd
 	case "gzip":

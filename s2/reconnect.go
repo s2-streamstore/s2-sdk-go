@@ -43,3 +43,14 @@ func isServerDraining(err error) bool {
 		s2Err.Status == http.StatusServiceUnavailable &&
 		s2Err.Code == "server_draining"
 }
+
+func isHotServer(err error) bool {
+	var s2Err *S2Error
+	return errors.As(err, &s2Err) &&
+		s2Err.Status == http.StatusBadGateway &&
+		s2Err.Code == "hot_server"
+}
+
+func shouldRetireConnection(err error) bool {
+	return isServerDraining(err) || isHotServer(err)
+}

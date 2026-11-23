@@ -16,6 +16,12 @@ type MultiStreamInput struct {
 }
 
 func ConnectMultiStreamInput(ctx context.Context, config *InputConfig) (*MultiStreamInput, error) {
+	if config.Logger == nil {
+		cfg := *config
+		cfg.Logger = nopLogger{}
+		config = &cfg
+	}
+
 	client := newClient(config.Config)
 	basin := client.Basin(config.Basin)
 
@@ -95,15 +101,21 @@ func streamsManager(
 		}
 		existingWorkers[stream] = worker
 
+		connect := func(ctx context.Context) (recvBatchSource, error) {
+			input, err := connectStreamInput(ctx, basin, cache, config.Logger, stream, config.MaxInFlight, config.StartSeqNum)
+			if err != nil {
+				return nil, err
+			}
+			return input, nil
+		}
+
 		go streamSource(
 			workerCtx,
-			basin,
+			connect,
 			config.Logger,
 			cache,
 			stream,
-			config.MaxInFlight,
 			backoffDuration,
-			config.StartSeqNum,
 			inputStream,
 			workerCloser,
 		)
@@ -169,19 +181,21 @@ managerLoop:
 
 func streamSource(
 	ctx context.Context,
-	basin *s2.BasinClient,
+	connect func(context.Context) (recvBatchSource, error),
 	logger Logger,
 	cache *seqNumCache,
 	stream string,
-	maxInflight int,
 	backoffDuration time.Duration,
-	inputStartSeqNum InputStartSeqNum,
 	inputStream chan<- recvOutput,
 	closer chan<- struct{},
 ) {
 	defer close(closer)
 
 	var backoff <-chan time.Time
+	startBackoff := func() {
+		jitter := time.Duration(rand.Int63n(int64(10 * time.Millisecond)))
+		backoff = time.After(backoffDuration + jitter)
+	}
 
 	for {
 		if backoff != nil {
@@ -199,17 +213,18 @@ func streamSource(
 		default:
 		}
 
-		input, err := connectStreamInput(ctx, basin, cache, logger, stream, maxInflight, inputStartSeqNum)
+		input, err := connect(ctx)
 		if err != nil {
 			logger.With("error", err, "stream", stream).Error("Failed to connect, retrying.")
-
-			jitter := time.Duration(rand.Int63n(int64(10 * time.Millisecond)))
-			backoff = time.After(backoffDuration + jitter)
-
+			startBackoff()
 			continue
 		}
 
-		streamSourceRecvLoop(ctx, input, cache, stream, inputStream, logger)
+		// Read sessions connect lazily, so failures surface here rather than
+		// from connect.
+		if failed := streamSourceRecvLoop(ctx, input, cache, stream, inputStream, logger); failed {
+			startBackoff()
+		}
 	}
 }
 
@@ -220,6 +235,8 @@ type recvBatchSource interface {
 	Close(ctx context.Context) error
 }
 
+// Reports whether the session ended on a read error, so the caller backs off
+// before reconnecting.
 func streamSourceRecvLoop(
 	ctx context.Context,
 	input recvBatchSource,
@@ -227,13 +244,13 @@ func streamSourceRecvLoop(
 	stream string,
 	inputStream chan<- recvOutput,
 	logger Logger,
-) {
+) bool {
 	defer input.Close(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		default:
 		}
 
@@ -242,7 +259,7 @@ func streamSourceRecvLoop(
 			if errors.Is(err, ErrInputClosed) {
 				logger.With("stream", stream).Debug("Restarting source")
 
-				return
+				return false
 			}
 
 			var rangeErr *s2.RangeNotSatisfiableError
@@ -256,22 +273,22 @@ func streamSourceRecvLoop(
 					logger.With("stream", stream, "error", setErr).
 						Error("Failed to durably reset cached sequence number after 416")
 				}
-				return
+				return false
 			}
 
 			select {
 			case inputStream <- recvOutput{Stream: stream, Err: err}:
 			case <-ctx.Done():
-				return
+				return false
 			}
 
-			return
+			return true
 		}
 
 		select {
 		case inputStream <- recvOutput{Stream: stream, Batch: batch, AckFunc: aFn}:
 		case <-ctx.Done():
-			return
+			return false
 		}
 	}
 }

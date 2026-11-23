@@ -242,15 +242,28 @@ batcher := s2.NewBatcher(ctx, &s2.BatchingOptions{
     Linger:      5 * time.Millisecond,
     MatchSeqNum: s2.Ptr(uint64(0)),
 })
-defer batcher.Close()
+
+// Consume batches concurrently; Batches is closed once the batcher is closed
+// and its final batch has been received.
+done := make(chan struct{})
+go func() {
+    defer close(done)
+    for batch := range batcher.Batches() {
+        // Send batch.Input to append session
+        if _, err := session.Submit(batch.Input); err != nil {
+            log.Printf("submit: %v", err)
+        }
+    }
+}()
 
 // Add records
 err := batcher.Add(s2.AppendRecord{Body: []byte("hello")}, nil)
 
-// Consume batches
-for batch := range batcher.Batches() {
-    // Send batch.Input to append session
-    session.Submit(batch.Input)
+// Flush remaining records, then wait for the consumer to drain them
+batcher.Close()
+<-done
+if err != nil {
+    return err
 }
 ```
 

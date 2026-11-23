@@ -1,6 +1,9 @@
 package s2
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestEndpointTemplate_DefaultsToV1(t *testing.T) {
 	template, err := newEndpointTemplate("aws.s2.dev:8443")
@@ -98,15 +101,25 @@ func TestEndpointTemplate_IPv6WithoutPort(t *testing.T) {
 	}
 }
 
-func TestEndpointTemplate_QueryParamsPreserved(t *testing.T) {
-	template, err := newEndpointTemplate("https://aws.s2.dev?foo=bar")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got := template.baseURL("")
-	want := "https://aws.s2.dev?foo=bar"
-	if got != want {
-		t.Fatalf("expected %q, got %q", want, got)
+func TestEndpointTemplate_RejectsInvalidEndpoints(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://aws.s2.dev?foo=bar",
+		"https://aws.s2.dev/v1?",
+		"https://aws.s2.dev#frag",
+		"aws.s2.dev/v1#",
+		"https://user:pass@aws.s2.dev",
+		"https://aws.s2.dev:0",
+		"localhost:65536",
+		"https://",
+		"http://example.com:",
+		"http://[not-ipv6]",
+		"ftp://example.com",
+	} {
+		_, err := newEndpointTemplate(endpoint)
+		var s2Err *S2Error
+		if !errors.As(err, &s2Err) || s2Err.Code != "VALIDATION" {
+			t.Errorf("%q: expected validation error, got %v", endpoint, err)
+		}
 	}
 }
 

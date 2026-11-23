@@ -1,12 +1,18 @@
 package s2
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	internalframing "github.com/s2-streamstore/s2-sdk-go/internal/framing"
 )
 
 type signalWriteCloser struct {
@@ -697,6 +703,54 @@ func TestAppendSession_NoSideEffectsRetriesWhenEffectNotSignalled(t *testing.T) 
 	}
 }
 
+// Canceling the session context aborts it. A batch already written to the
+// server may have been applied, so its error must not claim no side effects.
+func TestAppendSession_AbortReportsSentBatchAsIndefinite(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
+	stream := newTestStreamClientForAppend(retryCfg)
+	writeSignal := make(chan struct{}, 1)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		return newTransportSession(stream, &signalWriteCloser{signal: writeSignal}), nil
+	}
+
+	sessionCtx, abort := context.WithCancel(ctx)
+	session, err := stream.AppendSession(sessionCtx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("append session failed: %v", err)
+	}
+	defer session.Close()
+
+	future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+	if err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait failed: %v", err)
+	}
+	select {
+	case <-writeSignal:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the batch to be written")
+	}
+
+	abort()
+
+	_, err = ticket.Ack(ctx)
+	if err == nil {
+		t.Fatal("expected ack error after abort")
+	}
+	if !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("expected error to match ErrSessionClosed, got %v", err)
+	}
+	if HasNoSideEffects(err) {
+		t.Fatalf("sent batch reported as side-effect free after abort: %v", err)
+	}
+}
+
 func TestAppendSession_NoSideEffectsNoRetryWithNonIdempotentSentPipeline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -798,11 +852,20 @@ func TestAppendSession_HandleSessionErrorIsIdempotentAcrossConcurrentCalls(t *te
 		t.Fatalf("AppendSession: %v", err)
 	}
 	defer session.Close()
+	defer session.pumpCancel()
 
 	failed := newTransportSession(stream, &signalWriteCloser{})
 	session.sessionMu.Lock()
 	session.currentSession = failed
 	session.sessionMu.Unlock()
+	// An idle session's failure uses no budget, so give it a batch.
+	session.inflightMu.Lock()
+	session.inflightQueue = append(session.inflightQueue, &inflightEntry{
+		input:         &AppendInput{Records: []AppendRecord{{Body: []byte("x")}}},
+		expectedCount: 1,
+		resultCh:      make(chan *inflightResult, 1),
+	})
+	session.inflightMu.Unlock()
 
 	const callers = 8
 	var wg sync.WaitGroup
@@ -950,5 +1013,260 @@ func TestAppendSession_WriteUnblockedByTerminalErrorUsesServerError(t *testing.T
 	session.stateMu.RUnlock()
 	if attempt != 0 {
 		t.Fatalf("non-retryable terminal error should not consume a retry attempt, got %d", attempt)
+	}
+}
+
+func TestAppendSession_PersistentDrainExhaustsRetries(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       3,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}
+	stream := newTestStreamClientForAppend(retryCfg)
+	var requests atomic.Int32
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		requests.Add(1)
+		transport := newTransportSession(stream, &signalWriteCloser{})
+		transport.reportError(&S2Error{Status: 503, Code: "server_draining", Origin: "server"})
+		return transport, nil
+	}
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ticket.Ack(ctx); !isServerDraining(err) {
+		t.Fatalf("expected the drain error once retries ran out, got %v", err)
+	}
+	if got := requests.Load(); got != int32(retryCfg.MaxAttempts) {
+		t.Fatalf("expected %d requests, got %d", retryCfg.MaxAttempts, got)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAppendSession_NoSideEffectsRetriesRefusedConnection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       2,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyNoSideEffects,
+	}
+	stream := newTestStreamClientForAppend(retryCfg)
+	writes := make(chan struct{}, 2)
+	transports := make(chan *transportAppendSession, 2)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		transport := newTransportSession(stream, &signalWriteCloser{signal: writes})
+		transports <- transport
+		return transport, nil
+	}
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	next := func() *transportAppendSession {
+		select {
+		case transport := <-transports:
+			<-writes
+			return transport
+		case <-ctx.Done():
+			t.Fatal("batch was not retried on a new request")
+			return nil
+		}
+	}
+	// The batch was handed to the request body, but the connection was
+	// refused, so none of it left the client.
+	next().reportError(fmt.Errorf("failed to connect: %w", dialRefusedError()))
+	next().acksCh <- &AppendAck{
+		Start: StreamPosition{SeqNum: 0},
+		End:   StreamPosition{SeqNum: 1},
+		Tail:  StreamPosition{SeqNum: 1},
+	}
+	if _, err := ticket.Ack(ctx); err != nil {
+		t.Fatalf("expected the batch to be retried after a refused connection, got %v", err)
+	}
+}
+
+func TestAppendSession_ProtocolErrorsDoNotRetry(t *testing.T) {
+	oversizedPayload := make([]byte, internalframing.MaxDecompressedSize+1)
+	oversizedGzip, err := internalframing.Compress(oversizedPayload, internalframing.CompressionGzip)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		status int
+		header http.Header
+		body   []byte
+	}{
+		{
+			name:   "oversized s2s frame header",
+			status: http.StatusOK,
+			body:   []byte{0xFF, 0xFF, 0xFF, 0x00},
+		},
+		{
+			name:   "terminal frame with 2xx status",
+			status: http.StatusOK,
+			body:   internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK),
+		},
+		{
+			name:   "invalid protobuf AppendAck",
+			status: http.StatusOK,
+			body:   internalframing.CreateFrame([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, false, internalframing.CompressionNone),
+		},
+		{
+			name:   "oversized compressed ack frame",
+			status: http.StatusOK,
+			body:   internalframing.CreateFrame(oversizedPayload, false, internalframing.CompressionGzip),
+		},
+		{
+			name:   "oversized compressed 500 error response",
+			status: http.StatusInternalServerError,
+			header: http.Header{"Content-Encoding": {"gzip"}},
+			body:   oversizedGzip,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			var requests atomic.Int32
+			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests.Add(1)
+				if req.Body != nil {
+					go func() {
+						_, _ = io.Copy(io.Discard, req.Body)
+						_ = req.Body.Close()
+					}()
+				}
+				hdr := make(http.Header)
+				if tt.header != nil {
+					hdr = tt.header.Clone()
+				}
+				return &http.Response{
+					StatusCode: tt.status,
+					Header:     hdr,
+					Body:       io.NopCloser(bytes.NewReader(tt.body)),
+					Request:    req,
+				}, nil
+			})
+
+			retryCfg := &RetryConfig{
+				MaxAttempts:       3,
+				MinBaseDelay:      time.Millisecond,
+				MaxBaseDelay:      time.Millisecond,
+				AppendRetryPolicy: AppendRetryPolicyAll,
+			}
+			basin := &BasinClient{
+				baseURL:     "http://example.com/v1",
+				accessToken: "token",
+				retryConfig: retryCfg,
+			}
+			basin.client = &Client{streamingClient: &http.Client{Transport: rt}}
+			stream := &StreamClient{name: StreamName("test"), basinClient: basin}
+
+			session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+
+			future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ticket, err := future.Wait(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = ticket.Ack(ctx)
+			var s2Err *S2Error
+			if !errors.As(err, &s2Err) || s2Err.Code != protocolErrorCode || s2Err.IsRetryable() {
+				t.Fatalf("expected non-retryable PROTOCOL S2Error, got %v", err)
+			}
+			if got := requests.Load(); got != 1 {
+				t.Fatalf("expected protocol error not to retry, got %d requests", got)
+			}
+		})
+	}
+}
+
+func TestAppendSession_OverlappingAckIsProtocolError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
+	stream := newTestStreamClientForAppend(retryCfg)
+	writes := make(chan struct{}, 4)
+	transports := make(chan *transportAppendSession, 1)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		tr := newTransportSession(stream, &signalWriteCloser{signal: writes})
+		transports <- tr
+		return tr, nil
+	}
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	f1, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("a")}, {Body: []byte("b")}, {Body: []byte("c")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := f1.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := <-transports
+	<-writes
+	tr.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 0}, End: StreamPosition{SeqNum: 3}}
+	if _, err := t1.Ack(ctx); err != nil {
+		t.Fatalf("first ack failed: %v", err)
+	}
+
+	f2, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("d")}, {Body: []byte("e")}, {Body: []byte("f")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t2, err := f2.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-writes
+	// [2, 5) overlaps the earlier [0, 3).
+	tr.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 2}, End: StreamPosition{SeqNum: 5}}
+	_, err = t2.Ack(ctx)
+	var s2Err *S2Error
+	if !errors.As(err, &s2Err) || s2Err.Code != protocolErrorCode {
+		t.Fatalf("expected PROTOCOL error on overlapping ack, got %v", err)
 	}
 }

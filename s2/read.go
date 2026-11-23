@@ -86,9 +86,25 @@ func buildReadQueryParams(opts *ReadOptions) string {
 	return params.Encode()
 }
 
+func validateReadOptions(opts *ReadOptions) error {
+	if opts == nil {
+		return nil
+	}
+	if opts.TailOffset != nil && *opts.TailOffset < 0 {
+		return newValidationError("tail_offset must be non-negative")
+	}
+	if opts.Wait != nil && *opts.Wait < 0 {
+		return newValidationError("wait must be non-negative")
+	}
+	return nil
+}
+
 func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := validateReadOptions(opts); err != nil {
+		return nil, err
 	}
 
 	queryParams := buildReadQueryParams(opts)
@@ -98,13 +114,23 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 	}
 
 	var streamConfig *StreamConfig
+	ignoreCommandRecords := false
 	if opts != nil {
-		streamConfig = opts.StreamConfig
+		streamConfig = cloneStreamConfigPtr(opts.StreamConfig)
+		ignoreCommandRecords = opts.IgnoreCommandRecords
+	}
+
+	client := s.basinClient.httpClient
+	if opts != nil && opts.Wait != nil && *opts.Wait > 0 && client.Timeout > 0 {
+		// A long poll may legitimately hold the response for up to wait.
+		extended := *client
+		extended.Timeout += time.Duration(*opts.Wait) * time.Second
+		client = &extended
 	}
 
 	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
 		httpClient := &httpClient{
-			client:      s.basinClient.httpClient,
+			client:      client,
 			baseURL:     s.basinClient.baseURL,
 			accessToken: s.basinClient.accessToken,
 			logger:      s.logger,
@@ -132,7 +158,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		return nil, fmt.Errorf("unary read failed: %w", err)
 	}
 
-	if opts != nil && opts.IgnoreCommandRecords {
+	if ignoreCommandRecords {
 		batch.filterCommandRecords()
 	}
 
@@ -163,16 +189,19 @@ type streamReader struct {
 
 	baseOpts *ReadOptions
 
-	stateMu    sync.RWMutex
-	lastTail   *StreamPosition
-	lastTailAt time.Time
-	nextSeq    uint64
-	nextTS     uint64
-	hasNextSeq bool
+	stateMu          sync.RWMutex
+	lastTail         *StreamPosition
+	lastTailAt       time.Time
+	nextSeq          uint64
+	nextTS           uint64
+	hasNextSeq       bool
+	hasLastRecordSeq bool
+	lastRecordSeq    uint64
 
 	respBody    io.ReadCloser
 	bodyMu      sync.Mutex
 	recordsRead uint64
+	batchesRead uint64
 	bytesRead   uint64
 	retryConfig *RetryConfig
 	logger      *slog.Logger
@@ -183,6 +212,9 @@ type streamReader struct {
 func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (*streamReader, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := validateReadOptions(opts); err != nil {
+		return nil, err
 	}
 
 	var retryCfg *RetryConfig
@@ -247,6 +279,7 @@ func (r *streamReader) run() {
 
 		logInfo(r.logger, "s2 read session attempt", "stream", string(r.streamClient.name), "attempt", consecutiveFailures+1)
 
+		batchesBefore := r.batchesRead
 		recordsBefore := r.recordsRead
 
 		tailCtx, tailCancel := context.WithCancel(r.ctx)
@@ -254,14 +287,26 @@ func (r *streamReader) run() {
 		tailCancel()
 
 		if err == nil {
+			// Spec R11c: if a resumed request sent a reduced wait, fetched at
+			// least one record, has not exhausted count/bytes, and still has
+			// remaining wait > 0, continue on a new request without backoff.
+			if r.shouldContinueAfterReducedWait(opts, r.recordsRead > recordsBefore) {
+				nextOpts := r.buildAttemptOptions(0)
+				if nextOpts != nil && nextOpts.Wait != nil && *nextOpts.Wait > 0 {
+					consecutiveFailures = 0
+					opts = nextOpts
+					continue
+				}
+			}
 			return
 		}
 		if ctxErr := r.ctx.Err(); ctxErr != nil {
 			return
 		}
 
-		// Delivered records forgive earlier failures, including on handovers.
-		if r.recordsRead > recordsBefore {
+		// Any received batch or heartbeat resets the retry budget (spec T5a).
+		progressed := r.batchesRead > batchesBefore
+		if progressed {
 			consecutiveFailures = 0
 		}
 
@@ -283,22 +328,28 @@ func (r *streamReader) run() {
 			continue
 		}
 
-		if isServerDraining(err) {
+		// A drain is a planned handover only if the request made progress;
+		// otherwise it counts as a retry, so a server that keeps draining
+		// exhausts the budget instead of being redialed forever (spec T6).
+		// Drains do not consume the reconnect-advice rate-limit bucket (spec T6a).
+		if isServerDraining(err) && progressed {
 			if r.limitsReached() {
 				return
 			}
-			r.advisedReconnects.record(time.Now())
 			r.caughtUp.setBehind()
 			logInfo(r.logger, "s2 read session reconnecting while server drains",
-				"stream", string(r.streamClient.name),
-				"advised_reconnects", r.advisedReconnects.count)
+				"stream", string(r.streamClient.name))
 			opts = r.buildAttemptOptions(0)
 			continue
 		}
 
-		if r.recordsRead == recordsBefore {
-			consecutiveFailures++
+		// Spec R11c: if count or bytes was already exhausted after fetching
+		// records, close cleanly rather than opening another request.
+		if r.recordsRead > 0 && r.limitsReached() && isRetryableReadError(r.ctx, err) {
+			return
 		}
+
+		consecutiveFailures++
 
 		if !isRetryableReadError(r.ctx, err) || consecutiveFailures >= maxAttempts {
 			if r.ctx.Err() == nil {
@@ -321,8 +372,8 @@ func (r *streamReader) run() {
 		// A new connection must report a tail before the session is caught up.
 		r.caughtUp.setBehind()
 
-		// consecutiveFailures is a 0-based count; convert to 1-based attempt number
-		delay := calculateRetryBackoff(cfg, consecutiveFailures+1)
+		// consecutiveFailures is 1-based after the increment above (attempt 1 -> 2^0).
+		delay := calculateRetryBackoff(cfg, consecutiveFailures)
 		opts = r.buildAttemptOptions(delay)
 
 		logInfo(r.logger, "s2 read session retrying",
@@ -389,6 +440,7 @@ func (r *streamReader) buildAttemptOptions(plannedDelay time.Duration) *ReadOpti
 		opts.SeqNum = &seq
 		opts.Timestamp = nil
 		opts.TailOffset = nil
+		opts.Clamp = nil
 	}
 
 	if r.baseOpts != nil {
@@ -489,11 +541,14 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		logError(r.logger, "s2 read session connect error", "stream", string(r.streamClient.name), "error", err)
 		return fmt.Errorf("failed to connect: %w", err)
 	}
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		logError(r.logger, "s2 read session http status", "stream", string(r.streamClient.name), "status", resp.StatusCode)
 		err := parseHTTPError(resp)
-		if isServerDraining(err) {
+		if shouldRetireConnection(err) {
 			capture.poison()
+		}
+		if handled, stopErr := r.handleStopCondition416(ctx, opts, err); handled {
+			return stopErr
 		}
 		return err
 	}
@@ -558,8 +613,21 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		}
 
 		if fr.err != nil {
-			if fr.err == io.EOF || isExpectedFrameReadError(fr.err) {
+			if fr.err == io.EOF && hasReadStopOption(opts) {
 				return nil
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			// The server ends a response cleanly only on a stop condition,
+			// so any other end means the connection was lost.
+			if fr.err == io.EOF || isExpectedFrameReadError(fr.err) {
+				logError(r.logger, "s2 read session response ended early", "stream", string(r.streamClient.name), "error", fr.err)
+				return makeConnectionLostError(fr.err, "read session")
+			}
+			if errors.Is(fr.err, internalframing.ErrMalformedFrame) {
+				logError(r.logger, "s2 read session malformed frame", "stream", string(r.streamClient.name), "error", fr.err)
+				return makeProtocolError(fr.err, "read session frame")
 			}
 			logError(r.logger, "s2 read session frame error", "stream", string(r.streamClient.name), "error", fr.err)
 			return fmt.Errorf("read frame error: %w", fr.err)
@@ -568,20 +636,26 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		body, err := fr.frame.DecompressedBody()
 		if err != nil {
 			logError(r.logger, "s2 read session frame decompress error", "stream", string(r.streamClient.name), "error", err)
-			return err
+			return makeProtocolError(err, "read session frame decompression")
 		}
 
 		if fr.frame.Terminal {
-			if fr.frame.StatusCode != nil && *fr.frame.StatusCode >= 400 {
-				logError(r.logger, "s2 read session terminal error", "stream", string(r.streamClient.name), "status", *fr.frame.StatusCode)
-				err := decodeAPIError(*fr.frame.StatusCode, body)
-				if isServerDraining(err) {
-					capture.poison()
-				}
-				return err
+			if fr.frame.StatusCode == nil || *fr.frame.StatusCode < 300 || *fr.frame.StatusCode > 599 {
+				logError(r.logger, "s2 read session invalid terminal status", "stream", string(r.streamClient.name), "status", formatTerminalStatus(fr.frame.StatusCode))
+				return makeProtocolError(
+					fmt.Errorf("terminal frame status out of range: %s", formatTerminalStatus(fr.frame.StatusCode)),
+					"read session terminal frame",
+				)
 			}
-			logInfo(r.logger, "s2 read session terminal ok", "stream", string(r.streamClient.name), "status", fr.frame.StatusCode)
-			return nil
+			logError(r.logger, "s2 read session terminal error", "stream", string(r.streamClient.name), "status", *fr.frame.StatusCode)
+			err := decodeAPIError(*fr.frame.StatusCode, body)
+			if shouldRetireConnection(err) {
+				capture.poison()
+			}
+			if handled, stopErr := r.handleStopCondition416(ctx, opts, err); handled {
+				return stopErr
+			}
+			return err
 		}
 
 		batch, err := parseReadBatch(body)
@@ -594,37 +668,51 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		if batch.Tail != nil {
 			logInfo(r.logger, "s2 read session batch tail", "stream", string(r.streamClient.name), "seq_num", batch.Tail.SeqNum)
 			r.stateMu.Lock()
-			r.lastTailAt = time.Now()
-			r.lastTail = batch.Tail
+			if r.lastTailAt.IsZero() {
+				r.lastTailAt = time.Now()
+			}
+			if r.lastTail == nil || batch.Tail.SeqNum >= r.lastTail.SeqNum {
+				r.lastTail = batch.Tail
+			}
 			r.stateMu.Unlock()
 		}
 
 		caughtUp := readBatchCaughtUp(batch)
 
 		var next *StreamPosition
-		if n := len(batch.Records); n > 0 {
-			last := batch.Records[n-1]
-			next = &StreamPosition{SeqNum: last.SeqNum + 1, Timestamp: last.Timestamp}
-		} else if batch.Tail != nil {
-			// An empty batch with a tail resolves a relative or timestamp start.
-			next = &StreamPosition{SeqNum: batch.Tail.SeqNum, Timestamp: batch.Tail.Timestamp}
-		}
-
 		if len(batch.Records) > 0 {
+			r.stateMu.RLock()
+			prevHas := r.hasLastRecordSeq
+			prevSeq := r.lastRecordSeq
+			r.stateMu.RUnlock()
+
 			// Snapshot full-batch accounting before filtering: limits and the
 			// resume position must reflect every record read, including command
 			// records that are filtered out of delivery.
 			recordCount := uint64(len(batch.Records))
 			var meteredBytes uint64
 			for _, record := range batch.Records {
+				if prevHas && record.SeqNum <= prevSeq {
+					return makeProtocolError(
+						fmt.Errorf("read session record seq_num %d is not greater than previous %d", record.SeqNum, prevSeq),
+						"read session record ordering",
+					)
+				}
+				prevHas = true
+				prevSeq = record.SeqNum
 				meteredBytes += MeteredSequencedRecordBytes(record)
 			}
 			last := batch.Records[len(batch.Records)-1]
+			next = &StreamPosition{SeqNum: last.SeqNum + 1, Timestamp: last.Timestamp}
 			r.advanceState(recordCount, meteredBytes, last)
 
 			if r.baseOpts != nil && r.baseOpts.IgnoreCommandRecords {
 				batch.filterCommandRecords()
 			}
+		} else if batch.Tail != nil {
+			// An empty batch with a tail resolves a relative or timestamp start (spec R7a, R11b).
+			pos := r.advanceStateFromTail(batch.Tail)
+			next = &pos
 		}
 
 		hasRecords := len(batch.Records) > 0
@@ -633,6 +721,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		}
 
 		if next != nil {
+			r.batchesRead++
 			delivery := readDelivery{records: batch.Records, next: next}
 			if caughtUp {
 				delivery.caughtUpTail = batch.Tail
@@ -663,7 +752,101 @@ func (r *streamReader) advanceState(recordCount, meteredBytes uint64, last Seque
 	r.nextSeq = last.SeqNum + 1
 	r.hasNextSeq = true
 	r.nextTS = last.Timestamp
+	r.hasLastRecordSeq = true
+	r.lastRecordSeq = last.SeqNum
+	r.lastTailAt = time.Now()
 	r.stateMu.Unlock()
+}
+
+func (r *streamReader) advanceStateFromTail(tail *StreamPosition) StreamPosition {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	if !r.hasNextSeq || tail.SeqNum > r.nextSeq {
+		r.nextSeq = tail.SeqNum
+		r.nextTS = tail.Timestamp
+		r.hasNextSeq = true
+	}
+	return StreamPosition{SeqNum: r.nextSeq, Timestamp: r.nextTS}
+}
+
+func (r *streamReader) shouldContinueAfterReducedWait(attemptOpts *ReadOptions, fetchedRecord bool) bool {
+	if !fetchedRecord || r.baseOpts == nil || r.baseOpts.Wait == nil {
+		return false
+	}
+	if attemptOpts == nil || attemptOpts.Wait == nil || *attemptOpts.Wait >= *r.baseOpts.Wait {
+		return false
+	}
+	return !r.limitsReached()
+}
+
+func formatTerminalStatus(status *int) string {
+	if status == nil {
+		return "<missing>"
+	}
+	return strconv.Itoa(*status)
+}
+
+func hasNoWaitRemaining(opts *ReadOptions) bool {
+	if opts == nil {
+		return false
+	}
+	if opts.Wait != nil {
+		return *opts.Wait == 0
+	}
+	return opts.Count != nil || opts.Bytes != nil || opts.Until != nil
+}
+
+// handleStopCondition416 implements spec R11d: once the start has been resolved,
+// a resumed request with no wait remaining that receives 416 closes cleanly
+// unless the 416 carries a tail behind the requested seq_num.
+func (r *streamReader) handleStopCondition416(ctx context.Context, opts *ReadOptions, err error) (bool, error) {
+	var s2Err *S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != http.StatusRequestedRangeNotSatisfiable {
+		return false, nil
+	}
+	r.stateMu.RLock()
+	resolved := r.hasNextSeq
+	r.stateMu.RUnlock()
+	if !resolved || !hasNoWaitRemaining(opts) {
+		return false, nil
+	}
+	var tailPtr *StreamPosition
+	var rangeErr *RangeNotSatisfiableError
+	if errors.As(err, &rangeErr) {
+		tailPtr = rangeErr.Tail
+	}
+	if tailPtr != nil && opts != nil && opts.SeqNum != nil && tailPtr.SeqNum < *opts.SeqNum {
+		return false, nil
+	}
+	if tailPtr != nil {
+		tail := *tailPtr
+		r.stateMu.Lock()
+		if r.lastTail == nil || tail.SeqNum >= r.lastTail.SeqNum {
+			tailCopy := tail
+			r.lastTail = &tailCopy
+		}
+		if !r.hasNextSeq || tail.SeqNum > r.nextSeq {
+			r.nextSeq = tail.SeqNum
+			r.nextTS = tail.Timestamp
+			r.hasNextSeq = true
+		}
+		nextSeq := r.nextSeq
+		nextTS := r.nextTS
+		r.stateMu.Unlock()
+
+		delivery := readDelivery{
+			next: &StreamPosition{SeqNum: nextSeq, Timestamp: nextTS},
+		}
+		if tail.SeqNum == nextSeq {
+			tailCopy := tail
+			delivery.caughtUpTail = &tailCopy
+			delivery.consumed = make(chan struct{})
+		}
+		if sendErr := r.sendDelivery(ctx, delivery); sendErr != nil {
+			return true, sendErr
+		}
+	}
+	return true, nil
 }
 
 func (r *streamReader) sendDelivery(ctx context.Context, delivery readDelivery) error {
@@ -689,6 +872,10 @@ func readBatchCaughtUp(batch *ReadBatch) bool {
 	}
 	n := len(batch.Records)
 	return n == 0 || batch.Records[n-1].SeqNum+1 == batch.Tail.SeqNum
+}
+
+func hasReadStopOption(opts *ReadOptions) bool {
+	return opts != nil && (opts.Count != nil || opts.Bytes != nil || opts.Until != nil || opts.Wait != nil)
 }
 
 func (r *streamReader) limitsReached() bool {

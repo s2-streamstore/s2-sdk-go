@@ -26,6 +26,20 @@ type Logger interface {
 	With(keyValuePairs ...any) Logger
 }
 
+type nopLogger struct{}
+
+func (nopLogger) Tracef(string, ...any) {}
+func (nopLogger) Trace(string)          {}
+func (nopLogger) Debugf(string, ...any) {}
+func (nopLogger) Debug(string)          {}
+func (nopLogger) Infof(string, ...any)  {}
+func (nopLogger) Info(string)           {}
+func (nopLogger) Warnf(string, ...any)  {}
+func (nopLogger) Warn(string)           {}
+func (nopLogger) Errorf(string, ...any) {}
+func (nopLogger) Error(string)          {}
+func (nopLogger) With(...any) Logger    { return nopLogger{} }
+
 func newClient(config *Config) *s2.Client {
 	return s2.New(config.AccessToken, s2.LoadConfigFromEnv())
 }

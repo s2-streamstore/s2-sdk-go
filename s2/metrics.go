@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -119,8 +120,28 @@ func (m *MetricsClient) Stream(ctx context.Context, args *StreamMetricsArgs) (*M
 
 func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set string, start, end *int64, interval *TimeseriesInterval) (*MetricSetResponse, error) {
 	if set == "" {
-		return nil, fmt.Errorf("metrics set must be provided")
+		return nil, newValidationError("metrics set must be provided")
 	}
+	if err := validateMetricsTimestamp("start", start); err != nil {
+		return nil, err
+	}
+	if err := validateMetricsTimestamp("end", end); err != nil {
+		return nil, err
+	}
+
+	// Snapshot query parameters before retries so caller mutations have no effect (spec C10).
+	q := url.Values{}
+	q.Set("set", set)
+	if start != nil {
+		q.Set("start", strconv.FormatInt(*start, 10))
+	}
+	if end != nil {
+		q.Set("end", strconv.FormatInt(*end, 10))
+	}
+	if interval != nil && *interval != "" {
+		q.Set("interval", string(*interval))
+	}
+	rawQuery := q.Encode()
 
 	return withRetries(ctx, m.client.retryConfig, m.client.logger, func() (*MetricSetResponse, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -130,19 +151,10 @@ func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set s
 
 		req.Header.Set("Authorization", "Bearer "+m.client.accessToken)
 		req.Header.Set("Content-Type", "application/json")
-
-		q := req.URL.Query()
-		q.Set("set", set)
-		if start != nil {
-			q.Set("start", strconv.FormatInt(*start, 10))
+		if encoding := m.client.compression.AcceptEncoding(); encoding != "" {
+			req.Header.Set("Accept-Encoding", encoding)
 		}
-		if end != nil {
-			q.Set("end", strconv.FormatInt(*end, 10))
-		}
-		if interval != nil && *interval != "" {
-			q.Set("interval", string(*interval))
-		}
-		req.URL.RawQuery = q.Encode()
+		req.URL.RawQuery = rawQuery
 
 		resp, err := m.client.httpClient.Do(req)
 		if err != nil {
@@ -150,26 +162,36 @@ func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set s
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode >= 400 {
-			body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-			if readErr != nil {
-				return nil, newBodyReadError(resp.StatusCode, body, readErr)
-			}
-			return nil, decodeAPIError(resp.StatusCode, body)
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, parseHTTPError(resp)
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("reading response: %w", err)
+			return nil, makeConnectionLostError(err, "response body read")
+		}
+		body, err = decompressResponseBody(resp, body)
+		if err != nil {
+			return nil, err
 		}
 
 		var result MetricSetResponse
 		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("decoding response: %w", err)
+			return nil, makeProtocolError(err, "metrics response body decode")
 		}
 
 		return &result, nil
 	})
+}
+
+func validateMetricsTimestamp(name string, ts *int64) error {
+	if ts == nil {
+		return nil
+	}
+	if *ts < 0 || *ts > math.MaxUint32 {
+		return newValidationError(fmt.Sprintf("metrics %s timestamp must be between 0 and %d", name, uint64(math.MaxUint32)))
+	}
+	return nil
 }
 
 func validateMetricsInterval(interval *TimeseriesInterval) error {
@@ -180,6 +202,6 @@ func validateMetricsInterval(interval *TimeseriesInterval) error {
 	case TimeseriesIntervalMinute, TimeseriesIntervalHour, TimeseriesIntervalDay:
 		return nil
 	default:
-		return fmt.Errorf("invalid metrics interval: %q", *interval)
+		return newValidationError(fmt.Sprintf("invalid metrics interval: %q", *interval))
 	}
 }

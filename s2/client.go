@@ -34,6 +34,7 @@ const (
 type ClientOptions struct {
 	// Endpoint to connect to S2.
 	// Defaults to "https://a.s2.dev/v1".
+	// A custom BaseURL requires MakeBasinBaseURL, and vice versa.
 	BaseURL string
 	// HTTP client used for requests.
 	HTTPClient *http.Client
@@ -82,10 +83,24 @@ type Client struct {
 	NetworkPolicies *NetworkPoliciesClient
 }
 
+func validateAccessToken(token string) error {
+	if token == "" {
+		return newValidationError("access token cannot be empty")
+	}
+	// Reject control bytes (including CR, LF, NUL) invalid in HTTP header values (spec C1).
+	for i := range len(token) {
+		b := token[i]
+		if (b < 0x20 && b != '\t') || b == 0x7f {
+			return newValidationError("access token contains characters invalid in an HTTP header value")
+		}
+	}
+	return nil
+}
+
 // Create a new Client.
 func New(accessToken string, opts *ClientOptions) *Client {
-	if accessToken == "" {
-		panic("access token cannot be empty")
+	if err := validateAccessToken(accessToken); err != nil {
+		panic(err)
 	}
 	if opts == nil {
 		opts = &ClientOptions{}
@@ -94,6 +109,12 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	baseURL := DefaultBaseURL
 	if opts.BaseURL != "" {
 		baseURL = normalizeBaseURL(opts.BaseURL)
+	}
+	// Either endpoint alone would send the other kind of request, with this
+	// token, to S2 Cloud. An explicit DefaultBaseURL is S2 Cloud already.
+	if (opts.MakeBasinBaseURL == nil && baseURL != DefaultBaseURL) ||
+		(opts.MakeBasinBaseURL != nil && opts.BaseURL == "") {
+		panic(newValidationError("BaseURL and MakeBasinBaseURL must be set together"))
 	}
 
 	httpClient := opts.HTTPClient
@@ -123,30 +144,35 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	// Streaming uses its own HTTP/2 transport; carry over the TLS and proxy
 	// settings of a user-provided transport so it reaches the same endpoints.
 	var streamingTLSConfig *tls.Config
-	var streamingProxy proxyFunc
+	var streamingProxy proxyConfig
 	if t, ok := baseTransport.(*http.Transport); ok && opts.HTTPClient != nil {
 		streamingTLSConfig = t.TLSClientConfig
-		streamingProxy = t.Proxy
+		streamingProxy = proxyConfigFromTransport(t)
 	}
 	httpClient.Transport = userAgentRoundTripper{
 		base:      baseTransport,
 		userAgent: defaultUserAgent(),
 	}
 
-	makeBasinBaseURL := opts.MakeBasinBaseURL
-	if makeBasinBaseURL == nil {
+	customMakeBasinBaseURL := opts.MakeBasinBaseURL
+	var makeBasinBaseURL func(basin string) string
+	if customMakeBasinBaseURL == nil {
 		makeBasinBaseURL = func(basin string) string {
 			return fmt.Sprintf("https://%s.b.s2.dev/v1", basin)
 		}
 	} else {
 		makeBasinBaseURL = func(basin string) string {
-			return normalizeBaseURL(opts.MakeBasinBaseURL(basin))
+			return normalizeBaseURL(customMakeBasinBaseURL(basin))
 		}
 	}
 
-	retryConfig := opts.RetryConfig
-	if retryConfig == nil {
-		retryConfig = DefaultRetryConfig
+	var retryConfig *RetryConfig
+	if opts.RetryConfig != nil {
+		cfgCopy := *opts.RetryConfig
+		retryConfig = &cfgCopy
+	} else if DefaultRetryConfig != nil {
+		cfgCopy := *DefaultRetryConfig
+		retryConfig = &cfgCopy
 	}
 
 	connectionTimeout := opts.ConnectionTimeout
@@ -196,6 +222,7 @@ func newUnaryHTTPTransport(base http.RoundTripper, connectionTimeout time.Durati
 		Timeout:   connectionTimeout,
 		KeepAlive: defaultTCPKeepAlive,
 	}).DialContext
+	transport.TLSHandshakeTimeout = connectionTimeout
 	transport.ForceAttemptHTTP2 = true
 	transport.MaxIdleConnsPerHost = defaultMaxIdleConnsPerHost
 	return transport
@@ -218,7 +245,7 @@ func (t *schemeAwareTransport) CloseIdleConnections() {
 	t.h2c.CloseIdleConnections()
 }
 
-func createStreamingClient(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyFunc) *http.Client {
+func createStreamingClient(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyConfig) *http.Client {
 	newTransport := func() http.RoundTripper {
 		return newStreamingTransport(connectionTimeout, tlsConfig, proxy)
 	}
@@ -232,14 +259,14 @@ func createStreamingClient(connectionTimeout time.Duration, tlsConfig *tls.Confi
 	}
 }
 
-func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyFunc) http.RoundTripper {
+func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyConfig) http.RoundTripper {
 	if tlsConfig != nil {
 		tlsConfig = tlsConfig.Clone()
 	}
 	dialer := &streamingDialer{
-		dialer:    &net.Dialer{Timeout: connectionTimeout},
-		proxy:     proxy,
-		tlsConfig: tlsConfig,
+		proxyConfig: proxy,
+		dialer:      &net.Dialer{Timeout: connectionTimeout},
+		tlsConfig:   tlsConfig,
 	}
 
 	newHTTP2Config := func() *http.HTTP2Config {
@@ -252,20 +279,34 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 		}
 	}
 	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+		dialCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
 		defer cancel()
-		return dialer.dial(ctx, schemeHTTP, network, addr)
+		conn, err := dialer.dial(dialCtx, schemeHTTP, network, addr)
+		if err != nil {
+			if ctx.Err() == nil {
+				return nil, &connectError{err: err}
+			}
+			return nil, err
+		}
+		return conn, nil
 	}
 	// Handshake here rather than via TLSClientConfig so that dial, proxy and
 	// TLS share one ConnectionTimeout, and so that a server that does not
 	// negotiate h2 is rejected instead of net/http falling back to HTTP/1.1.
 	dialTLSContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+		dialCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
 		defer cancel()
 
-		conn, err := dialer.dial(ctx, schemeHTTPS, network, addr)
+		wrapConnectErr := func(err error) error {
+			if ctx.Err() == nil {
+				return &connectError{err: err}
+			}
+			return err
+		}
+
+		conn, err := dialer.dial(dialCtx, schemeHTTPS, network, addr)
 		if err != nil {
-			return nil, err
+			return nil, wrapConnectErr(err)
 		}
 		cfg := &tls.Config{}
 		if tlsConfig != nil {
@@ -280,13 +321,13 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 		}
 		cfg.NextProtos = []string{"h2"}
 		tlsConn := tls.Client(conn, cfg)
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
+		if err := tlsConn.HandshakeContext(dialCtx); err != nil {
 			conn.Close()
-			return nil, err
+			return nil, wrapConnectErr(err)
 		}
 		if proto := tlsConn.ConnectionState().NegotiatedProtocol; proto != "h2" {
 			tlsConn.Close()
-			return nil, fmt.Errorf("server at %s did not negotiate HTTP/2 (got %q)", addr, proto)
+			return nil, wrapConnectErr(fmt.Errorf("server at %s did not negotiate HTTP/2 (got %q)", addr, proto))
 		}
 		return tlsConn, nil
 	}
@@ -323,7 +364,8 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 // Create a client using configuration from environment variables.
 // Environment variables: S2_ACCESS_TOKEN, S2_ACCOUNT_ENDPOINT, S2_BASIN_ENDPOINT.
 // ClientOptions fields override environment variables.
-// Panics if S2_ACCESS_TOKEN is not set.
+// Panics if S2_ACCESS_TOKEN is not set, or if only one of S2_ACCOUNT_ENDPOINT
+// and S2_BASIN_ENDPOINT is set.
 func NewFromEnvironment(opts *ClientOptions) *Client {
 	if opts == nil {
 		opts = &ClientOptions{}
@@ -332,7 +374,10 @@ func NewFromEnvironment(opts *ClientOptions) *Client {
 	envConfig := loadConfigFromEnv()
 
 	if envConfig.AccessToken == "" {
-		panic("S2_ACCESS_TOKEN environment variable is required")
+		panic(newValidationError("S2_ACCESS_TOKEN environment variable is required"))
+	}
+	if opts.BaseURL == "" && opts.MakeBasinBaseURL == nil {
+		envConfig.requireEndpointPair()
 	}
 
 	effectiveOpts := &ClientOptions{
@@ -390,7 +435,14 @@ type userAgentRoundTripper struct {
 func (rt userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	reqCtx := req.Clone(req.Context())
 	reqCtx.Header.Set("User-Agent", rt.userAgent)
-	return rt.base.RoundTrip(reqCtx)
+	resp, err := rt.base.RoundTrip(reqCtx)
+	if err == nil && resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		// S2 never redirects. Fail here, below http.Client's redirect policy
+		// (which may be the caller's), so headers such as s2-encryption-key
+		// are never forwarded to the redirect target.
+		return nil, parseHTTPError(resp)
+	}
+	return resp, err
 }
 
 func (rt userAgentRoundTripper) CloseIdleConnections() {

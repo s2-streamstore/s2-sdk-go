@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -366,5 +367,112 @@ func TestBatcher_FlushOnCtxCancelDoesNotAdvanceSeqNum(t *testing.T) {
 
 	if got := *batcher.nextMatchSeqNum; got != 1 {
 		t.Fatalf("seq num advanced to %d for a batch that was never sent, want 1", got)
+	}
+}
+
+// Add must not report success for a record that was never emitted: when the
+// context is canceled while Add is blocked flushing into a full channel, the
+// batch is dropped and Add has to say so.
+func TestBatcher_AddReportsRecordsDroppedOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	batcher := NewBatcher(ctx, &BatchingOptions{
+		MaxRecords:    1,
+		Linger:        time.Hour,
+		ChannelBuffer: 1,
+	})
+	if err := batcher.Add(AppendRecord{Body: []byte("a")}, nil); err != nil {
+		t.Fatalf("add 1: %v", err)
+	}
+
+	addErr := make(chan error, 1)
+	go func() { addErr <- batcher.Add(AppendRecord{Body: []byte("b")}, nil) }()
+
+	// Let the second Add block on the full channel before canceling.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-addErr:
+		if err == nil {
+			t.Fatal("Add returned nil for a record dropped on cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Add did not return after cancellation")
+	}
+
+	if n := len(batcher.Batches()); n != 1 {
+		t.Fatalf("expected only the first batch emitted, got %d batches", n)
+	}
+}
+
+// Close waits until the consumer receives the final batch (whether buffered or
+// already being flushed by a linger timer) without holding the lock across the
+// wait, so concurrent Add calls fail fast instead of blocking behind Close.
+func TestBatcher_CloseWaitsForConsumerWithoutBlockingOthers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		linger time.Duration
+		// Long enough for the linger flush to block on the full channel.
+		wait time.Duration
+	}{
+		{"buffered", time.Hour, 0},
+		{"linger flush pending", 10 * time.Millisecond, 50 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			batcher := NewBatcher(ctx, &BatchingOptions{
+				Linger:        tc.linger,
+				ChannelBuffer: 1,
+			})
+			if err := batcher.Add(AppendRecord{Body: []byte("a")}, nil); err != nil {
+				t.Fatalf("add a: %v", err)
+			}
+			batcher.Flush()
+			if err := batcher.Add(AppendRecord{Body: []byte("b")}, nil); err != nil {
+				t.Fatalf("add b: %v", err)
+			}
+			time.Sleep(tc.wait)
+
+			closed := make(chan struct{})
+			go func() {
+				batcher.Close()
+				close(closed)
+			}()
+
+			added := make(chan error, 1)
+			go func() {
+				time.Sleep(20 * time.Millisecond)
+				added <- batcher.Add(AppendRecord{Body: []byte("c")}, nil)
+			}()
+			select {
+			case err := <-added:
+				if !errors.Is(err, ErrSessionClosed) {
+					t.Fatalf("expected ErrSessionClosed from Add during Close, got %v", err)
+				}
+			case <-time.After(time.Second):
+				cancel()
+				t.Fatal("Add blocked behind Close")
+			}
+			select {
+			case <-closed:
+				t.Fatal("Close returned before the final batch was received")
+			default:
+			}
+
+			var bodies []string
+			for batch := range batcher.Batches() {
+				for _, r := range batch.Input.Records {
+					bodies = append(bodies, string(r.Body))
+				}
+			}
+			<-closed
+			if len(bodies) != 2 || bodies[0] != "a" || bodies[1] != "b" {
+				t.Fatalf("expected records [a b], got %q", bodies)
+			}
+		})
 	}
 }

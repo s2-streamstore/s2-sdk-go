@@ -14,14 +14,28 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-// proxyFunc matches http.Transport.Proxy.
-type proxyFunc func(*http.Request) (*url.URL, error)
+// proxyConfig holds the proxy settings of the user's http.Transport.
+type proxyConfig struct {
+	proxy             func(*http.Request) (*url.URL, error)
+	connectHeader     http.Header
+	getConnectHeader  func(ctx context.Context, proxyURL *url.URL, target string) (http.Header, error)
+	onConnectResponse func(ctx context.Context, proxyURL *url.URL, connectReq *http.Request, connectRes *http.Response) error
+}
+
+func proxyConfigFromTransport(t *http.Transport) proxyConfig {
+	return proxyConfig{
+		proxy:             t.Proxy,
+		connectHeader:     t.ProxyConnectHeader.Clone(),
+		getConnectHeader:  t.GetProxyConnectHeader,
+		onConnectResponse: t.OnProxyConnectResponse,
+	}
+}
 
 // streamingDialer dials streaming connections directly or through the proxy
 // that the user's transport selects for the target.
 type streamingDialer struct {
+	proxyConfig
 	dialer *net.Dialer
-	proxy  proxyFunc
 	// tlsConfig is the user's TLS config, also used for HTTPS proxies as
 	// net/http does.
 	tlsConfig *tls.Config
@@ -34,7 +48,7 @@ func (d *streamingDialer) dial(ctx context.Context, scheme, network, addr string
 			return nil, fmt.Errorf("resolve proxy for %s: %w", addr, err)
 		}
 		if proxyURL != nil {
-			return dialThroughProxy(ctx, d.dialer, d.tlsConfig, proxyURL, addr)
+			return d.dialThroughProxy(ctx, proxyURL, addr)
 		}
 	}
 	return d.dialer.DialContext(ctx, network, addr)
@@ -42,7 +56,8 @@ func (d *streamingDialer) dial(ctx context.Context, scheme, network, addr string
 
 // dialThroughProxy opens a TCP tunnel to addr through proxyURL. HTTP/2 needs a
 // raw tunnel, so HTTP(S) proxies are asked to CONNECT rather than forward.
-func dialThroughProxy(ctx context.Context, dialer *net.Dialer, tlsConfig *tls.Config, proxyURL *url.URL, addr string) (net.Conn, error) {
+func (d *streamingDialer) dialThroughProxy(ctx context.Context, proxyURL *url.URL, addr string) (net.Conn, error) {
+	dialer, tlsConfig := d.dialer, d.tlsConfig
 	switch proxyURL.Scheme {
 	case "socks5", "socks5h":
 		socks, err := proxy.FromURL(proxyURL, dialer)
@@ -95,11 +110,23 @@ func dialThroughProxy(ctx context.Context, dialer *net.Dialer, tlsConfig *tls.Co
 		conn = tlsConn
 	}
 
+	// Build CONNECT headers as net/http does.
+	header := d.connectHeader
+	if d.getConnectHeader != nil {
+		header, err = d.getConnectHeader(ctx, proxyURL, addr)
+		if err != nil {
+			return fail(err)
+		}
+	}
+	header = header.Clone()
+	if header == nil {
+		header = make(http.Header)
+	}
 	req := &http.Request{
 		Method: http.MethodConnect,
 		URL:    &url.URL{Opaque: addr},
 		Host:   addr,
-		Header: make(http.Header),
+		Header: header,
 	}
 	if user := proxyURL.User; user != nil {
 		password, _ := user.Password()
@@ -114,6 +141,12 @@ func dialThroughProxy(ctx context.Context, dialer *net.Dialer, tlsConfig *tls.Co
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
 		return fail(fmt.Errorf("read CONNECT response from proxy %s: %w", proxyAddr, err))
+	}
+	if d.onConnectResponse != nil {
+		if err := d.onConnectResponse(ctx, proxyURL, req, resp); err != nil {
+			resp.Body.Close()
+			return fail(err)
+		}
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()

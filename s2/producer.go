@@ -158,7 +158,7 @@ func (p *Producer) Submit(record AppendRecord) (*RecordSubmitFuture, error) {
 
 	recordBytes := MeteredPayloadBytes(record)
 	if recordBytes > p.batcher.opts.MaxMeteredBytes {
-		return nil, &S2Error{Message: "record exceeds max batch bytes"}
+		return nil, newValidationError("record exceeds max batch bytes")
 	}
 
 	p.submitMu.Lock()

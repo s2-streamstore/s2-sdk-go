@@ -50,12 +50,20 @@ func (h *httpClient) requestWithHeadersResult(ctx context.Context, method, path 
 	)
 
 	var reqBody io.Reader
+	compressedBody := false
 	if body != nil {
 		jsonData, err := json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("marshal request body: %w", err)
 		}
-		reqBody = bytes.NewBuffer(jsonData)
+		if h.compression != CompressionNone && len(jsonData) > 0 {
+			jsonData, err = internalframing.Compress(jsonData, h.compression)
+			if err != nil {
+				return nil, fmt.Errorf("compress request body: %w", err)
+			}
+			compressedBody = true
+		}
+		reqBody = bytes.NewReader(jsonData)
 	}
 
 	url := h.baseURL + path
@@ -67,6 +75,14 @@ func (h *httpClient) requestWithHeadersResult(ctx context.Context, method, path 
 	req.Header.Set("Authorization", "Bearer "+h.accessToken)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+		if compressedBody {
+			req.Header.Set("Content-Encoding", h.compression.ContentEncoding())
+		}
+	}
+	if result != nil {
+		if encoding := h.compression.AcceptEncoding(); encoding != "" {
+			req.Header.Set("Accept-Encoding", encoding)
+		}
 	}
 
 	if h.basinName != "" {
@@ -86,22 +102,25 @@ func (h *httpClient) requestWithHeadersResult(ctx context.Context, method, path 
 
 	logInfo(h.logger, "s2 http response", "method", method, "path", path, "status", resp.StatusCode)
 
-	if resp.StatusCode >= 400 {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		if readErr != nil {
-			bodyErr := newBodyReadError(resp.StatusCode, body, readErr)
-			logError(h.logger, "s2 http error response body read failed", "method", method, "path", path, "status", resp.StatusCode, "error", readErr)
-			return nil, bodyErr
-		}
-		apiErr := decodeAPIError(resp.StatusCode, body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		apiErr := parseHTTPError(resp)
 		logError(h.logger, "s2 http error response", "method", method, "path", path, "status", resp.StatusCode, "message", apiErr.Error())
 		return nil, apiErr
 	}
 
 	if result != nil && resp.StatusCode != http.StatusNoContent {
-		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logError(h.logger, "s2 http read response error", "error", err, "method", method, "path", path)
+			return nil, makeConnectionLostError(err, "response body read")
+		}
+		data, err = decompressResponseBody(resp, data)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(data, result); err != nil {
 			logError(h.logger, "s2 http decode response error", "error", err, "method", method, "path", path)
-			return nil, fmt.Errorf("decode response: %w", err)
+			return nil, makeProtocolError(err, "json response body decode")
 		}
 	}
 
@@ -141,17 +160,19 @@ func (h *httpClient) requestProto(
 	)
 
 	var reqBody io.Reader
+	compressedBody := false
 	if body != nil {
 		data, err := proto.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("marshal proto body: %w", err)
 		}
 
-		if h.compression != CompressionNone {
+		if h.compression != CompressionNone && len(data) > 0 {
 			data, err = internalframing.Compress(data, h.compression)
 			if err != nil {
 				return fmt.Errorf("compress request body: %w", err)
 			}
+			compressedBody = true
 		}
 
 		reqBody = bytes.NewReader(data)
@@ -166,8 +187,8 @@ func (h *httpClient) requestProto(
 	req.Header.Set("Authorization", "Bearer "+h.accessToken)
 	if body != nil {
 		req.Header.Set("Content-Type", protoContentType)
-		if encoding := h.compression.ContentEncoding(); encoding != "" {
-			req.Header.Set("Content-Encoding", encoding)
+		if compressedBody {
+			req.Header.Set("Content-Encoding", h.compression.ContentEncoding())
 		}
 	}
 	if result != nil {
@@ -194,22 +215,8 @@ func (h *httpClient) requestProto(
 
 	logInfo(h.logger, "s2 http proto response", "method", method, "path", path, "status", resp.StatusCode)
 
-	if resp.StatusCode >= 400 {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		if readErr != nil {
-			bodyErr := newBodyReadError(resp.StatusCode, body, readErr)
-			logError(h.logger, "s2 http proto error response body read failed", "method", method, "path", path, "status", resp.StatusCode, "error", readErr)
-			return bodyErr
-		}
-		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
-			respCompression := internalframing.ParseContentEncoding(encoding)
-			decompressed, err := internalframing.Decompress(body, respCompression)
-			if err != nil {
-				return fmt.Errorf("decompress error response body: %w", err)
-			}
-			body = decompressed
-		}
-		apiErr := decodeAPIError(resp.StatusCode, body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		apiErr := parseHTTPError(resp)
 		logError(h.logger, "s2 http proto error response", "method", method, "path", path, "status", resp.StatusCode, "message", apiErr.Error())
 		return apiErr
 	}
@@ -217,19 +224,16 @@ func (h *httpClient) requestProto(
 	if result != nil && resp.StatusCode != http.StatusNoContent {
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return fmt.Errorf("read proto response: %w", err)
+			return makeConnectionLostError(err, "response body read")
 		}
 
-		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
-			respCompression := internalframing.ParseContentEncoding(encoding)
-			data, err = internalframing.Decompress(data, respCompression)
-			if err != nil {
-				return fmt.Errorf("decompress response body: %w", err)
-			}
+		data, err = decompressResponseBody(resp, data)
+		if err != nil {
+			return err
 		}
 
 		if err := proto.Unmarshal(data, result); err != nil {
-			return fmt.Errorf("decode proto response: %w", err)
+			return makeProtocolError(err, "proto response body decode")
 		}
 	}
 

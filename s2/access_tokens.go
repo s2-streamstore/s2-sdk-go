@@ -101,6 +101,12 @@ func (a *AccessTokensClient) Issue(ctx context.Context, args IssueAccessTokenArg
 	if err := validateAccessTokenID(args.ID); err != nil {
 		return nil, err
 	}
+	if args.ExpiresAt != nil {
+		year := args.ExpiresAt.UTC().Year()
+		if year < 0 || year > 9999 {
+			return nil, newValidationError("access token expires_at year must be between 0000 and 9999")
+		}
+	}
 
 	return withRetries(ctx, a.client.retryConfig, a.client.logger, func() (*IssueAccessTokenResponse, error) {
 		httpClient := &httpClient{

@@ -52,7 +52,7 @@ func TestStreamingClientClassifiesHTTP2Errors(t *testing.T) {
 	defer server.Close()
 
 	readBody := func(path string) error {
-		client := createStreamingClient(5*time.Second, nil, nil)
+		client := createStreamingClient(5*time.Second, nil, proxyConfig{})
 		resp, err := client.Do(mustRequest(t, server.URL+path))
 		if err != nil {
 			return err
