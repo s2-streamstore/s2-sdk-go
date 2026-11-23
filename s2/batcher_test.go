@@ -405,3 +405,45 @@ func TestBatcher_AddReportsRecordsDroppedOnCancel(t *testing.T) {
 		t.Fatalf("expected only the first batch emitted, got %d batches", n)
 	}
 }
+
+// Close must not block when Batches is full and nobody is draining it yet,
+// e.g. when the consumer is the goroutine calling Close. The final batch must
+// still be delivered once the consumer drains.
+func TestBatcher_CloseDoesNotBlockOnFullChannel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	batcher := NewBatcher(ctx, &BatchingOptions{
+		Linger:        time.Hour,
+		ChannelBuffer: 1,
+	})
+	if err := batcher.Add(AppendRecord{Body: []byte("a")}, nil); err != nil {
+		t.Fatalf("add a: %v", err)
+	}
+	batcher.Flush()
+	if err := batcher.Add(AppendRecord{Body: []byte("b")}, nil); err != nil {
+		t.Fatalf("add b: %v", err)
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		batcher.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("Close blocked on a full, undrained batch channel")
+	}
+
+	var bodies []string
+	for batch := range batcher.Batches() {
+		for _, r := range batch.Input.Records {
+			bodies = append(bodies, string(r.Body))
+		}
+	}
+	if len(bodies) != 2 || bodies[0] != "a" || bodies[1] != "b" {
+		t.Fatalf("expected records [a b], got %q", bodies)
+	}
+}
