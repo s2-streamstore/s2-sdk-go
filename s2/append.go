@@ -410,7 +410,7 @@ func (p *transportAppendSession) readAcksLoop(conn *http.Response) {
 func (p *transportAppendSession) handleFrame(frame *framing.S2SFrame) error {
 	body, err := frame.DecompressedBody()
 	if err != nil {
-		return fmt.Errorf("failed to decompress frame: %w", err)
+		return makeProtocolError(err, "append session frame decompression")
 	}
 
 	if frame.Terminal {
