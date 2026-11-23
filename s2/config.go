@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -161,23 +162,26 @@ func newEndpointTemplate(endpoint string) (*endpointTemplate, error) {
 	if scheme != schemeHTTP && scheme != schemeHTTPS {
 		return nil, fmt.Errorf("unsupported scheme: %s", parsed.Scheme)
 	}
+	// Request URLs are built by appending routes to the endpoint, so a query
+	// or fragment would swallow the route.
+	if parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.Contains(raw, "#") {
+		return nil, newValidationError("endpoint must not include a query or fragment")
+	}
+	if parsed.User != nil {
+		return nil, newValidationError("endpoint must not include user info")
+	}
 
 	hostTemplate := strings.ReplaceAll(parsed.Hostname(), basinPlaceholderSentinel, basinPlaceholder)
 	port := parsed.Port()
-
-	parsedPath := strings.ReplaceAll(parsed.EscapedPath(), basinPlaceholderSentinel, basinPlaceholder)
-	parsedQuery := ""
-	if parsed.RawQuery != "" {
-		parsedQuery = "?" + strings.ReplaceAll(parsed.RawQuery, basinPlaceholderSentinel, basinPlaceholder)
-	}
-	parsedFragment := ""
-	if parsed.Fragment != "" {
-		parsedFragment = "#" + strings.ReplaceAll(parsed.Fragment, basinPlaceholderSentinel, basinPlaceholder)
+	if port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return nil, newValidationError(fmt.Sprintf("endpoint port must be between 1 and 65535, got %q", port))
+		}
 	}
 
 	pathTemplate := defaultAPIPath
 	if explicitPathProvided {
-		pathTemplate = parsedPath + parsedQuery + parsedFragment
+		pathTemplate = strings.ReplaceAll(parsed.EscapedPath(), basinPlaceholderSentinel, basinPlaceholder)
 	}
 
 	return &endpointTemplate{
