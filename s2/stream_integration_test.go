@@ -1756,10 +1756,10 @@ func TestCreateStream_NameEmpty(t *testing.T) {
 func TestCreateStream_NameTooLong(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamTestTimeout)
 	defer cancel()
-	t.Log("Testing: Create stream with name too long (>512 bytes)")
+	t.Log("Testing: Create stream with name too long (>253 bytes)")
 
 	basin := getSharedBasin(t)
-	longName := s2.StreamName(strings.Repeat("a", 513))
+	longName := s2.StreamName(strings.Repeat("a", 254))
 	_, err := basin.Streams.Create(ctx, s2.CreateStreamArgs{Stream: longName})
 
 	if err == nil {

@@ -278,8 +278,8 @@ func (s *StreamsClient) Reconfigure(ctx context.Context, args ReconfigureStreamA
 
 func validateStreamName(name StreamName) error {
 	length := len(name)
-	if length < 1 || length > 512 {
-		return newValidationError("stream name must be between 1 and 512 bytes")
+	if length < 1 || length > 253 {
+		return newValidationError("stream name must be between 1 and 253 bytes")
 	}
 	if strings.ContainsRune(string(name), 0) {
 		return newValidationError("stream name must not contain NUL bytes")
