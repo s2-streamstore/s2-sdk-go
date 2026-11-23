@@ -219,7 +219,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 
 		if isNetworkError(ctx, err) {
 			sentNothing := isConnectError(err)
-			if attemptNo == maxAttempts || !(sentNothing || shouldRetryNetworkError(config)) {
+			if attemptNo == maxAttempts || (!sentNothing && !shouldRetryNetworkError(config)) {
 				logError(logger, "s2 append network error, max attempts exhausted or not retryable",
 					"attempts", maxAttempts,
 					"error", err)
