@@ -98,8 +98,10 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 	}
 
 	var streamConfig *StreamConfig
+	ignoreCommandRecords := false
 	if opts != nil {
 		streamConfig = cloneStreamConfigPtr(opts.StreamConfig)
+		ignoreCommandRecords = opts.IgnoreCommandRecords
 	}
 
 	client := s.basinClient.httpClient
@@ -140,7 +142,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		return nil, fmt.Errorf("unary read failed: %w", err)
 	}
 
-	if opts != nil && opts.IgnoreCommandRecords {
+	if ignoreCommandRecords {
 		batch.filterCommandRecords()
 	}
 
@@ -181,6 +183,7 @@ type streamReader struct {
 	respBody    io.ReadCloser
 	bodyMu      sync.Mutex
 	recordsRead uint64
+	batchesRead uint64
 	bytesRead   uint64
 	retryConfig *RetryConfig
 	logger      *slog.Logger
@@ -255,7 +258,7 @@ func (r *streamReader) run() {
 
 		logInfo(r.logger, "s2 read session attempt", "stream", string(r.streamClient.name), "attempt", consecutiveFailures+1)
 
-		recordsBefore := r.recordsRead
+		batchesBefore := r.batchesRead
 
 		tailCtx, tailCancel := context.WithCancel(r.ctx)
 		err := r.runOnce(tailCtx, opts)
@@ -268,8 +271,9 @@ func (r *streamReader) run() {
 			return
 		}
 
-		// Delivered records forgive earlier failures, including on handovers.
-		if r.recordsRead > recordsBefore {
+		// Any received batch or heartbeat resets the retry budget (spec T5a).
+		progressed := r.batchesRead > batchesBefore
+		if progressed {
 			consecutiveFailures = 0
 		}
 
@@ -291,7 +295,10 @@ func (r *streamReader) run() {
 			continue
 		}
 
-		if isServerDraining(err) {
+		// A drain is a planned handover only if the request made progress;
+		// otherwise it counts as a retry, so a server that keeps draining
+		// exhausts the budget instead of being redialed forever (spec T6).
+		if isServerDraining(err) && progressed {
 			if r.limitsReached() {
 				return
 			}
@@ -304,7 +311,7 @@ func (r *streamReader) run() {
 			continue
 		}
 
-		if r.recordsRead == recordsBefore {
+		if !progressed {
 			consecutiveFailures++
 		}
 
@@ -578,6 +585,10 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 				logError(r.logger, "s2 read session response ended early", "stream", string(r.streamClient.name), "error", fr.err)
 				return makeConnectionLostError(fr.err, "read session")
 			}
+			if errors.Is(fr.err, internalframing.ErrMalformedFrame) {
+				logError(r.logger, "s2 read session malformed frame", "stream", string(r.streamClient.name), "error", fr.err)
+				return makeProtocolError(fr.err, "read session frame")
+			}
 			logError(r.logger, "s2 read session frame error", "stream", string(r.streamClient.name), "error", fr.err)
 			return fmt.Errorf("read frame error: %w", fr.err)
 		}
@@ -650,6 +661,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		}
 
 		if next != nil {
+			r.batchesRead++
 			delivery := readDelivery{records: batch.Records, next: next}
 			if caughtUp {
 				delivery.caughtUpTail = batch.Tail

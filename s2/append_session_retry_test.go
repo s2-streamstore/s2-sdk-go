@@ -1,14 +1,18 @@
 package s2
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	internalframing "github.com/s2-streamstore/s2-sdk-go/internal/framing"
 )
 
 type signalWriteCloser struct {
@@ -1058,5 +1062,112 @@ func TestAppendSession_NoSideEffectsRetriesRefusedConnection(t *testing.T) {
 	}
 	if _, err := ticket.Ack(ctx); err != nil {
 		t.Fatalf("expected the batch to be retried after a refused connection, got %v", err)
+	}
+}
+
+func TestAppendSession_ProtocolErrorsDoNotRetry(t *testing.T) {
+	oversizedPayload := make([]byte, internalframing.MaxDecompressedSize+1)
+	oversizedGzip, err := internalframing.Compress(oversizedPayload, internalframing.CompressionGzip)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		status int
+		header http.Header
+		body   []byte
+	}{
+		{
+			name:   "oversized s2s frame header",
+			status: http.StatusOK,
+			body:   []byte{0xFF, 0xFF, 0xFF, 0x00},
+		},
+		{
+			name:   "zero-length s2s frame",
+			status: http.StatusOK,
+			body:   []byte{0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			name:   "invalid protobuf AppendAck",
+			status: http.StatusOK,
+			body:   internalframing.CreateFrame([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, false, internalframing.CompressionNone),
+		},
+		{
+			name:   "oversized compressed ack frame",
+			status: http.StatusOK,
+			body:   internalframing.CreateFrame(oversizedPayload, false, internalframing.CompressionGzip),
+		},
+		{
+			name:   "oversized compressed 500 error response",
+			status: http.StatusInternalServerError,
+			header: http.Header{"Content-Encoding": {"gzip"}},
+			body:   oversizedGzip,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			var requests atomic.Int32
+			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests.Add(1)
+				if req.Body != nil {
+					go func() {
+						_, _ = io.Copy(io.Discard, req.Body)
+						_ = req.Body.Close()
+					}()
+				}
+				hdr := make(http.Header)
+				if tt.header != nil {
+					hdr = tt.header.Clone()
+				}
+				return &http.Response{
+					StatusCode: tt.status,
+					Header:     hdr,
+					Body:       io.NopCloser(bytes.NewReader(tt.body)),
+					Request:    req,
+				}, nil
+			})
+
+			retryCfg := &RetryConfig{
+				MaxAttempts:       3,
+				MinBaseDelay:      time.Millisecond,
+				MaxBaseDelay:      time.Millisecond,
+				AppendRetryPolicy: AppendRetryPolicyAll,
+			}
+			basin := &BasinClient{
+				baseURL:     "http://example.com/v1",
+				accessToken: "token",
+				retryConfig: retryCfg,
+			}
+			basin.client = &Client{streamingClient: &http.Client{Transport: rt}}
+			stream := &StreamClient{name: StreamName("test"), basinClient: basin}
+
+			session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+
+			future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ticket, err := future.Wait(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = ticket.Ack(ctx)
+			var s2Err *S2Error
+			if !errors.As(err, &s2Err) || s2Err.Code != protocolErrorCode || s2Err.IsRetryable() {
+				t.Fatalf("expected non-retryable PROTOCOL S2Error, got %v", err)
+			}
+			if got := requests.Load(); got != 1 {
+				t.Fatalf("expected protocol error not to retry, got %d requests", got)
+			}
+		})
 	}
 }

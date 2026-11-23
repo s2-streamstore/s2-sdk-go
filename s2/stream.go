@@ -123,6 +123,9 @@ func parseHTTPError(resp *http.Response) error {
 	if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
 		decompressed, err := internalframing.Decompress(body, internalframing.ParseContentEncoding(encoding))
 		if err != nil {
+			if errors.Is(err, internalframing.ErrDecompressedTooLarge) {
+				return makeProtocolError(err, "error response body decompression")
+			}
 			return decodeAPIError(resp.StatusCode, nil)
 		}
 		body = decompressed
@@ -130,10 +133,22 @@ func parseHTTPError(resp *http.Response) error {
 	return decodeAPIError(resp.StatusCode, body)
 }
 
+func decompressResponseBody(resp *http.Response, data []byte) ([]byte, error) {
+	encoding := resp.Header.Get("Content-Encoding")
+	if encoding == "" {
+		return data, nil
+	}
+	decompressed, err := internalframing.Decompress(data, internalframing.ParseContentEncoding(encoding))
+	if err != nil {
+		return nil, makeProtocolError(err, "response body decompression")
+	}
+	return decompressed, nil
+}
+
 func parseReadBatch(data []byte) (*ReadBatch, error) {
 	var pbBatch pb.ReadBatch
 	if err := proto.Unmarshal(data, &pbBatch); err != nil {
-		return nil, fmt.Errorf("failed to parse ReadBatch protobuf: %w", err)
+		return nil, makeProtocolError(err, "read batch decode")
 	}
 	return convertPbReadBatch(&pbBatch), nil
 }

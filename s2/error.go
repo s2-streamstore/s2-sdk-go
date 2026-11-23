@@ -273,10 +273,16 @@ func decodeAPIError(status int, body []byte) error {
 	// to reposition, so it must never be fabricated.
 	if status == http.StatusRequestedRangeNotSatisfiable && len(trimmed) > 0 {
 		var payload struct {
-			Tail *StreamPosition `json:"tail"`
+			Tail *struct {
+				SeqNum    *uint64 `json:"seq_num"`
+				Timestamp *uint64 `json:"timestamp"`
+			} `json:"tail"`
 		}
-		if json.Unmarshal(trimmed, &payload) == nil && payload.Tail != nil {
-			return newRangeNotSatisfiableError(status, payload.Tail)
+		if json.Unmarshal(trimmed, &payload) == nil && payload.Tail != nil && payload.Tail.SeqNum != nil && payload.Tail.Timestamp != nil {
+			return newRangeNotSatisfiableError(status, &StreamPosition{
+				SeqNum:    *payload.Tail.SeqNum,
+				Timestamp: *payload.Tail.Timestamp,
+			})
 		}
 	}
 
@@ -353,12 +359,14 @@ func makeConnectionLostError(err error, context string) *S2Error {
 	}
 }
 
+const protocolErrorCode = "PROTOCOL"
+
 // makeProtocolError reports a response or session message that violates the
 // protocol. Retrying would not help, and the request may have taken effect.
 func makeProtocolError(err error, context string) *S2Error {
 	return &S2Error{
 		Message: fmt.Sprintf("Protocol error during %s: %s", context, err.Error()),
-		Code:    "PROTOCOL",
+		Code:    protocolErrorCode,
 		Origin:  "sdk",
 	}
 }

@@ -87,13 +87,7 @@ func (h *httpClient) requestWithHeadersResult(ctx context.Context, method, path 
 	logInfo(h.logger, "s2 http response", "method", method, "path", path, "status", resp.StatusCode)
 
 	if resp.StatusCode >= 400 {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		if readErr != nil {
-			bodyErr := newBodyReadError(resp.StatusCode, body, readErr)
-			logError(h.logger, "s2 http error response body read failed", "method", method, "path", path, "status", resp.StatusCode, "error", readErr)
-			return nil, bodyErr
-		}
-		apiErr := decodeAPIError(resp.StatusCode, body)
+		apiErr := parseHTTPError(resp)
 		logError(h.logger, "s2 http error response", "method", method, "path", path, "status", resp.StatusCode, "message", apiErr.Error())
 		return nil, apiErr
 	}
@@ -104,9 +98,13 @@ func (h *httpClient) requestWithHeadersResult(ctx context.Context, method, path 
 			logError(h.logger, "s2 http read response error", "error", err, "method", method, "path", path)
 			return nil, makeConnectionLostError(err, "response body read")
 		}
+		data, err = decompressResponseBody(resp, data)
+		if err != nil {
+			return nil, err
+		}
 		if err := json.Unmarshal(data, result); err != nil {
 			logError(h.logger, "s2 http decode response error", "error", err, "method", method, "path", path)
-			return nil, fmt.Errorf("decode response: %w", err)
+			return nil, makeProtocolError(err, "json response body decode")
 		}
 	}
 
@@ -211,16 +209,13 @@ func (h *httpClient) requestProto(
 			return makeConnectionLostError(err, "response body read")
 		}
 
-		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
-			respCompression := internalframing.ParseContentEncoding(encoding)
-			data, err = internalframing.Decompress(data, respCompression)
-			if err != nil {
-				return makeProtocolError(err, "response body decompression")
-			}
+		data, err = decompressResponseBody(resp, data)
+		if err != nil {
+			return err
 		}
 
 		if err := proto.Unmarshal(data, result); err != nil {
-			return fmt.Errorf("decode proto response: %w", err)
+			return makeProtocolError(err, "proto response body decode")
 		}
 	}
 

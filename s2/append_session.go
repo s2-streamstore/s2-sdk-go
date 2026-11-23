@@ -477,67 +477,59 @@ func (r *AppendSession) submitInflightBatches() {
 		return
 	}
 
-	if session.holdInputsForReconnect() {
-		return
-	}
-
 	r.inflightMu.Lock()
 	entries := make([]*inflightEntry, len(r.inflightQueue))
 	copy(entries, r.inflightQueue)
 	r.inflightMu.Unlock()
 
 	for _, entry := range entries {
-		r.inflightMu.Lock()
-		if atomic.LoadInt32(&entry.completed) != 0 {
-			r.inflightMu.Unlock()
-			continue // entry already completed, skip
+		if session.holdInputsForReconnect() {
+			return
 		}
-		if entry.wasSentOnSessionLocked(session) {
-			r.inflightMu.Unlock()
-			continue // already sent on this session, skip
-		}
-		entry.sentOnSessions = append(entry.sentOnSessions, session)
-		r.sessionRefs[session]++
-		stamped := entry.attemptStart.IsZero()
-		if stamped {
-			entry.attemptStart = time.Now()
-		}
-		r.inflightMu.Unlock()
 
-		if err := session.appendInput(entry.input); err != nil {
+		r.inflightMu.RLock()
+		skip := atomic.LoadInt32(&entry.completed) != 0 || entry.wasSentOnSessionLocked(session)
+		r.inflightMu.RUnlock()
+		if skip {
+			continue
+		}
+
+		frame, err := session.marshalInput(entry.input)
+		if err != nil {
+			r.handleSessionError(session, err)
+			return
+		}
+
+		r.inflightMu.Lock()
+		if atomic.LoadInt32(&entry.completed) != 0 || entry.wasSentOnSessionLocked(session) {
+			r.inflightMu.Unlock()
+			continue
+		}
+		// Reserve the writer while holding inflightMu (same inflightMu ->
+		// session.mu lock order as handleAck) so readAcks cannot half-close
+		// the request and observe a phantom or missing unacked entry between
+		// reserving the write and recording entry in sentOnSessions.
+		writer, err := session.beginWrite()
+		if err != nil {
+			r.inflightMu.Unlock()
 			if errors.Is(err, errAppendHalfClosed) {
-				// Reconnect advice arrived mid-loop; the rest go on the next
-				// request. The ACK reader may have seen this entry as unacked.
-				r.unmarkSent(entry, session, stamped)
-				if !r.hasUnackedOnSession(session) {
-					r.handOverOnAdvice(session)
-				}
+				// Reconnect advice arrived; remaining entries go on the next request.
 				return
 			}
 			r.handleSessionError(session, err)
 			return
 		}
-	}
-}
+		entry.sentOnSessions = append(entry.sentOnSessions, session)
+		r.sessionRefs[session]++
+		if entry.attemptStart.IsZero() {
+			entry.attemptStart = time.Now()
+		}
+		r.inflightMu.Unlock()
 
-func (r *AppendSession) unmarkSent(entry *inflightEntry, session *transportAppendSession, stamped bool) {
-	r.inflightMu.Lock()
-	defer r.inflightMu.Unlock()
-	for i, sent := range entry.sentOnSessions {
-		if sent == session {
-			entry.sentOnSessions = append(entry.sentOnSessions[:i], entry.sentOnSessions[i+1:]...)
-			break
+		if err := session.writeFrame(writer, frame); err != nil {
+			r.handleSessionError(session, err)
+			return
 		}
-	}
-	if count, ok := r.sessionRefs[session]; ok {
-		if count <= 1 {
-			delete(r.sessionRefs, session)
-		} else {
-			r.sessionRefs[session] = count - 1
-		}
-	}
-	if stamped {
-		entry.attemptStart = time.Time{}
 	}
 }
 

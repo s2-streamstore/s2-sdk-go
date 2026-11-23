@@ -244,46 +244,39 @@ func (p *transportAppendSession) terminalError() error {
 	return p.terminalErr
 }
 
-func (p *transportAppendSession) appendInput(input *AppendInput) error {
-	// A handover may close the request right after half-closing it; the
-	// input was still never written, so report it as refused, not failed.
-	p.mu.Lock()
-	halfClosed := p.halfClosed
-	p.mu.Unlock()
-	if halfClosed {
-		return errAppendHalfClosed
-	}
-	if p.isClosed() {
-		if err := p.terminalError(); err != nil {
-			return err
-		}
-		return ErrSessionClosed
-	}
-
+func (p *transportAppendSession) marshalInput(input *AppendInput) ([]byte, error) {
 	pbInput := convertAppendInputToProto(input)
 
 	frame, err := framing.MarshalProtoFrame(pbInput, p.streamClient.basinClient.compression)
 	if err != nil {
-		return fmt.Errorf("failed to marshal append input: %w", err)
+		return nil, fmt.Errorf("failed to marshal append input: %w", err)
 	}
+	return frame, nil
+}
 
+// beginWrite reserves the request writer for a single frame write. Callers
+// must pair a successful beginWrite with writeFrame.
+func (p *transportAppendSession) beginWrite() (io.WriteCloser, error) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	// A handover may close the request right after half-closing it; the
+	// input was still never written, so report it as refused, not failed.
 	if p.halfClosed {
-		p.mu.Unlock()
-		return errAppendHalfClosed
+		return nil, errAppendHalfClosed
 	}
-	writer := p.requestWriter
-	p.writing = writer != nil
-	p.mu.Unlock()
-	if writer == nil {
-		if err := p.terminalError(); err != nil {
-			return err
+	if p.isClosed() || p.requestWriter == nil {
+		if p.terminalErr != nil {
+			return nil, p.terminalErr
 		}
-		return ErrSessionClosed
+		return nil, ErrSessionClosed
 	}
+	p.writing = true
+	return p.requestWriter, nil
+}
 
+func (p *transportAppendSession) writeFrame(writer io.WriteCloser, frame []byte) error {
 	p.markWriteSignalled()
-	_, err = writer.Write(frame)
+	_, err := writer.Write(frame)
 	p.finishWrite()
 	if err != nil {
 		if terminalErr := p.terminalError(); terminalErr != nil {
@@ -296,6 +289,18 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 	}
 
 	return nil
+}
+
+func (p *transportAppendSession) appendInput(input *AppendInput) error {
+	frame, err := p.marshalInput(input)
+	if err != nil {
+		return err
+	}
+	writer, err := p.beginWrite()
+	if err != nil {
+		return err
+	}
+	return p.writeFrame(writer, frame)
 }
 
 func (p *transportAppendSession) ReconnectAdvised() bool {
@@ -404,6 +409,10 @@ func (p *transportAppendSession) readAcksLoop(conn *http.Response) {
 			if isExpectedFrameReadError(err) {
 				return
 			}
+			if errors.Is(err, framing.ErrMalformedFrame) {
+				p.reportErrorIfOpen(makeProtocolError(err, "append session frame"))
+				return
+			}
 			p.reportErrorIfOpen(fmt.Errorf("read frame error: %w", err))
 			return
 		}
@@ -438,7 +447,7 @@ func (p *transportAppendSession) handleFrame(frame *framing.S2SFrame) error {
 
 	var pbAck pb.AppendAck
 	if err := proto.Unmarshal(body, &pbAck); err != nil {
-		return fmt.Errorf("failed to parse AppendAck: %w", err)
+		return makeProtocolError(err, "append session ack decode")
 	}
 
 	ack := convertPbAppendAck(&pbAck)

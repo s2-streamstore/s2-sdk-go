@@ -151,21 +151,21 @@ func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set s
 		defer resp.Body.Close()
 
 		if resp.StatusCode >= 400 {
-			body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-			if readErr != nil {
-				return nil, newBodyReadError(resp.StatusCode, body, readErr)
-			}
-			return nil, decodeAPIError(resp.StatusCode, body)
+			return nil, parseHTTPError(resp)
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, makeConnectionLostError(err, "response body read")
 		}
+		body, err = decompressResponseBody(resp, body)
+		if err != nil {
+			return nil, err
+		}
 
 		var result MetricSetResponse
 		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("decoding response: %w", err)
+			return nil, makeProtocolError(err, "metrics response body decode")
 		}
 
 		return &result, nil

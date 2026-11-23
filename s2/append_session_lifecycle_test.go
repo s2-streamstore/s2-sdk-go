@@ -481,3 +481,113 @@ func TestAppendSession_CleanEndWithUnackedIsConnectionLost(t *testing.T) {
 		t.Fatal("a clean end with an unacked batch was not retried as a lost connection")
 	}
 }
+
+// adviceServerWriter simulates a server that acknowledges every frame actually
+// written to the request stream (marking the first with reconnect advice) and
+// ends the response cleanly as soon as the request stream is closed.
+type adviceServerWriter struct {
+	transport *transportAppendSession
+	mu        sync.Mutex
+	written   int
+	closed    bool
+}
+
+func (w *adviceServerWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	}
+	seq := uint64(w.written)
+	w.written++
+	w.mu.Unlock()
+
+	if seq == 0 {
+		w.transport.reconnectAdvised.Store(true)
+	}
+	w.transport.acksCh <- &AppendAck{
+		Start: StreamPosition{SeqNum: seq},
+		End:   StreamPosition{SeqNum: seq + 1},
+		Tail:  StreamPosition{SeqNum: seq + 1},
+	}
+	return len(p), nil
+}
+
+func (w *adviceServerWriter) Close() error {
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return nil
+	}
+	w.closed = true
+	w.mu.Unlock()
+
+	close(w.transport.errorsCh)
+	close(w.transport.acksCh)
+	return nil
+}
+
+func TestAppendSession_AdviceCleanEndDuringMarshalDoesNotFailQueuedBatch(t *testing.T) {
+	session, transport, _ := newAppendAckDrainSession(t, &RetryConfig{
+		MaxAttempts:       1,
+		AppendRetryPolicy: AppendRetryPolicyNoSideEffects,
+	}, 0)
+	// Compress a large incompressible body on the second batch so marshaling
+	// takes long enough to overlap with readAcks processing the first ACK and
+	// half-closing the request.
+	transport.streamClient.basinClient.compression = CompressionGzip
+	writer := &adviceServerWriter{transport: transport}
+	transport.requestWriter = writer
+
+	first, err := session.enqueueReservedEntry(&AppendInput{
+		Records: []AppendRecord{{Body: []byte("first")}},
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := make([]byte, 512*1024)
+	for i := range big {
+		big[i] = byte(i*31 + i/251)
+	}
+	second, err := session.enqueueReservedEntry(&AppendInput{
+		Records: []AppendRecord{{Body: big}},
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	readDone := make(chan struct{})
+	go func() {
+		session.readAcks(transport)
+		close(readDone)
+	}()
+
+	session.submitInflightBatches()
+
+	select {
+	case <-readDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("readAcks did not finish")
+	}
+
+	select {
+	case res := <-first.resultCh:
+		if res == nil || res.err != nil {
+			t.Fatalf("expected first batch to succeed, got %+v", res)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first batch did not receive ACK")
+	}
+
+	select {
+	case res := <-second.resultCh:
+		if res != nil && res.err != nil {
+			t.Fatalf("second batch failed during advised handover: %v", res.err)
+		}
+	default:
+	}
+
+	if session.closed || session.currentAttempt != 0 {
+		t.Fatalf("advised clean end failed or retried the session (closed=%v attempt=%d)", session.closed, session.currentAttempt)
+	}
+}
