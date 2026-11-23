@@ -197,7 +197,7 @@ func connectStreamInput(
 	startSeqNum, err := cache.Get(ctx, stream)
 	// After Get, so a 416 racing in only raises the generation we capture and
 	// this session's own acks are never dropped as stale.
-	gen := cache.generation(stream)
+	gen := cache.sessionGeneration(stream)
 	if errors.Is(err, ErrNoCacheEntry) {
 		// No cache entry: use the configured default start position.
 		if inputStartSeqNum == InputStartSeqNumLatest {

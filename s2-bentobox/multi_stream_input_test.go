@@ -123,7 +123,7 @@ func TestStaleAckDoesNotOverwrite416TailReset(t *testing.T) {
 	oldSi := &streamInput{
 		Stream:   stream,
 		cache:    cache,
-		toAck:    newToAckMap(stream, cache, cache.generation(stream), silentLogger{}),
+		toAck:    newToAckMap(stream, cache, cache.sessionGeneration(stream), silentLogger{}),
 		nacks:    make(chan []s2.SequencedRecord, 8),
 		Logger:   silentLogger{},
 		closedCh: make(chan struct{}),
@@ -174,7 +174,7 @@ func TestAckAfterTailResetAdvancesCache(t *testing.T) {
 	newSi := &streamInput{
 		Stream:   stream,
 		cache:    cache,
-		toAck:    newToAckMap(stream, cache, cache.generation(stream), silentLogger{}),
+		toAck:    newToAckMap(stream, cache, cache.sessionGeneration(stream), silentLogger{}),
 		nacks:    make(chan []s2.SequencedRecord, 8),
 		Logger:   silentLogger{},
 		closedCh: make(chan struct{}),
@@ -467,5 +467,53 @@ drain:
 
 	if got := connects.Load(); got > 4 {
 		t.Fatalf("expected reconnects paced by %v, got %d connects in %v", backoff, got, 3*backoff)
+	}
+}
+
+// Acks from a removed stream's session that land before the stream is read
+// again must still persist (#294), but once a new session starts they must not
+// overwrite its progress: the stream may have been deleted and recreated.
+func TestLateAckAfterForget(t *testing.T) {
+	const stream = "demo"
+	ctx := context.Background()
+	inner := &mapCache{data: map[string]uint64{}}
+	cache := newSeqNumCache(inner, silentLogger{})
+
+	oldAcks := newToAckMap(stream, cache, cache.sessionGeneration(stream), silentLogger{})
+	first := []s2.SequencedRecord{{SeqNum: 100}}
+	second := []s2.SequencedRecord{{SeqNum: 101}, {SeqNum: 102}}
+	oldAcks.Add(first)
+	oldAcks.Add(second)
+
+	cache.Forget(stream)
+
+	if err := oldAcks.MarkDone(ctx, first, true); err != nil {
+		t.Fatalf("late ack before re-add: %v", err)
+	}
+	if got := inner.data[stream]; got != 101 {
+		t.Fatalf("ack after removal should persist; durable cache got %d, want 101", got)
+	}
+
+	// The stream is deleted, its durable entry cleared, and it is recreated and
+	// read from the start.
+	delete(inner.data, stream)
+	if _, err := cache.Get(ctx, stream); !errors.Is(err, ErrNoCacheEntry) {
+		t.Fatalf("expected miss for recreated stream, got %v", err)
+	}
+	newAcks := newToAckMap(stream, cache, cache.sessionGeneration(stream), silentLogger{})
+	recreated := []s2.SequencedRecord{{SeqNum: 0}, {SeqNum: 1}}
+	newAcks.Add(recreated)
+	if err := newAcks.MarkDone(ctx, recreated, true); err != nil {
+		t.Fatalf("new session ack: %v", err)
+	}
+
+	if err := oldAcks.MarkDone(ctx, second, true); err != nil {
+		t.Fatalf("late ack after re-add: %v", err)
+	}
+	if got := inner.data[stream]; got != 2 {
+		t.Fatalf("old session's ack overwrote the new session's position; durable cache got %d, want 2", got)
+	}
+	if got, err := cache.Get(ctx, stream); err != nil || got != 2 {
+		t.Fatalf("expected in-memory position 2, got %d (err %v)", got, err)
 	}
 }

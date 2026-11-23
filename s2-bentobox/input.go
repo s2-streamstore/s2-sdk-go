@@ -59,6 +59,9 @@ type seqNumCache struct {
 type streamGen struct {
 	mu  sync.Mutex
 	gen uint64
+	// Set by Forget. The next session bumps gen, so acks from sessions before
+	// the Forget still persist until the stream is read again, then drop.
+	forgotten bool
 }
 
 func newSeqNumCache(inner SeqNumCache, logger Logger) *seqNumCache {
@@ -79,10 +82,15 @@ func (s *seqNumCache) streamGenFor(stream string) *streamGen {
 	})
 }
 
-func (s *seqNumCache) generation(stream string) uint64 {
+// Returns the generation for a session that is starting on stream.
+func (s *seqNumCache) sessionGeneration(stream string) uint64 {
 	guard := s.streamGenFor(stream)
 	guard.mu.Lock()
 	defer guard.mu.Unlock()
+	if guard.forgotten {
+		guard.forgotten = false
+		guard.gen++
+	}
 	return guard.gen
 }
 
@@ -115,7 +123,8 @@ func (s *seqNumCache) Get(ctx context.Context, stream string) (uint64, error) {
 
 // Set advances the cached position from an ack. gen is dropped if it's older
 // than the stream's current generation: the ack predates a 416 reset and would
-// move the position back beyond the tail.
+// move the position back beyond the tail, or predates the stream being
+// forgotten and read again, so it may belong to a deleted incarnation.
 func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum, gen uint64) error {
 	guard := s.streamGenFor(stream)
 	guard.mu.Lock()
@@ -126,7 +135,11 @@ func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum, gen uint64
 		return nil
 	}
 
-	s.mem.Set(stream, seqNum)
+	// A forgotten stream's next session reads the durable cache, so don't
+	// shadow it in memory unless memory is all there is.
+	if !guard.forgotten || s.inner == nil {
+		s.mem.Set(stream, seqNum)
+	}
 	if s.inner != nil {
 		if err := s.inner.Set(ctx, stream, seqNum); err != nil {
 			return err
@@ -159,7 +172,16 @@ func (s *seqNumCache) ResetToTail(ctx context.Context, stream string, seqNum uin
 // durable cache. Used when a stream leaves the configured set: if it returns
 // later (possibly delete/recreated), we don't shadow the inner cache with a
 // stale value held only in memory.
+//
+// Acks from earlier sessions keep persisting until the stream is read again,
+// so a re-added stream resumes after them. Once a new session starts they are
+// dropped: they can't be told apart from a deleted incarnation's acks, and
+// would overwrite the new session's progress.
 func (s *seqNumCache) Forget(stream string) {
+	guard := s.streamGenFor(stream)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	guard.forgotten = true
 	s.mem.Remove(stream)
 }
 
