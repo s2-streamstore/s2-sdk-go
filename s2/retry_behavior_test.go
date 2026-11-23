@@ -301,6 +301,13 @@ func TestWithAppendRetries_NoSideEffectsRetriesDialError(t *testing.T) {
 	if !HasNoSideEffects(err) {
 		t.Fatalf("expected a definite final error, got %v", err)
 	}
+
+	_, err = withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		return nil, dialRefusedError()
+	})
+	if !HasNoSideEffects(err) {
+		t.Fatalf("expected a definite error when every dial was refused, got %v", err)
+	}
 }
 
 func TestWithRetries_ContextCancellationStopsRetryLoop(t *testing.T) {

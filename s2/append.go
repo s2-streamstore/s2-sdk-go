@@ -245,6 +245,14 @@ func (p *transportAppendSession) terminalError() error {
 }
 
 func (p *transportAppendSession) appendInput(input *AppendInput) error {
+	// A handover may close the request right after half-closing it; the
+	// input was still never written, so report it as refused, not failed.
+	p.mu.Lock()
+	halfClosed := p.halfClosed
+	p.mu.Unlock()
+	if halfClosed {
+		return errAppendHalfClosed
+	}
 	if p.isClosed() {
 		if err := p.terminalError(); err != nil {
 			return err

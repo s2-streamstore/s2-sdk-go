@@ -131,7 +131,7 @@ func (s *seqNumCache) Set(ctx context.Context, stream string, seqNum, gen uint64
 	defer guard.mu.Unlock()
 
 	if gen < guard.gen {
-		s.logger.With("stream", stream, "seq_num", seqNum).Debug("Dropping ack from before a 416 tail reset")
+		s.logger.With("stream", stream, "seq_num", seqNum).Debug("Dropping stale ack from an earlier session generation")
 		return nil
 	}
 

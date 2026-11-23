@@ -163,6 +163,9 @@ func HasNoSideEffects(err error) bool {
 	if errors.As(err, &indefinite) {
 		return false
 	}
+	if isConnectError(err) {
+		return true
+	}
 	var s2Err *S2Error
 	return errors.As(err, &s2Err) && s2Err.HasNoSideEffects()
 }
