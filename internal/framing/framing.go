@@ -27,12 +27,16 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/protobuf/proto"
 )
+
+// ErrMalformedFrame reports a violation of the S2S wire framing format.
+var ErrMalformedFrame = errors.New("malformed s2s frame")
 
 const (
 	// Maximum S2S frame length (flag + body), 2.5 MiB per protocol spec.
@@ -155,10 +159,10 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 
 	// Validate frame size
 	if length == 0 {
-		return nil, fmt.Errorf("invalid frame: length must be at least 1 (flag byte)")
+		return nil, fmt.Errorf("%w: length must be at least 1 (flag byte)", ErrMalformedFrame)
 	}
 	if length > MaxFrameSize {
-		return nil, fmt.Errorf("frame too large: %d bytes (max %d)", length, MaxFrameSize)
+		return nil, fmt.Errorf("%w: frame too large: %d bytes (max %d)", ErrMalformedFrame, length, MaxFrameSize)
 	}
 
 	// Check if we have the full message
@@ -184,7 +188,7 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 	case 2:
 		compression = CompressionGzip
 	default:
-		return nil, fmt.Errorf("unknown compression type: %d", compressionBits)
+		return nil, fmt.Errorf("%w: unknown compression type: %d", ErrMalformedFrame, compressionBits)
 	}
 
 	// Payload view into the buffer (length includes flag byte, so payload is
@@ -196,7 +200,7 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 	// For terminal frames, extract status code (2 bytes)
 	if terminal {
 		if len(payload) < 2 {
-			return nil, fmt.Errorf("terminal frame missing status code")
+			return nil, fmt.Errorf("%w: terminal frame missing status code", ErrMalformedFrame)
 		}
 		status := int(binary.BigEndian.Uint16(payload[0:2]))
 		statusCode = &status

@@ -57,8 +57,28 @@ var zstdDecoder = func() *zstd.Decoder {
 	return decoder
 }()
 
+// Fallback decoder for streaming zstd frames whose header declares a window
+// larger than MaxDecompressedSize (e.g. zstd.NewWriter's default 8 MiB window).
+// DecodeAll writes directly into dst without allocating WindowSize, and
+// WithDecodeAllCapLimit enforces the MaxDecompressedSize output limit.
+var zstdLargeWindowDecoder = func() *zstd.Decoder {
+	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(0), zstd.WithDecodeAllCapLimit(true))
+	if err != nil {
+		panic(err)
+	}
+	return decoder
+}()
+
 func unzstd(data []byte) ([]byte, error) {
 	out, err := zstdDecoder.DecodeAll(data, nil)
+	if errors.Is(err, zstd.ErrWindowSizeExceeded) {
+		out, err = zstdLargeWindowDecoder.DecodeAll(data, make([]byte, 0, MaxDecompressedSize))
+		if err == nil && len(out) < cap(out)/2 {
+			shrunk := make([]byte, len(out))
+			copy(shrunk, out)
+			out = shrunk
+		}
+	}
 	if errors.Is(err, zstd.ErrDecoderSizeExceeded) {
 		return nil, ErrDecompressedTooLarge
 	}
