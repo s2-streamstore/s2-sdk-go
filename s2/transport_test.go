@@ -23,7 +23,7 @@ func TestStreamingTransportRejectsNonHTTP2Server(t *testing.T) {
 	srv.StartTLS()
 	defer srv.Close()
 
-	rt := newStreamingTransport(2*time.Second, &tls.Config{InsecureSkipVerify: true}, nil)
+	rt := newStreamingTransport(2*time.Second, &tls.Config{InsecureSkipVerify: true}, proxyConfig{})
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
 	resp, err := rt.RoundTrip(req)
 	if err == nil {
@@ -67,7 +67,7 @@ func TestStreamingTransportCoalescesConcurrentDials(t *testing.T) {
 	srv.StartTLS()
 	defer srv.Close()
 
-	rt := newStreamingTransport(5*time.Second, &tls.Config{InsecureSkipVerify: true}, nil)
+	rt := newStreamingTransport(5*time.Second, &tls.Config{InsecureSkipVerify: true}, proxyConfig{})
 	var wg sync.WaitGroup
 	for range n {
 		wg.Add(1)
