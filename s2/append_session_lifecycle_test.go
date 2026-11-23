@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -265,11 +266,11 @@ func TestAppendSession_SubmitOrderSurvivesBackpressure(t *testing.T) {
 	}
 }
 
-func TestAppendSession_AdvisedHandoverDoesNotWaitForResponseEnd(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	stream := newTestStreamClientForAppend(DefaultRetryConfig)
+// newFreshRequestSession returns a session and a function that submits a
+// batch, expects it on a new request, and acks it there with the given advice.
+func newFreshRequestSession(t *testing.T, ctx context.Context, retryCfg *RetryConfig) (*AppendSession, func(seq uint64, advise bool) *transportAppendSession) {
+	t.Helper()
+	stream := newTestStreamClientForAppend(retryCfg)
 	writes := make(chan struct{}, 2)
 	transports := make(chan *transportAppendSession, 2)
 	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
@@ -277,12 +278,12 @@ func TestAppendSession_AdvisedHandoverDoesNotWaitForResponseEnd(t *testing.T) {
 		transports <- transport
 		return transport, nil
 	}
-	session, err := stream.AppendSession(ctx, nil)
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	appendOne := func(seq uint64, advise bool) {
+	return session, func(seq uint64, advise bool) *transportAppendSession {
 		future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
 		if err != nil {
 			t.Fatal(err)
@@ -295,7 +296,7 @@ func TestAppendSession_AdvisedHandoverDoesNotWaitForResponseEnd(t *testing.T) {
 		select {
 		case transport = <-transports:
 		case <-ctx.Done():
-			t.Fatalf("batch %d was held on the advised request", seq)
+			t.Fatalf("batch %d was not sent on a new request", seq)
 		}
 		select {
 		case <-writes:
@@ -311,7 +312,14 @@ func TestAppendSession_AdvisedHandoverDoesNotWaitForResponseEnd(t *testing.T) {
 		if _, err := ticket.Ack(ctx); err != nil {
 			t.Fatal(err)
 		}
+		return transport
 	}
+}
+
+func TestAppendSession_AdvisedHandoverDoesNotWaitForResponseEnd(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	session, appendOne := newFreshRequestSession(t, ctx, DefaultRetryConfig)
 
 	// The advised response stays open and silent after acking everything.
 	appendOne(0, true)
@@ -321,6 +329,48 @@ func TestAppendSession_AdvisedHandoverDoesNotWaitForResponseEnd(t *testing.T) {
 	}
 	if session.currentAttempt != 0 {
 		t.Fatal("advised handover consumed a retry")
+	}
+}
+
+func TestAppendSession_IdleRequestEndUsesNoBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		end  func(*transportAppendSession)
+	}{
+		{"connection breaks", func(transport *transportAppendSession) {
+			transport.reportError(fmt.Errorf("read frame error: %w", io.ErrUnexpectedEOF))
+		}},
+		{"retryable terminal error", func(transport *transportAppendSession) {
+			transport.reportError(&S2Error{Status: 503, Code: "unavailable", Origin: "server"})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			session, appendOne := newFreshRequestSession(t, ctx, &RetryConfig{
+				MaxAttempts:       1,
+				AppendRetryPolicy: AppendRetryPolicyAll,
+			})
+
+			tc.end(appendOne(0, false))
+			for {
+				session.sessionMu.RLock()
+				released := session.currentSession == nil
+				session.sessionMu.RUnlock()
+				if released {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal("ended request was not released")
+				case <-time.After(time.Millisecond):
+				}
+			}
+			appendOne(1, false)
+			if err := session.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

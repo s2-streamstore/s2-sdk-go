@@ -754,6 +754,12 @@ func (r *AppendSession) handOverOnAdvice(session *transportAppendSession) {
 	r.wakeupPump()
 }
 
+func (r *AppendSession) inflightEmpty() bool {
+	r.inflightMu.RLock()
+	defer r.inflightMu.RUnlock()
+	return len(r.inflightQueue) == 0
+}
+
 func (r *AppendSession) hasUnackedOnSession(session *transportAppendSession) bool {
 	r.inflightMu.RLock()
 	defer r.inflightMu.RUnlock()
@@ -810,16 +816,25 @@ func (r *AppendSession) handleClaimedSessionError(failedSession *transportAppend
 		r.wakeupPump()
 	}()
 
-	if isServerDraining(err) {
-		r.stateMu.Lock()
-		r.advisedReconnects.record(time.Now())
-		advisedReconnects := r.advisedReconnects.count
-		r.stateMu.Unlock()
+	var s2Err *S2Error
+	isS2Err := errors.As(err, &s2Err)
+	if (!isS2Err || s2Err.IsRetryable()) && r.inflightEmpty() {
+		// Nothing is unacked or queued, so nothing failed; the next batch
+		// opens a new request.
+		logDebug(r.streamClient.logger, "append session idle request ended",
+			"stream", string(r.streamClient.name),
+			"error", err)
+		return
+	}
+
+	draining := isServerDraining(err)
+	// A drain is a planned handover only if the request made progress;
+	// otherwise it counts as a retry, so a server that keeps draining
+	// exhausts the budget instead of being redialed forever.
+	if draining && failedSession != nil && failedSession.ackReceived.Load() {
 		r.resetInflightAttemptStarts()
 		logInfo(r.streamClient.logger, "append session reconnecting while server drains",
-			"stream", string(r.streamClient.name),
-			"advised_reconnects", advisedReconnects)
-		r.wakeupPump()
+			"stream", string(r.streamClient.name))
 		return
 	}
 
@@ -827,7 +842,8 @@ func (r *AppendSession) handleClaimedSessionError(failedSession *transportAppend
 		"stream", string(r.streamClient.name),
 		"error", err)
 
-	if r.requiresNoSideEffectsRetries() {
+	// Every batch a draining server did not acknowledge was never processed.
+	if r.requiresNoSideEffectsRetries() && !draining {
 		if !r.canRetryUnderNoSideEffects(failedSession, err) {
 			logError(r.streamClient.logger, "append session cannot retry under noSideEffects policy",
 				"stream", string(r.streamClient.name),
@@ -843,8 +859,7 @@ func (r *AppendSession) handleClaimedSessionError(failedSession *transportAppend
 		}
 	}
 
-	var s2Err *S2Error
-	if errors.As(err, &s2Err) && !s2Err.IsRetryable() {
+	if isS2Err && !s2Err.IsRetryable() {
 		logError(r.streamClient.logger, "append session error not retryable",
 			"stream", string(r.streamClient.name),
 			"status", s2Err.Status,

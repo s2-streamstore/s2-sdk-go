@@ -88,6 +88,7 @@ type transportAppendSession struct {
 	terminalErr       error
 	reconnectAdvised  atomic.Bool
 	reconnectDeclined atomic.Bool
+	ackReceived       atomic.Bool
 	poisonCapture     *poisonCapture
 	// halfClosed defers closing the request to the in-progress write, if
 	// any, so a frame is never cut short.
@@ -344,6 +345,7 @@ func (p *transportAppendSession) markWriteSignalled() {
 }
 
 func (p *transportAppendSession) markAckReceived() {
+	p.ackReceived.Store(true)
 	p.mu.Lock()
 	if p.pendingWrites > 0 {
 		p.pendingWrites--
