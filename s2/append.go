@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -88,8 +89,15 @@ type transportAppendSession struct {
 	reconnectAdvised  atomic.Bool
 	reconnectDeclined atomic.Bool
 	poisonCapture     *poisonCapture
-	halfCloseOnce     sync.Once
+	// halfClosed defers closing the request to the in-progress write, if
+	// any, so a frame is never cut short.
+	halfClosed bool
+	writing    bool
 }
+
+// errAppendHalfClosed reports that an input was not sent because the request
+// was half-closed for a reconnect.
+var errAppendHalfClosed = errors.New("append request half-closed")
 
 func (s *StreamClient) createAppendSession(ctx context.Context, streamConfig *StreamConfig) (*transportAppendSession, error) {
 	if s.appendSessionFactory != nil {
@@ -258,7 +266,12 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 	}
 
 	p.mu.Lock()
+	if p.halfClosed {
+		p.mu.Unlock()
+		return errAppendHalfClosed
+	}
 	writer := p.requestWriter
+	p.writing = writer != nil
 	p.mu.Unlock()
 	if writer == nil {
 		if err := p.terminalError(); err != nil {
@@ -269,6 +282,7 @@ func (p *transportAppendSession) appendInput(input *AppendInput) error {
 
 	p.markWriteSignalled()
 	_, err = writer.Write(frame)
+	p.finishWrite()
 	if err != nil {
 		if terminalErr := p.terminalError(); terminalErr != nil {
 			return terminalErr
@@ -296,16 +310,31 @@ func (p *transportAppendSession) declineReconnect() {
 
 // halfClose ends input while acknowledgements remain readable.
 func (p *transportAppendSession) halfClose() {
-	p.halfCloseOnce.Do(func() {
-		p.mu.Lock()
-		requestWriter := p.requestWriter
-		p.requestWriter = nil
-		p.mu.Unlock()
+	p.mu.Lock()
+	p.halfClosed = true
+	var requestWriter io.WriteCloser
+	if !p.writing {
+		requestWriter, p.requestWriter = p.requestWriter, nil
+	}
+	p.mu.Unlock()
 
-		if requestWriter != nil {
-			requestWriter.Close()
-		}
-	})
+	if requestWriter != nil {
+		requestWriter.Close()
+	}
+}
+
+func (p *transportAppendSession) finishWrite() {
+	p.mu.Lock()
+	p.writing = false
+	var requestWriter io.WriteCloser
+	if p.halfClosed {
+		requestWriter, p.requestWriter = p.requestWriter, nil
+	}
+	p.mu.Unlock()
+
+	if requestWriter != nil {
+		requestWriter.Close()
+	}
 }
 
 func (p *transportAppendSession) markWriteSignalled() {

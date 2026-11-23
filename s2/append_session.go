@@ -498,43 +498,80 @@ func (r *AppendSession) submitInflightBatches() {
 		}
 		entry.sentOnSessions = append(entry.sentOnSessions, session)
 		r.sessionRefs[session]++
-		if entry.attemptStart.IsZero() {
+		stamped := entry.attemptStart.IsZero()
+		if stamped {
 			entry.attemptStart = time.Now()
 		}
 		r.inflightMu.Unlock()
 
 		if err := session.appendInput(entry.input); err != nil {
+			if errors.Is(err, errAppendHalfClosed) {
+				// Reconnect advice arrived mid-loop; the rest go on the next
+				// request. The ACK reader may have seen this entry as unacked.
+				r.unmarkSent(entry, session, stamped)
+				if !r.hasUnackedOnSession(session) {
+					r.handOverOnAdvice(session)
+				}
+				return
+			}
 			r.handleSessionError(session, err)
 			return
 		}
 	}
 }
 
+func (r *AppendSession) unmarkSent(entry *inflightEntry, session *transportAppendSession, stamped bool) {
+	r.inflightMu.Lock()
+	defer r.inflightMu.Unlock()
+	for i, sent := range entry.sentOnSessions {
+		if sent == session {
+			entry.sentOnSessions = append(entry.sentOnSessions[:i], entry.sentOnSessions[i+1:]...)
+			break
+		}
+	}
+	if count, ok := r.sessionRefs[session]; ok {
+		if count <= 1 {
+			delete(r.sessionRefs, session)
+		} else {
+			r.sessionRefs[session] = count - 1
+		}
+	}
+	if stamped {
+		entry.attemptStart = time.Time{}
+	}
+}
+
 func (r *AppendSession) readAcks(session *transportAppendSession) {
 	// Both channels are closed when the response ends, and select picks a
-	// ready case at random, so either one can win. Reconnect from a single
-	// exit point rather than from whichever branch happens to observe it.
+	// ready case at random, so either one can win. Handle the end from a
+	// single exit point rather than from whichever branch observes it.
 	endedCleanly := false
 	reconnectAccepted := false
 	defer func() {
-		if endedCleanly && reconnectAccepted {
-			r.handleReconnectAdvice(session)
+		if endedCleanly && reconnectAccepted && r.hasUnackedOnSession(session) {
+			r.handleSessionError(session, fmt.Errorf("append session ended before acknowledging all appends"))
 		}
 	}()
 	adviceHandled := false
+	handedOver := false
 	processAck := func(ack *AppendAck) {
 		r.handleAck(session, ack)
 		if session.ReconnectAdvised() && !adviceHandled {
 			adviceHandled = true
-			if r.shouldReconnectOnAdvice() {
+			if r.acceptReconnectAdvice() {
 				reconnectAccepted = true
-				// Half-close so the server acknowledges accepted appends
-				// and then ends the response.
+				// Stop sending so the server acknowledges what it accepted.
 				session.halfClose()
 			} else {
 				session.declineReconnect()
 				r.wakeupPump()
 			}
+		}
+		// Hand over once everything sent is acknowledged, without waiting
+		// for the server to end the response, which it may not do promptly.
+		if reconnectAccepted && !handedOver && !r.hasUnackedOnSession(session) {
+			handedOver = true
+			r.handOverOnAdvice(session)
 		}
 	}
 	acksCh := session.acksCh
@@ -586,10 +623,15 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 	}
 }
 
-func (r *AppendSession) shouldReconnectOnAdvice() bool {
-	r.stateMu.RLock()
-	defer r.stateMu.RUnlock()
-	return r.advisedReconnects.shouldReconnect(time.Now())
+func (r *AppendSession) acceptReconnectAdvice() bool {
+	now := time.Now()
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	if !r.advisedReconnects.shouldReconnect(now) {
+		return false
+	}
+	r.advisedReconnects.record(now)
+	return true
 }
 
 func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAck) {
@@ -686,8 +728,8 @@ func (r *AppendSession) validateAckLocked(entry *inflightEntry, ack *AppendAck) 
 	return nil
 }
 
-// handleReconnectAdvice reconnects without consuming the retry budget.
-func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
+// handOverOnAdvice moves to a new request without consuming the retry budget.
+func (r *AppendSession) handOverOnAdvice(session *transportAppendSession) {
 	r.closedMu.RLock()
 	closed := r.closed
 	r.closedMu.RUnlock()
@@ -695,33 +737,19 @@ func (r *AppendSession) handleReconnectAdvice(session *transportAppendSession) {
 		return
 	}
 
-	// A clean end with unacknowledged appends is a truncated response, so the
-	// ordinary retry policy decides whether to resend them.
-	if r.hasUnackedOnSession(session) {
-		r.handleSessionError(session, fmt.Errorf("append session ended before acknowledging all appends"))
-		return
-	}
-
 	r.sessionMu.Lock()
 	if r.currentSession != session {
 		r.sessionMu.Unlock()
-		r.closeSessionIfUnused(session)
 		return
 	}
 	r.currentSession = nil
 	r.sessionMu.Unlock()
-	r.closeSessionIfUnused(session)
-
 	// The advised connection was already poisoned when the advice was first
 	// decoded, so reconnecting dials a fresh one.
-	r.stateMu.Lock()
-	r.advisedReconnects.record(time.Now())
-	advisedReconnects := r.advisedReconnects.count
-	r.stateMu.Unlock()
+	r.closeSessionIfUnused(session)
 
 	logInfo(r.streamClient.logger, "append session reconnecting on server advice",
-		"stream", string(r.streamClient.name),
-		"advised_reconnects", advisedReconnects)
+		"stream", string(r.streamClient.name))
 
 	r.wakeupPump()
 }
