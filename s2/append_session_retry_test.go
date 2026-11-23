@@ -704,6 +704,54 @@ func TestAppendSession_NoSideEffectsRetriesWhenEffectNotSignalled(t *testing.T) 
 	}
 }
 
+// Canceling the session context aborts it. A batch already written to the
+// server may have been applied, so its error must not claim no side effects.
+func TestAppendSession_AbortReportsSentBatchAsIndefinite(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
+	stream := newTestStreamClientForAppend(retryCfg)
+	writeSignal := make(chan struct{}, 1)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		return newTransportSession(stream, &signalWriteCloser{signal: writeSignal}), nil
+	}
+
+	sessionCtx, abort := context.WithCancel(ctx)
+	session, err := stream.AppendSession(sessionCtx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatalf("append session failed: %v", err)
+	}
+	defer session.Close()
+
+	future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+	if err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatalf("wait failed: %v", err)
+	}
+	select {
+	case <-writeSignal:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the batch to be written")
+	}
+
+	abort()
+
+	_, err = ticket.Ack(ctx)
+	if err == nil {
+		t.Fatal("expected ack error after abort")
+	}
+	if !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("expected error to match ErrSessionClosed, got %v", err)
+	}
+	if HasNoSideEffects(err) {
+		t.Fatalf("sent batch reported as side-effect free after abort: %v", err)
+	}
+}
+
 func TestAppendSession_NoSideEffectsNoRetryWithNonIdempotentSentPipeline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

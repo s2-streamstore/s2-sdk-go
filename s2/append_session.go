@@ -1003,8 +1003,14 @@ func (r *AppendSession) failAllInflight(err error) {
 func (r *AppendSession) failAllInflightLocked(err error) []*transportAppendSession {
 	for _, entry := range r.inflightQueue {
 		if atomic.CompareAndSwapInt32(&entry.completed, 0, 1) {
+			result := withPriorUncertainty(err, entry.priorUncertainty)
+			if len(entry.sentOnSessions) > 0 && errors.Is(err, ErrSessionClosed) && HasNoSideEffects(result) {
+				// An abort (canceled session context) can end a batch already
+				// written to the server, so it may have taken effect (spec A8c).
+				result = &AppendIndefiniteFailureError{FinalAttemptError: err}
+			}
 			select {
-			case entry.resultCh <- &inflightResult{err: withPriorUncertainty(err, entry.priorUncertainty)}:
+			case entry.resultCh <- &inflightResult{err: result}:
 				close(entry.resultCh)
 			default:
 			}
