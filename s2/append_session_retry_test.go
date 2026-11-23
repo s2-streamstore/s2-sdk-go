@@ -3,8 +3,10 @@ package s2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -798,11 +800,20 @@ func TestAppendSession_HandleSessionErrorIsIdempotentAcrossConcurrentCalls(t *te
 		t.Fatalf("AppendSession: %v", err)
 	}
 	defer session.Close()
+	defer session.pumpCancel()
 
 	failed := newTransportSession(stream, &signalWriteCloser{})
 	session.sessionMu.Lock()
 	session.currentSession = failed
 	session.sessionMu.Unlock()
+	// An idle session's failure uses no budget, so give it a batch.
+	session.inflightMu.Lock()
+	session.inflightQueue = append(session.inflightQueue, &inflightEntry{
+		input:         &AppendInput{Records: []AppendRecord{{Body: []byte("x")}}},
+		expectedCount: 1,
+		resultCh:      make(chan *inflightResult, 1),
+	})
+	session.inflightMu.Unlock()
 
 	const callers = 8
 	var wg sync.WaitGroup
@@ -950,5 +961,102 @@ func TestAppendSession_WriteUnblockedByTerminalErrorUsesServerError(t *testing.T
 	session.stateMu.RUnlock()
 	if attempt != 0 {
 		t.Fatalf("non-retryable terminal error should not consume a retry attempt, got %d", attempt)
+	}
+}
+
+func TestAppendSession_PersistentDrainExhaustsRetries(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       3,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}
+	stream := newTestStreamClientForAppend(retryCfg)
+	var requests atomic.Int32
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		requests.Add(1)
+		transport := newTransportSession(stream, &signalWriteCloser{})
+		transport.reportError(&S2Error{Status: 503, Code: "server_draining", Origin: "server"})
+		return transport, nil
+	}
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Drains that make no progress count as retries.
+	if _, err := ticket.Ack(ctx); !isServerDraining(err) {
+		t.Fatalf("expected the drain error once retries ran out, got %v", err)
+	}
+	if got := requests.Load(); got != int32(retryCfg.MaxAttempts) {
+		t.Fatalf("expected %d requests, got %d", retryCfg.MaxAttempts, got)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAppendSession_NoSideEffectsRetriesRefusedConnection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	retryCfg := &RetryConfig{
+		MaxAttempts:       2,
+		MinBaseDelay:      time.Millisecond,
+		MaxBaseDelay:      time.Millisecond,
+		AppendRetryPolicy: AppendRetryPolicyNoSideEffects,
+	}
+	stream := newTestStreamClientForAppend(retryCfg)
+	writes := make(chan struct{}, 2)
+	transports := make(chan *transportAppendSession, 2)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		transport := newTransportSession(stream, &signalWriteCloser{signal: writes})
+		transports <- transport
+		return transport, nil
+	}
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := future.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	next := func() *transportAppendSession {
+		select {
+		case transport := <-transports:
+			<-writes
+			return transport
+		case <-ctx.Done():
+			t.Fatal("batch was not retried on a new request")
+			return nil
+		}
+	}
+	// The batch was handed to the request body, but the connection was
+	// refused, so none of it left the client.
+	next().reportError(fmt.Errorf("failed to connect: %w", dialRefusedError()))
+	next().acksCh <- &AppendAck{
+		Start: StreamPosition{SeqNum: 0},
+		End:   StreamPosition{SeqNum: 1},
+		Tail:  StreamPosition{SeqNum: 1},
+	}
+	if _, err := ticket.Ack(ctx); err != nil {
+		t.Fatalf("expected the batch to be retried after a refused connection, got %v", err)
 	}
 }

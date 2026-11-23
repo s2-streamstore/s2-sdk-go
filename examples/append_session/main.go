@@ -19,8 +19,8 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	client := s2.NewFromEnvironment(&s2.ClientOptions{
-		Logger: logger,
-		RequestTimeout:     12 * time.Second,
+		Logger:         logger,
+		RequestTimeout: 12 * time.Second,
 		RetryConfig: &s2.RetryConfig{
 			MaxAttempts:       math.MaxInt,
 			AppendRetryPolicy: s2.AppendRetryPolicyAll,
@@ -35,7 +35,7 @@ func main() {
 	stream := basin.Stream("<your-stream>")
 
 	session, err := stream.AppendSession(ctx, &s2.AppendSessionOptions{
-		MaxInflightBytes: 2000,
+		MaxInflightBytes: 1 << 20, // the minimum: 1 MiB
 	})
 	if err != nil {
 		log.Fatalf("open append session: %v", err)
