@@ -16,6 +16,12 @@ type MultiStreamInput struct {
 }
 
 func ConnectMultiStreamInput(ctx context.Context, config *InputConfig) (*MultiStreamInput, error) {
+	if config.Logger == nil {
+		cfg := *config
+		cfg.Logger = nopLogger{}
+		config = &cfg
+	}
+
 	client := newClient(config.Config)
 	basin := client.Basin(config.Basin)
 

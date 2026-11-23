@@ -265,7 +265,7 @@ type InputConfig struct {
 	// stopped once a full scan completes. Defaults to 1 second.
 	ListStreamsPageInterval time.Duration
 	Cache                   SeqNumCache
-	Logger                  Logger
+	Logger                  Logger // Optional; logs are discarded when nil.
 	BackoffDuration         time.Duration
 	StartSeqNum             InputStartSeqNum
 }
