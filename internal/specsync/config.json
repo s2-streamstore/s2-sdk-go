@@ -40,6 +40,7 @@
     "BasinState": "Not referenced by any schema or operation in the spec.",
     "EnsureBasinRequest": "EnsureBasinArgs combines this body with its basin path parameter and therefore has an extra field.",
     "Cidr": "The SDK represents CIDRs as ordinary strings within its network policy model.",
+    "ErrorEventData": "This is nested in the SDK-owned ReadEvent union; the Go read API reports read errors as S2Error instead.",
     "FencingToken": "The SDK represents fencing tokens as ordinary strings within its SDK-owned append and error models.",
     "Format": "The SDK's record API uses byte bodies and its protobuf transport rather than exposing the HTTP s2-format header.",
     "NetworkPolicyRef": "The SDK represents network policy references as ordinary strings.",

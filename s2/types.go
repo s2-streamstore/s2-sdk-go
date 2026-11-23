@@ -15,7 +15,7 @@ type AccessTokenID string
 type BasinName string
 
 // Stream name that is unique to the basin.
-// It can be between 1 and 512 bytes in length, and must not contain NUL bytes.
+// It can be between 1 and 253 bytes in length, and must not contain NUL bytes.
 type StreamName string
 
 // LocationName identifies where a basin is placed.
@@ -39,7 +39,7 @@ type StreamMetricSet string
 type MetricSample [2]float64
 type TimestampingMode string
 
-// ProvisionResult indicates whether provisioning created, updated, or skipped writing a resource.
+// Outcome of a create or ensure operation, reported in the `s2-provision-result` response header.
 type ProvisionResult string
 
 const (
@@ -820,7 +820,7 @@ type ListStreamsArgs struct {
 
 type CreateStreamArgs struct {
 	// Stream name that is unique to the basin.
-	// It can be between 1 and 512 bytes in length, and must not contain NUL bytes.
+	// It can be between 1 and 253 bytes in length, and must not contain NUL bytes.
 	Stream StreamName `json:"stream"`
 	// Stream configuration.
 	Config *StreamConfig `json:"config,omitempty"`
