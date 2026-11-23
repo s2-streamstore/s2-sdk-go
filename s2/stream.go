@@ -138,7 +138,7 @@ func decompressResponseBody(resp *http.Response, data []byte) ([]byte, error) {
 	if encoding == "" {
 		return data, nil
 	}
-	decompressed, err := internalframing.Decompress(data, internalframing.ParseContentEncoding(encoding))
+	decompressed, err := internalframing.DecompressUnlimited(data, internalframing.ParseContentEncoding(encoding))
 	if err != nil {
 		return nil, makeProtocolError(err, "response body decompression")
 	}

@@ -99,3 +99,34 @@ func unzstdStream(data []byte) ([]byte, error) {
 	}
 	return out, nil
 }
+
+// DecompressUnlimited decompresses a unary response body. Only session frames
+// have a decompressed size limit; unary bodies are not bounded uncompressed
+// either, and legitimate ones (such as long-range metrics) can exceed it.
+func DecompressUnlimited(data []byte, compression CompressionType) ([]byte, error) {
+	var reader io.ReadCloser
+	switch compression {
+	case CompressionNone:
+		return data, nil
+	case CompressionGzip:
+		gz, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("gzip reader: %w", err)
+		}
+		reader = gz
+	case CompressionZstd:
+		zr, err := zstd.NewReader(bytes.NewReader(data), zstd.WithDecoderConcurrency(1))
+		if err != nil {
+			return nil, fmt.Errorf("zstd reader: %w", err)
+		}
+		reader = zr.IOReadCloser()
+	default:
+		return nil, fmt.Errorf("unknown compression type: %d", compression)
+	}
+	defer reader.Close()
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("decompress: %w", err)
+	}
+	return out, nil
+}
