@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -433,4 +434,38 @@ func TestSeqNumCacheGetMissLogging(t *testing.T) {
 			t.Fatalf("backend error should warn once; got %d warnings", warns)
 		}
 	})
+}
+
+// Read sessions connect lazily, so a stream that keeps failing surfaces each
+// failure from ReadBatch rather than from connect. Reconnects must still be
+// paced by BackoffDuration instead of hot-looping against the server.
+func TestStreamSourceBacksOffAfterReadError(t *testing.T) {
+	const backoff = 100 * time.Millisecond
+
+	var connects atomic.Int64
+	connect := func(context.Context) (recvBatchSource, error) {
+		connects.Add(1)
+		return &fakeBatchSource{results: []readResult{{err: errors.New("stream not found")}}}, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	inputStream := make(chan recvOutput)
+	closer := make(chan struct{})
+	go streamSource(ctx, connect, silentLogger{}, newSeqNumCache(nil, silentLogger{}), "demo", backoff, inputStream, closer)
+
+	deadline := time.After(3 * backoff)
+drain:
+	for {
+		select {
+		case <-inputStream:
+		case <-deadline:
+			break drain
+		}
+	}
+	cancel()
+	<-closer
+
+	if got := connects.Load(); got > 4 {
+		t.Fatalf("expected reconnects paced by %v, got %d connects in %v", backoff, got, 3*backoff)
+	}
 }
