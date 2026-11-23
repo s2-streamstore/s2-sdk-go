@@ -258,6 +258,7 @@ func TestClient_RequiresBothEndpoints(t *testing.T) {
 	t.Setenv(envAccountEndpoint, "")
 	t.Setenv(envBasinEndpoint, "localhost:8080")
 	expectValidationPanic("basin env only", func() { NewFromEnvironment(nil) })
+	NewFromEnvironment(&ClientOptions{BaseURL: "http://localhost:9000", MakeBasinBaseURL: testBasinBaseURL})
 
 	if got := New("token", &ClientOptions{BaseURL: DefaultBaseURL}).Basin("demo").baseURL; got != "https://demo.b.s2.dev/v1" {
 		t.Fatalf("expected default basin endpoint with explicit DefaultBaseURL, got %q", got)

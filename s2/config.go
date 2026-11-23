@@ -32,6 +32,7 @@ type Config struct {
 // Returns ClientOptions with endpoints from S2_ACCOUNT_ENDPOINT and S2_BASIN_ENDPOINT.
 func LoadConfigFromEnv() *ClientOptions {
 	cfg := loadConfigFromEnv()
+	cfg.requireEndpointPair()
 	opts := &ClientOptions{}
 	if cfg.AccountTemplate != nil {
 		opts.BaseURL = cfg.AccountTemplate.baseURL("")
@@ -63,11 +64,15 @@ func loadConfigFromEnv() *Config {
 		cfg.BasinTemplate = template
 	}
 
+	return cfg
+}
+
+// Options override the environment, so NewFromEnvironment only checks this
+// when they leave both endpoints unset; New checks the merged pair.
+func (cfg *Config) requireEndpointPair() {
 	if (cfg.AccountTemplate == nil) != (cfg.BasinTemplate == nil) {
 		panic(newValidationError(envAccountEndpoint + " and " + envBasinEndpoint + " must be set together"))
 	}
-
-	return cfg
 }
 
 var schemePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)

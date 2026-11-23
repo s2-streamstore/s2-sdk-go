@@ -342,6 +342,9 @@ func NewFromEnvironment(opts *ClientOptions) *Client {
 	if envConfig.AccessToken == "" {
 		panic("S2_ACCESS_TOKEN environment variable is required")
 	}
+	if opts.BaseURL == "" && opts.MakeBasinBaseURL == nil {
+		envConfig.requireEndpointPair()
+	}
 
 	effectiveOpts := &ClientOptions{
 		HTTPClient:        opts.HTTPClient,
