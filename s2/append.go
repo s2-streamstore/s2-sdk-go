@@ -174,14 +174,7 @@ func (p *transportAppendSession) connectAndRead(req *http.Request, pipeWriter *i
 	}
 
 	if resp.StatusCode >= 400 {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		resp.Body.Close()
-		var apiErr error
-		if readErr != nil {
-			apiErr = newBodyReadError(resp.StatusCode, body, readErr)
-		} else {
-			apiErr = decodeAPIError(resp.StatusCode, body)
-		}
+		apiErr := parseHTTPError(resp)
 		if isServerDraining(apiErr) {
 			p.poisonCapture.poison()
 		}

@@ -763,3 +763,33 @@ func TestReadSessionCleanEndRetriesWithoutStopOption(t *testing.T) {
 		})
 	}
 }
+
+func TestReadSessionDecodesCompressedErrorResponse(t *testing.T) {
+	body, err := internalframing.Compress([]byte(`{"code":"invalid","message":"bad stream config"}`), internalframing.CompressionGzip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		header := make(http.Header)
+		header.Set("Content-Encoding", "gzip")
+		return &http.Response{
+			StatusCode: http.StatusUnprocessableEntity,
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Header:     header,
+			Request:    req,
+		}, nil
+	})
+	session, err := newFrameServedStreamClient(rt).ReadSession(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("open read session: %v", err)
+	}
+	defer session.Close()
+
+	if session.Next() {
+		t.Fatal("unexpected record")
+	}
+	var s2Err *S2Error
+	if !errors.As(session.Err(), &s2Err) || s2Err.Code != "invalid" || s2Err.Message != "bad stream config" {
+		t.Fatalf("expected decoded server error, got %v", session.Err())
+	}
+}

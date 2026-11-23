@@ -1,5 +1,7 @@
 package framing
 
+import "strings"
+
 // CompressionType describes the frame-level compression encoding used for payloads.
 type CompressionType uint8
 
@@ -31,7 +33,7 @@ func (c CompressionType) AcceptEncoding() string {
 }
 
 func ParseContentEncoding(encoding string) CompressionType {
-	switch encoding {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "zstd":
 		return CompressionZstd
 	case "gzip":

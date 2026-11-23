@@ -200,21 +200,7 @@ func (h *httpClient) requestProto(
 	logInfo(h.logger, "s2 http proto response", "method", method, "path", path, "status", resp.StatusCode)
 
 	if resp.StatusCode >= 400 {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		if readErr != nil {
-			bodyErr := newBodyReadError(resp.StatusCode, body, readErr)
-			logError(h.logger, "s2 http proto error response body read failed", "method", method, "path", path, "status", resp.StatusCode, "error", readErr)
-			return bodyErr
-		}
-		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
-			respCompression := internalframing.ParseContentEncoding(encoding)
-			decompressed, err := internalframing.Decompress(body, respCompression)
-			if err != nil {
-				return fmt.Errorf("decompress error response body: %w", err)
-			}
-			body = decompressed
-		}
-		apiErr := decodeAPIError(resp.StatusCode, body)
+		apiErr := parseHTTPError(resp)
 		logError(h.logger, "s2 http proto error response", "method", method, "path", path, "status", resp.StatusCode, "message", apiErr.Error())
 		return apiErr
 	}

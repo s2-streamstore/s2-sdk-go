@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/s2-streamstore/s2-sdk-go/generated"
+	internalframing "github.com/s2-streamstore/s2-sdk-go/internal/framing"
 )
 
 type StreamClient struct {
@@ -117,6 +118,15 @@ func parseHTTPError(resp *http.Response) error {
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	if readErr != nil {
 		return newBodyReadError(resp.StatusCode, body, readErr)
+	}
+	// Requests that set Accept-Encoding themselves get compressed error
+	// bodies back as-is.
+	if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
+		decompressed, err := internalframing.Decompress(body, internalframing.ParseContentEncoding(encoding))
+		if err != nil {
+			return decodeAPIError(resp.StatusCode, nil)
+		}
+		body = decompressed
 	}
 	return decodeAPIError(resp.StatusCode, body)
 }
