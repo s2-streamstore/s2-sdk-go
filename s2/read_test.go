@@ -43,3 +43,51 @@ func TestUnaryReadWaitExtendsRequestTimeout(t *testing.T) {
 		t.Fatalf("long-poll read failed: %v", err)
 	}
 }
+
+func TestUnaryCallRetriesTruncatedResponseBody(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+		call func(*StreamClient) error
+	}{
+		{
+			name: "proto",
+			call: func(s *StreamClient) error {
+				_, err := s.Read(context.Background(), &ReadOptions{Count: Uint64(1)})
+				return err
+			},
+		},
+		{
+			name: "json",
+			body: []byte(`{"tail":{"seq_num":1,"timestamp":2}}`),
+			call: func(s *StreamClient) error {
+				_, err := s.CheckTail(context.Background())
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					return okResponse(req, io.MultiReader(bytes.NewReader([]byte("{")), bodyErrReader{io.ErrUnexpectedEOF})), nil
+				}
+				return okResponse(req, bytes.NewReader(tt.body)), nil
+			})
+			stream := newUnaryTestStreamClient(&http.Client{Transport: rt}, 2)
+
+			if err := tt.call(stream); err != nil {
+				t.Fatalf("expected retry to succeed, got %v", err)
+			}
+			if calls != 2 {
+				t.Fatalf("expected 2 attempts, got %d", calls)
+			}
+		})
+	}
+}
+
+type bodyErrReader struct{ err error }
+
+func (r bodyErrReader) Read([]byte) (int, error) { return 0, r.err }

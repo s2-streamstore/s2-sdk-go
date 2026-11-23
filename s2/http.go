@@ -99,7 +99,12 @@ func (h *httpClient) requestWithHeadersResult(ctx context.Context, method, path 
 	}
 
 	if result != nil && resp.StatusCode != http.StatusNoContent {
-		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logError(h.logger, "s2 http read response error", "error", err, "method", method, "path", path)
+			return nil, makeConnectionLostError(err, "response body read")
+		}
+		if err := json.Unmarshal(data, result); err != nil {
 			logError(h.logger, "s2 http decode response error", "error", err, "method", method, "path", path)
 			return nil, fmt.Errorf("decode response: %w", err)
 		}
@@ -217,7 +222,7 @@ func (h *httpClient) requestProto(
 	if result != nil && resp.StatusCode != http.StatusNoContent {
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return fmt.Errorf("read proto response: %w", err)
+			return makeConnectionLostError(err, "response body read")
 		}
 
 		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {

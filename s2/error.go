@@ -335,6 +335,22 @@ func makeStreamResetError(err error, context string) error {
 	}
 }
 
+// makeConnectionLostError reports a response that broke or ended before it was
+// complete; it is retryable like any other network failure.
+func makeConnectionLostError(err error, context string) *S2Error {
+	message := fmt.Sprintf("Connection lost during %s", context)
+	if err != nil {
+		message = fmt.Sprintf("%s: %s", message, err.Error())
+	}
+
+	return &S2Error{
+		Message: message,
+		Code:    "CONNECTION_LOST",
+		Status:  502,
+		Origin:  "network",
+	}
+}
+
 func makeAppendPreconditionError(status int, jsonMap map[string]interface{}) error {
 	if seqNumMismatch, exists := jsonMap["seq_num_mismatch"]; exists {
 		if expectedSeqNum, ok := seqNumMismatch.(float64); ok {
