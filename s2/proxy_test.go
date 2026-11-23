@@ -82,7 +82,7 @@ func TestStreamingClientUsesUserProxy(t *testing.T) {
 			http.Error(w, "CONNECT only", http.StatusMethodNotAllowed)
 			return
 		}
-		if r.Header.Get("Proxy-Authorization") != "Basic dXNlcjpwYXNz" {
+		if r.Header.Get("Proxy-Authorization") != "Basic dXNlcjpwYXNz" || r.Header.Get("X-Proxy-Token") != "secret" {
 			http.Error(w, "bad credentials", http.StatusProxyAuthRequired)
 			return
 		}
@@ -117,6 +117,12 @@ func TestStreamingClientUsesUserProxy(t *testing.T) {
 	proxyURL.User = url.UserPassword("user", "pass")
 	transport := trustingTransport(server, proxy)
 	transport.Proxy = http.ProxyURL(proxyURL)
+	transport.ProxyConnectHeader = http.Header{"X-Proxy-Token": {"secret"}}
+	var connectResponses atomic.Int32
+	transport.OnProxyConnectResponse = func(context.Context, *url.URL, *http.Request, *http.Response) error {
+		connectResponses.Add(1)
+		return nil
+	}
 
 	client := New("token", &ClientOptions{HTTPClient: &http.Client{Transport: transport}})
 	if err := streamingGet(t, client, server.URL); err != nil {
@@ -124,6 +130,9 @@ func TestStreamingClientUsesUserProxy(t *testing.T) {
 	}
 	if got := connects.Load(); got != 1 {
 		t.Fatalf("expected 1 CONNECT through the proxy, got %d", got)
+	}
+	if got := connectResponses.Load(); got != 1 {
+		t.Fatalf("expected OnProxyConnectResponse to see 1 CONNECT response, got %d", got)
 	}
 }
 

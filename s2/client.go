@@ -132,10 +132,10 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	// Streaming uses its own HTTP/2 transport; carry over the TLS and proxy
 	// settings of a user-provided transport so it reaches the same endpoints.
 	var streamingTLSConfig *tls.Config
-	var streamingProxy proxyFunc
+	var streamingProxy proxyConfig
 	if t, ok := baseTransport.(*http.Transport); ok && opts.HTTPClient != nil {
 		streamingTLSConfig = t.TLSClientConfig
-		streamingProxy = t.Proxy
+		streamingProxy = proxyConfigFromTransport(t)
 	}
 	httpClient.Transport = userAgentRoundTripper{
 		base:      baseTransport,
@@ -227,7 +227,7 @@ func (t *schemeAwareTransport) CloseIdleConnections() {
 	t.h2c.CloseIdleConnections()
 }
 
-func createStreamingClient(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyFunc) *http.Client {
+func createStreamingClient(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyConfig) *http.Client {
 	newTransport := func() http.RoundTripper {
 		return newStreamingTransport(connectionTimeout, tlsConfig, proxy)
 	}
@@ -241,14 +241,14 @@ func createStreamingClient(connectionTimeout time.Duration, tlsConfig *tls.Confi
 	}
 }
 
-func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyFunc) http.RoundTripper {
+func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Config, proxy proxyConfig) http.RoundTripper {
 	if tlsConfig != nil {
 		tlsConfig = tlsConfig.Clone()
 	}
 	dialer := &streamingDialer{
-		dialer:    &net.Dialer{Timeout: connectionTimeout},
-		proxy:     proxy,
-		tlsConfig: tlsConfig,
+		proxyConfig: proxy,
+		dialer:      &net.Dialer{Timeout: connectionTimeout},
+		tlsConfig:   tlsConfig,
 	}
 
 	h2cTransport := &http2.Transport{
