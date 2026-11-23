@@ -407,10 +407,9 @@ func TestBatcher_AddReportsRecordsDroppedOnCancel(t *testing.T) {
 	}
 }
 
-// Close must not block when Batches is full and nobody is draining it yet,
-// e.g. when the consumer is the goroutine calling Close, whether the pending
-// batch is still buffered or a linger flush is already waiting to send it. The
-// final batch must still be delivered once the consumer drains.
+// Close waits until the consumer receives the final batch (whether buffered or
+// already being flushed by a linger timer) without holding the lock across the
+// wait, so concurrent Add calls fail fast instead of blocking behind Close.
 func TestBatcher_CloseWaitsForConsumerWithoutBlockingOthers(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

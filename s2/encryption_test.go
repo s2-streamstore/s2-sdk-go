@@ -36,6 +36,38 @@ func TestNewEncryptionKeyTrimsBase64Material(t *testing.T) {
 	}
 }
 
+func TestNewEncryptionKeyValidation(t *testing.T) {
+	// Non-32-byte valid base64 is accepted; required cipher key length is
+	// validated by the server (spec C4).
+	shortKey, err := NewEncryptionKey("AQIDBA==")
+	if err != nil {
+		t.Fatalf("expected non-32-byte valid base64 key to succeed, got %v", err)
+	}
+	if got := shortKey.headerValue(); got != "AQIDBA==" {
+		t.Fatalf("expected header value %q, got %q", "AQIDBA==", got)
+	}
+
+	invalid := []struct {
+		name string
+		key  string
+	}{
+		{name: "empty", key: ""},
+		{name: "whitespace only", key: "  \t\n "},
+		{name: "not base64", key: "not!base64"},
+		{name: "embedded newline", key: "AQID\nBAUG"},
+		{name: "embedded crlf", key: "AQID\r\nBAUG"},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewEncryptionKey(tc.key)
+			var s2Err *S2Error
+			if !errors.As(err, &s2Err) || s2Err.Origin != "sdk" {
+				t.Fatalf("expected sdk validation error for %q, got %v", tc.key, err)
+			}
+		})
+	}
+}
+
 func TestNewEncryptionKeyFromBytesEncodesRawMaterial(t *testing.T) {
 	key, err := NewEncryptionKeyFromBytes(testEncryptionKeyBytes)
 	if err != nil {
