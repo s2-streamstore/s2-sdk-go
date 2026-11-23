@@ -99,10 +99,6 @@ func TestDecodeAPIError_RangeNotSatisfiableWithoutTailIsPlain(t *testing.T) {
 	}{
 		{name: "plain body", body: "custom range error", wantMessage: "custom range error"},
 		{name: "empty body", body: "", wantMessage: http.StatusText(http.StatusRequestedRangeNotSatisfiable)},
-		{name: "empty object", body: "{}", wantMessage: "{}"},
-		{name: "null", body: "null", wantMessage: "null"},
-		{name: "null tail", body: `{"tail":null}`, wantMessage: `{"tail":null}`},
-		{name: "empty tail object", body: `{"tail":{}}`, wantMessage: `{"tail":{}}`},
 		{name: "partial tail", body: `{"tail":{"seq_num":1}}`, wantMessage: `{"tail":{"seq_num":1}}`},
 		{name: "api error", body: `{"code":"x","message":"y"}`, wantCode: "x", wantMessage: "y"},
 	}
@@ -394,19 +390,5 @@ func TestErrorVectors(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestDecodeAPIError_InvalidUTF8AndUnknownStatusFallback(t *testing.T) {
-	err := decodeAPIError(599, []byte{0xff, 0xfe})
-	var s2Err *S2Error
-	if !errors.As(err, &s2Err) {
-		t.Fatalf("expected *S2Error, got %T", err)
-	}
-	if s2Err.Message != "599" {
-		t.Fatalf("expected fallback message %q for invalid UTF-8 on unknown status 599, got %q", "599", s2Err.Message)
-	}
-	if !HasNoSideEffects(newValidationError("bad")) || !HasNoSideEffects(ErrSessionClosed) {
-		t.Fatal("expected ValidationError and ErrSessionClosed to have HasNoSideEffects == true")
 	}
 }

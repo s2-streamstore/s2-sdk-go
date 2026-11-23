@@ -176,7 +176,6 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// A redirect fails the operation with its status, on the first attempt.
 	assertRedirectError := func(name string, err error) {
 		t.Helper()
 		var s2Err *S2Error

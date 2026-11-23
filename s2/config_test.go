@@ -110,6 +110,10 @@ func TestEndpointTemplate_RejectsInvalidEndpoints(t *testing.T) {
 		"https://user:pass@aws.s2.dev",
 		"https://aws.s2.dev:0",
 		"localhost:65536",
+		"https://",
+		"http://example.com:",
+		"http://[not-ipv6]",
+		"ftp://example.com",
 	} {
 		_, err := newEndpointTemplate(endpoint)
 		var s2Err *S2Error

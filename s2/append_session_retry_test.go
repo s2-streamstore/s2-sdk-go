@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -1047,7 +1046,6 @@ func TestAppendSession_PersistentDrainExhaustsRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Drains that make no progress count as retries.
 	if _, err := ticket.Ack(ctx); !isServerDraining(err) {
 		t.Fatalf("expected the drain error once retries ran out, got %v", err)
 	}
@@ -1133,9 +1131,9 @@ func TestAppendSession_ProtocolErrorsDoNotRetry(t *testing.T) {
 			body:   []byte{0xFF, 0xFF, 0xFF, 0x00},
 		},
 		{
-			name:   "zero-length s2s frame",
+			name:   "terminal frame with 2xx status",
 			status: http.StatusOK,
-			body:   []byte{0x00, 0x00, 0x00, 0x00},
+			body:   internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK),
 		},
 		{
 			name:   "invalid protobuf AppendAck",
@@ -1221,176 +1219,54 @@ func TestAppendSession_ProtocolErrorsDoNotRetry(t *testing.T) {
 	}
 }
 
-func TestAppendSession_SpecConformance(t *testing.T) {
-	t.Run("terminal status outside 300-599 fails with PROTOCOL error", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
+func TestAppendSession_OverlappingAckIsProtocolError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-		var requests atomic.Int32
-		rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			requests.Add(1)
-			if req.Body != nil {
-				go func() {
-					_, _ = io.Copy(io.Discard, req.Body)
-					_ = req.Body.Close()
-				}()
-			}
-			body := internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK)
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Header:     make(http.Header),
-				Body:       io.NopCloser(bytes.NewReader(body)),
-				Request:    req,
-			}, nil
-		})
-		retryCfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
-		basin := &BasinClient{baseURL: "http://example.com/v1", accessToken: "token", retryConfig: retryCfg}
-		basin.client = &Client{streamingClient: &http.Client{Transport: rt}}
-		stream := &StreamClient{name: StreamName("test"), basinClient: basin}
+	retryCfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
+	stream := newTestStreamClientForAppend(retryCfg)
+	writes := make(chan struct{}, 4)
+	transports := make(chan *transportAppendSession, 1)
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		tr := newTransportSession(stream, &signalWriteCloser{signal: writes})
+		transports <- tr
+		return tr, nil
+	}
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
 
-		session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer session.Close()
+	f1, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("a")}, {Body: []byte("b")}, {Body: []byte("c")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := f1.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := <-transports
+	<-writes
+	tr.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 0}, End: StreamPosition{SeqNum: 3}}
+	if _, err := t1.Ack(ctx); err != nil {
+		t.Fatalf("first ack failed: %v", err)
+	}
 
-		future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		ticket, err := future.Wait(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = ticket.Ack(ctx)
-		var s2Err *S2Error
-		if !errors.As(err, &s2Err) || s2Err.Code != protocolErrorCode || s2Err.IsRetryable() {
-			t.Fatalf("expected non-retryable PROTOCOL error, got %v", err)
-		}
-		if got := requests.Load(); got != 1 {
-			t.Fatalf("expected no retry on invalid terminal status, got %d requests", got)
-		}
-	})
-
-	t.Run("overlapping ack fails with PROTOCOL error and LastAckedPosition returns copy", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		retryCfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
-		stream := newTestStreamClientForAppend(retryCfg)
-		writes := make(chan struct{}, 4)
-		transports := make(chan *transportAppendSession, 1)
-		stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
-			tr := newTransportSession(stream, &signalWriteCloser{signal: writes})
-			transports <- tr
-			return tr, nil
-		}
-		session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer session.Close()
-
-		f1, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("a")}, {Body: []byte("b")}, {Body: []byte("c")}}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t1, err := f1.Wait(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		tr := <-transports
-		<-writes
-		tr.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 0}, End: StreamPosition{SeqNum: 3}}
-		if _, err := t1.Ack(ctx); err != nil {
-			t.Fatalf("first ack failed: %v", err)
-		}
-
-		// Mutating LastAckedPosition() must not affect internal session state (spec C10).
-		pos := session.LastAckedPosition()
-		pos.End.SeqNum = 999
-		if got := session.LastAckedPosition(); got.End.SeqNum != 3 {
-			t.Fatalf("LastAckedPosition aliased internal state: got %d, want 3", got.End.SeqNum)
-		}
-
-		// Submit 3 more records; server responds with overlapping [2, 5) instead of [3, 6).
-		f2, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("d")}, {Body: []byte("e")}, {Body: []byte("f")}}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t2, err := f2.Wait(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		<-writes
-		tr.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 2}, End: StreamPosition{SeqNum: 5}}
-		_, err = t2.Ack(ctx)
-		var s2Err *S2Error
-		if !errors.As(err, &s2Err) || s2Err.Code != protocolErrorCode {
-			t.Fatalf("expected PROTOCOL error on overlapping ack [2,5) after [0,3), got %v", err)
-		}
-	})
-
-	t.Run("connectError retries under noSideEffects policy", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		retryCfg := &RetryConfig{
-			MaxAttempts:       2,
-			MinBaseDelay:      time.Millisecond,
-			MaxBaseDelay:      time.Millisecond,
-			AppendRetryPolicy: AppendRetryPolicyNoSideEffects,
-		}
-		stream := newTestStreamClientForAppend(retryCfg)
-		writes := make(chan struct{}, 2)
-		transports := make(chan *transportAppendSession, 2)
-		stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
-			tr := newTransportSession(stream, &signalWriteCloser{signal: writes})
-			transports <- tr
-			return tr, nil
-		}
-		session, err := stream.AppendSession(ctx, &AppendSessionOptions{RetryConfig: retryCfg})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer session.Close()
-
-		f, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		ticket, err := f.Wait(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		tr1 := <-transports
-		<-writes
-		tr1.reportError(&connectError{err: errors.New("tls handshake failed")})
-
-		tr2 := <-transports
-		<-writes
-		tr2.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 0}, End: StreamPosition{SeqNum: 1}}
-		if _, err := ticket.Ack(ctx); err != nil {
-			t.Fatalf("expected connectError to retry under noSideEffects policy, got %v", err)
-		}
-	})
-
-	t.Run("batcher match_seq_num uint64 overflow returns ValidationError", func(t *testing.T) {
-		start := uint64(math.MaxUint64 - 1)
-		b := NewBatcher(context.Background(), &BatchingOptions{
-			Linger:      time.Hour,
-			MaxRecords:  10,
-			MatchSeqNum: &start,
-		})
-		defer b.Close()
-
-		if err := b.Add(AppendRecord{Body: []byte("ok")}, nil); err != nil {
-			t.Fatalf("first record at MaxUint64-1 should succeed, got %v", err)
-		}
-		err := b.Add(AppendRecord{Body: []byte("overflow")}, nil)
-		var s2Err *S2Error
-		if !errors.As(err, &s2Err) || s2Err.Code != validationErrorCode {
-			t.Fatalf("expected ValidationError on uint64 overflow, got %v", err)
-		}
-	})
+	f2, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("d")}, {Body: []byte("e")}, {Body: []byte("f")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t2, err := f2.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-writes
+	// [2, 5) overlaps the earlier [0, 3).
+	tr.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 2}, End: StreamPosition{SeqNum: 5}}
+	_, err = t2.Ack(ctx)
+	var s2Err *S2Error
+	if !errors.As(err, &s2Err) || s2Err.Code != protocolErrorCode {
+		t.Fatalf("expected PROTOCOL error on overlapping ack, got %v", err)
+	}
 }

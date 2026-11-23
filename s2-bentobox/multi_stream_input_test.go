@@ -45,17 +45,17 @@ func (f *fakeBatchSource) Close(context.Context) error {
 
 type silentLogger struct{}
 
-func (silentLogger) Tracef(string, ...any)            {}
-func (silentLogger) Trace(string)                     {}
-func (silentLogger) Debugf(string, ...any)            {}
-func (silentLogger) Debug(string)                     {}
-func (silentLogger) Infof(string, ...any)             {}
-func (silentLogger) Info(string)                      {}
-func (silentLogger) Warnf(string, ...any)             {}
-func (silentLogger) Warn(string)                      {}
-func (silentLogger) Errorf(string, ...any)            {}
-func (silentLogger) Error(string)                     {}
-func (silentLogger) With(...any) Logger               { return silentLogger{} }
+func (silentLogger) Tracef(string, ...any) {}
+func (silentLogger) Trace(string)          {}
+func (silentLogger) Debugf(string, ...any) {}
+func (silentLogger) Debug(string)          {}
+func (silentLogger) Infof(string, ...any)  {}
+func (silentLogger) Info(string)           {}
+func (silentLogger) Warnf(string, ...any)  {}
+func (silentLogger) Warn(string)           {}
+func (silentLogger) Errorf(string, ...any) {}
+func (silentLogger) Error(string)          {}
+func (silentLogger) With(...any) Logger    { return silentLogger{} }
 
 func TestStreamSourceRecvLoopResetsCacheOn416(t *testing.T) {
 	const stream = "demo"
