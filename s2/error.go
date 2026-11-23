@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"unicode/utf8"
 )
 
 // Sentinel errors for SDK-originated errors.
@@ -39,40 +41,39 @@ type errorCodeInfo struct {
 	noSideEffects bool
 }
 
-// Canonical server error codes; mirrors ErrorCode in the S2 API, plus codes
-// the SDK synthesizes for responses that use a different error schema.
+// Canonical server error codes; mirrors s2-specs/s2/v1/error-codes.json.
 var errorCodes = map[string]errorCodeInfo{
-	"access_token_not_found":  {404, false, true},
-	"authn":                   {401, false, true},
-	"bad_frame":               {400, false, true},
-	"bad_header":              {400, false, true},
-	"bad_json":                {400, false, true},
-	"bad_path":                {400, false, true},
-	"bad_proto":               {400, false, true},
-	"bad_query":               {400, false, true},
-	"basin_deletion_pending":  {409, false, true},
-	"basin_not_found":         {404, false, true},
-	"client_hangup":           {499, false, false},
-	"decryption_failed":       {400, false, true},
-	"hot_server":              {502, true, true},
-	"invalid":                 {422, false, true},
-	"not_implemented":         {501, false, true},
-	"other":                   {500, true, false},
-	"permission_denied":       {403, false, true},
-	"quota_exhausted":         {403, false, true},
-	"rate_limited":            {429, true, true},
-	"request_timeout":         {408, true, false},
-	"resource_already_exists": {409, false, true},
-	"server_draining":         {503, true, true},
-	"storage":                 {500, true, false},
-	"stream_deletion_pending": {409, false, true},
-	"stream_not_found":        {404, false, true},
-	"transaction_conflict":    {409, true, true},
-	"unavailable":             {503, true, false},
-	"upstream_timeout":        {504, true, false},
-	// 412 append condition failures carry their own schema; the condition
-	// is checked before the append is applied.
-	"APPEND_CONDITION_FAILED": {412, false, true},
+	"access_token_not_found":   {404, false, true},
+	"authn":                    {401, false, true},
+	"bad_frame":                {400, false, true},
+	"bad_header":               {400, false, true},
+	"bad_json":                 {400, false, true},
+	"bad_path":                 {400, false, true},
+	"bad_proto":                {400, false, true},
+	"bad_query":                {400, false, true},
+	"basin_deletion_pending":   {409, false, true},
+	"basin_not_found":          {404, false, true},
+	"client_hangup":            {499, false, false},
+	"decryption_failed":        {400, false, true},
+	"hot_server":               {502, true, true},
+	"invalid":                  {422, false, true},
+	"network_policy_denied":    {403, false, true},
+	"network_policy_in_use":    {409, false, true},
+	"network_policy_not_found": {404, false, true},
+	"not_implemented":          {501, false, true},
+	"other":                    {500, true, false},
+	"permission_denied":        {403, false, true},
+	"quota_exhausted":          {403, false, true},
+	"rate_limited":             {429, true, true},
+	"request_timeout":          {408, true, false},
+	"resource_already_exists":  {409, false, true},
+	"server_draining":          {503, true, true},
+	"storage":                  {500, true, false},
+	"stream_deletion_pending":  {409, false, true},
+	"stream_not_found":         {404, false, true},
+	"transaction_conflict":     {409, true, true},
+	"unavailable":              {503, true, false},
+	"upstream_timeout":         {504, true, false},
 }
 
 func isRetryableStatus(status int) bool {
@@ -83,11 +84,17 @@ func isRetryableStatus(status int) bool {
 	return false
 }
 
+const (
+	validationErrorCode = "VALIDATION"
+	protocolErrorCode   = "PROTOCOL"
+	errorOriginSDK      = "sdk"
+)
+
 func newValidationError(message string) *S2Error {
 	return &S2Error{
 		Message: message,
-		Code:    "VALIDATION",
-		Origin:  "sdk",
+		Code:    validationErrorCode,
+		Origin:  errorOriginSDK,
 	}
 }
 
@@ -108,8 +115,8 @@ func (e *S2Error) IsRetryable() bool {
 	}
 
 	if e.Origin == "server" {
-		if info, ok := errorCodes[e.Code]; ok {
-			return info.status == e.Status && info.retryable
+		if info, ok := errorCodes[e.Code]; ok && info.status == e.Status {
+			return info.retryable
 		}
 	}
 
@@ -122,8 +129,19 @@ func (e *S2Error) HasNoSideEffects() bool {
 		return false
 	}
 
+	// SDK validation errors are raised before any request is sent (spec E3).
+	if e.Origin == errorOriginSDK && e.Code == validationErrorCode && e.Status == 0 {
+		return true
+	}
+
 	if e.Origin != "server" {
 		return false
+	}
+
+	// Every 412 (append precondition failed) and 416 (read unwritten) response
+	// guarantees no mutation occurred (spec E4e, E2).
+	if e.Status == http.StatusPreconditionFailed || e.Status == http.StatusRequestedRangeNotSatisfiable {
+		return true
 	}
 
 	info, ok := errorCodes[e.Code]
@@ -163,7 +181,7 @@ func HasNoSideEffects(err error) bool {
 	if errors.As(err, &indefinite) {
 		return false
 	}
-	if isConnectError(err) {
+	if errors.Is(err, ErrSessionClosed) || isConnectError(err) {
 		return true
 	}
 	var s2Err *S2Error
@@ -255,17 +273,18 @@ func (e *RangeNotSatisfiableError) Unwrap() error {
 func decodeAPIError(status int, body []byte) error {
 	trimmed := bytes.TrimSpace(body)
 
-	if status == http.StatusPreconditionFailed {
-		if len(trimmed) > 0 {
-			var jsonMap map[string]interface{}
-			if json.Unmarshal(trimmed, &jsonMap) == nil {
-				return makeAppendPreconditionError(status, jsonMap)
-			}
+	if status == http.StatusPreconditionFailed && len(trimmed) > 0 {
+		var payload struct {
+			SeqNumMismatch       *uint64 `json:"seq_num_mismatch"`
+			FencingTokenMismatch *string `json:"fencing_token_mismatch"`
 		}
-		return &S2Error{
-			Message: fmt.Sprintf("HTTP %d", status),
-			Status:  status,
-			Origin:  "server",
+		if json.Unmarshal(trimmed, &payload) == nil {
+			if payload.SeqNumMismatch != nil {
+				return newSeqNumMismatchError(status, *payload.SeqNumMismatch)
+			}
+			if payload.FencingTokenMismatch != nil {
+				return newFencingTokenMismatchError(status, *payload.FencingTokenMismatch)
+			}
 		}
 	}
 
@@ -286,7 +305,7 @@ func decodeAPIError(status int, body []byte) error {
 		}
 	}
 
-	if len(trimmed) > 0 {
+	if len(trimmed) > 0 && utf8.Valid(trimmed) {
 		var apiErr ErrorInfo
 		if json.Unmarshal(trimmed, &apiErr) == nil && apiErr.Message != "" {
 			return &S2Error{
@@ -304,10 +323,17 @@ func decodeAPIError(status int, body []byte) error {
 	}
 
 	return &S2Error{
-		Message: http.StatusText(status),
+		Message: statusFallbackMessage(status),
 		Status:  status,
 		Origin:  "server",
 	}
+}
+
+func statusFallbackMessage(status int) string {
+	if text := http.StatusText(status); text != "" {
+		return text
+	}
+	return strconv.Itoa(status)
 }
 
 // newBodyReadError reports a failure to read an HTTP error-response body. The
@@ -359,40 +385,12 @@ func makeConnectionLostError(err error, context string) *S2Error {
 	}
 }
 
-const protocolErrorCode = "PROTOCOL"
-
 // makeProtocolError reports a response or session message that violates the
 // protocol. Retrying would not help, and the request may have taken effect.
 func makeProtocolError(err error, context string) *S2Error {
 	return &S2Error{
 		Message: fmt.Sprintf("Protocol error during %s: %s", context, err.Error()),
 		Code:    protocolErrorCode,
-		Origin:  "sdk",
-	}
-}
-
-func makeAppendPreconditionError(status int, jsonMap map[string]interface{}) error {
-	if seqNumMismatch, exists := jsonMap["seq_num_mismatch"]; exists {
-		if expectedSeqNum, ok := seqNumMismatch.(float64); ok {
-			return newSeqNumMismatchError(status, uint64(expectedSeqNum))
-		}
-	}
-
-	if fencingMismatch, exists := jsonMap["fencing_token_mismatch"]; exists {
-		if expectedToken, ok := fencingMismatch.(string); ok {
-			return newFencingTokenMismatchError(status, expectedToken)
-		}
-	}
-	message := "Append condition failed"
-	if msg, exists := jsonMap["message"]; exists {
-		if msgStr, ok := msg.(string); ok {
-			message = msgStr
-		}
-	}
-
-	return &S2Error{
-		Message: message,
-		Status:  status,
-		Origin:  "server",
+		Origin:  errorOriginSDK,
 	}
 }

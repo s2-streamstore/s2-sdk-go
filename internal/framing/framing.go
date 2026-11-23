@@ -145,8 +145,8 @@ func (p *S2SFrameParser) readFrom(r io.Reader) (int, error) {
 func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 	buf := p.buffer[p.off:]
 
-	// Need at least 4 bytes (3-byte length + 1-byte flag)
-	if len(buf) < 4 {
+	// Need at least 3 bytes to decode and validate the length prefix.
+	if len(buf) < 3 {
 		return nil, nil
 	}
 
@@ -176,19 +176,21 @@ func (p *S2SFrameParser) ParseFrame() (*S2SFrame, error) {
 	flag := buf[3]
 	terminal := (flag & flagTerminal) != 0
 
-	// Parse compression from bits 6-5
-	var compression CompressionType
-
-	compressionBits := (flag & flagCompressionMask) >> flagCompressionShift
-	switch compressionBits {
-	case 0:
-		compression = CompressionNone
-	case 1:
-		compression = CompressionZstd
-	case 2:
-		compression = CompressionGzip
-	default:
-		return nil, fmt.Errorf("%w: unknown compression type: %d", ErrMalformedFrame, compressionBits)
+	// Terminal frames are never compressed and their non-terminal flag bits
+	// are ignored on receive per s2s.md.
+	compression := CompressionNone
+	if !terminal {
+		compressionBits := (flag & flagCompressionMask) >> flagCompressionShift
+		switch compressionBits {
+		case 0:
+			compression = CompressionNone
+		case 1:
+			compression = CompressionZstd
+		case 2:
+			compression = CompressionGzip
+		default:
+			return nil, fmt.Errorf("%w: unknown compression type: %d", ErrMalformedFrame, compressionBits)
+		}
 	}
 
 	// Payload view into the buffer (length includes flag byte, so payload is
@@ -325,7 +327,7 @@ func CreateFrameWithStatus(data []byte, terminal bool, compression CompressionTy
 	compressedData := data
 	actualCompression := CompressionNone
 
-	if compression != CompressionNone && len(data) >= compressionThreshold {
+	if !terminal && compression != CompressionNone && len(data) >= compressionThreshold {
 		switch compression {
 		case CompressionZstd:
 			if compressed, err := compressZstd(data); err == nil {

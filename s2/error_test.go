@@ -1,8 +1,12 @@
 package s2
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -221,9 +225,9 @@ func TestS2Error_IsRetryable(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "server invalid status mismatch",
+			name: "server invalid status mismatch falls back to status retryability",
 			err:  &S2Error{Status: 500, Code: "invalid", Origin: "server"},
-			want: false,
+			want: true,
 		},
 		{
 			name: "server other",
@@ -253,5 +257,156 @@ func TestS2Error_IsRetryable(t *testing.T) {
 				t.Fatalf("expected %v, got %v", tt.want, got)
 			}
 		})
+	}
+}
+
+func TestErrorCodesMatchSpec(t *testing.T) {
+	specPath := filepath.Join("..", "s2-specs", "s2", "v1", "error-codes.json")
+	raw, err := os.ReadFile(specPath)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skip("s2-specs submodule not checked out")
+	}
+	if err != nil {
+		t.Fatalf("read error-codes.json: %v", err)
+	}
+
+	var spec struct {
+		Codes []struct {
+			Code        string `json:"code"`
+			Status      int    `json:"status"`
+			Retryable   bool   `json:"retryable"`
+			SideEffects string `json:"side_effects"`
+		} `json:"codes"`
+	}
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("unmarshal error-codes.json: %v", err)
+	}
+
+	seen := make(map[string]bool, len(spec.Codes))
+	for _, want := range spec.Codes {
+		seen[want.Code] = true
+		wantNoSideEffects := want.SideEffects == "none"
+		got, ok := errorCodes[want.Code]
+		if !ok {
+			t.Errorf("missing error code %q from s2-specs/s2/v1/error-codes.json", want.Code)
+			continue
+		}
+		if got.status != want.Status || got.retryable != want.Retryable || got.noSideEffects != wantNoSideEffects {
+			t.Errorf("code %q: got %+v, want status=%d retryable=%v noSideEffects=%v",
+				want.Code, got, want.Status, want.Retryable, wantNoSideEffects)
+		}
+	}
+	for code := range errorCodes {
+		if !seen[code] {
+			t.Errorf("extra error code %q not present in s2-specs/s2/v1/error-codes.json", code)
+		}
+	}
+}
+
+func TestErrorVectors(t *testing.T) {
+	vectorPath := filepath.Join("..", "s2-specs", "sdk", "vectors", "errors.json")
+	raw, err := os.ReadFile(vectorPath)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skip("s2-specs submodule not checked out")
+	}
+	if err != nil {
+		t.Fatalf("read error vectors: %v", err)
+	}
+
+	type errorExpect struct {
+		Type                string `json:"type"`
+		Status              int    `json:"status"`
+		Code                string `json:"code"`
+		IsRetryable         bool   `json:"is_retryable"`
+		HasNoSideEffects    bool   `json:"has_no_side_effects"`
+		AssignableSeqNum    string `json:"assignable_seq_num"`
+		CurrentFencingToken string `json:"current_fencing_token"`
+		Tail                *struct {
+			SeqNum    string `json:"seq_num"`
+			Timestamp string `json:"timestamp"`
+		} `json:"tail"`
+		IfRepresentable *errorExpect `json:"if_representable"`
+	}
+	var doc struct {
+		Cases []struct {
+			Rule   string      `json:"rule"`
+			Name   string      `json:"name"`
+			Status int         `json:"status"`
+			Body   string      `json:"body"`
+			Expect errorExpect `json:"expect"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal error vectors: %v", err)
+	}
+
+	for _, tc := range doc.Cases {
+		t.Run(tc.Rule+"/"+tc.Name, func(t *testing.T) {
+			want := tc.Expect
+			if want.IfRepresentable != nil {
+				want = *want.IfRepresentable
+			}
+			gotErr := decodeAPIError(tc.Status, []byte(tc.Body))
+			var s2Err *S2Error
+			if !errors.As(gotErr, &s2Err) {
+				t.Fatalf("expected *S2Error, got %T", gotErr)
+			}
+			if s2Err.Status != want.Status {
+				t.Errorf("status=%d, want %d", s2Err.Status, want.Status)
+			}
+			if s2Err.IsRetryable() != want.IsRetryable {
+				t.Errorf("IsRetryable()=%v, want %v", s2Err.IsRetryable(), want.IsRetryable)
+			}
+			if HasNoSideEffects(gotErr) != want.HasNoSideEffects {
+				t.Errorf("HasNoSideEffects()=%v, want %v", HasNoSideEffects(gotErr), want.HasNoSideEffects)
+			}
+			switch want.Type {
+			case "SeqNumMismatchError":
+				var seqErr *SeqNumMismatchError
+				if !errors.As(gotErr, &seqErr) {
+					t.Fatalf("expected *SeqNumMismatchError, got %T", gotErr)
+				}
+				wantSeq, _ := strconv.ParseUint(want.AssignableSeqNum, 10, 64)
+				if seqErr.ExpectedSeqNum != wantSeq {
+					t.Errorf("ExpectedSeqNum=%d, want %d", seqErr.ExpectedSeqNum, wantSeq)
+				}
+			case "FencingTokenMismatchError":
+				var fenceErr *FencingTokenMismatchError
+				if !errors.As(gotErr, &fenceErr) {
+					t.Fatalf("expected *FencingTokenMismatchError, got %T", gotErr)
+				}
+				if fenceErr.ExpectedFencingToken != want.CurrentFencingToken {
+					t.Errorf("ExpectedFencingToken=%q, want %q", fenceErr.ExpectedFencingToken, want.CurrentFencingToken)
+				}
+			case "ReadUnwrittenError":
+				var rangeErr *RangeNotSatisfiableError
+				if !errors.As(gotErr, &rangeErr) || rangeErr.Tail == nil {
+					t.Fatalf("expected *RangeNotSatisfiableError with Tail, got %T", gotErr)
+				}
+				wantSeq, _ := strconv.ParseUint(want.Tail.SeqNum, 10, 64)
+				wantTS, _ := strconv.ParseUint(want.Tail.Timestamp, 10, 64)
+				if rangeErr.Tail.SeqNum != wantSeq || rangeErr.Tail.Timestamp != wantTS {
+					t.Errorf("Tail=%+v, want seq=%d ts=%d", rangeErr.Tail, wantSeq, wantTS)
+				}
+			default:
+				if s2Err.Code != want.Code {
+					t.Errorf("code=%q, want %q", s2Err.Code, want.Code)
+				}
+			}
+		})
+	}
+}
+
+func TestDecodeAPIError_InvalidUTF8AndUnknownStatusFallback(t *testing.T) {
+	err := decodeAPIError(599, []byte{0xff, 0xfe})
+	var s2Err *S2Error
+	if !errors.As(err, &s2Err) {
+		t.Fatalf("expected *S2Error, got %T", err)
+	}
+	if s2Err.Message != "599" {
+		t.Fatalf("expected fallback message %q for invalid UTF-8 on unknown status 599, got %q", "599", s2Err.Message)
+	}
+	if !HasNoSideEffects(newValidationError("bad")) || !HasNoSideEffects(ErrSessionClosed) {
+		t.Fatal("expected ValidationError and ErrSessionClosed to have HasNoSideEffects == true")
 	}
 }

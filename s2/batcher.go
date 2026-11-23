@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -152,7 +153,11 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 
 	recordBytes := MeteredPayloadBytes(rec)
 	if recordBytes > b.opts.MaxMeteredBytes {
-		return &S2Error{Message: "record exceeds max batch bytes"}
+		return newValidationError("record exceeds max batch bytes")
+	}
+
+	if b.nextMatchSeqNum != nil && uint64(len(b.buffer))+1 > math.MaxUint64-*b.nextMatchSeqNum {
+		return newValidationError("match_seq_num would overflow uint64")
 	}
 
 	if len(b.buffer) > 0 && (len(b.buffer)+1 > b.opts.MaxRecords || b.bufferBytes+recordBytes > b.opts.MaxMeteredBytes) {

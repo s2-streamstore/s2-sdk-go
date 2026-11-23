@@ -94,6 +94,9 @@ type transportAppendSession struct {
 	// any, so a frame is never cut short.
 	halfClosed bool
 	writing    bool
+	// completedElsewhere counts batches sent on this session that were
+	// acknowledged on another session after a retry (protected by AppendSession.inflightMu).
+	completedElsewhere int
 }
 
 // errAppendHalfClosed reports that an input was not sent because the request
@@ -182,9 +185,9 @@ func (p *transportAppendSession) connectAndRead(req *http.Request, pipeWriter *i
 		return
 	}
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		apiErr := parseHTTPError(resp)
-		if isServerDraining(apiErr) {
+		if shouldRetireConnection(apiErr) {
 			p.poisonCapture.poison()
 		}
 		pipeWriter.CloseWithError(apiErr)
@@ -431,14 +434,17 @@ func (p *transportAppendSession) handleFrame(frame *framing.S2SFrame) error {
 	}
 
 	if frame.Terminal {
-		if frame.StatusCode != nil && *frame.StatusCode >= 400 {
-			err := decodeAPIError(*frame.StatusCode, body)
-			if isServerDraining(err) {
-				p.poisonCapture.poison()
-			}
-			return err
+		if frame.StatusCode == nil || *frame.StatusCode < 300 || *frame.StatusCode > 599 {
+			return makeProtocolError(
+				fmt.Errorf("terminal frame status out of range: %s", formatTerminalStatus(frame.StatusCode)),
+				"append session terminal frame",
+			)
 		}
-		return nil
+		err := decodeAPIError(*frame.StatusCode, body)
+		if shouldRetireConnection(err) {
+			p.poisonCapture.poison()
+		}
+		return err
 	}
 
 	if frame.ReconnectAdvised && !p.reconnectAdvised.Swap(true) {

@@ -2,7 +2,13 @@ package framing
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -374,8 +380,8 @@ func TestAcceptEncoding(t *testing.T) {
 		want string
 	}{
 		{"none", CompressionNone, ""},
-		{"gzip", CompressionGzip, "zstd, gzip"},
-		{"zstd", CompressionZstd, "zstd, gzip"},
+		{"gzip", CompressionGzip, "gzip"},
+		{"zstd", CompressionZstd, "zstd"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -383,6 +389,46 @@ func TestAcceptEncoding(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTerminalFrameIgnoresNonTerminalFlagBits(t *testing.T) {
+	// Terminal frames must ignore compression bits (6-5) and reconnect-advised
+	// bit (4) per s2s.md, even when bits 6-5 are 11 (normally invalid).
+	body := []byte(`{"code":"bad_request","message":"oops"}`)
+	frameLen := 1 + 2 + len(body) // flags + 2-byte status + body
+	raw := make([]byte, 3+frameLen)
+	raw[0] = byte(frameLen >> 16)
+	raw[1] = byte(frameLen >> 8)
+	raw[2] = byte(frameLen)
+	// Terminal (0x80) | compression bits 11 (0x60) | reconnect advised (0x10)
+	raw[3] = 0x80 | 0x60 | 0x10
+	raw[4] = byte(400 >> 8)
+	raw[5] = byte(400 & 0xFF)
+	copy(raw[6:], body)
+
+	frame, err := NewFrameReader(bytes.NewReader(raw)).ReadFrame()
+	if err != nil {
+		t.Fatalf("expected terminal frame with non-terminal bits set to parse, got: %v", err)
+	}
+	if !frame.Terminal {
+		t.Fatal("expected Terminal == true")
+	}
+	if frame.Compression != CompressionNone {
+		t.Fatalf("expected CompressionNone on terminal frame, got %v", frame.Compression)
+	}
+	if frame.ReconnectAdvised {
+		t.Fatal("expected ReconnectAdvised == false on terminal frame")
+	}
+	if frame.StatusCode == nil || *frame.StatusCode != 400 {
+		t.Fatalf("expected StatusCode 400, got %v", frame.StatusCode)
+	}
+	gotBody, err := frame.DecompressedBody()
+	if err != nil {
+		t.Fatalf("DecompressedBody failed: %v", err)
+	}
+	if !bytes.Equal(gotBody, body) {
+		t.Fatalf("body mismatch: got %q, want %q", gotBody, body)
 	}
 }
 
@@ -394,5 +440,137 @@ func TestFrameReaderReportsTruncatedFrameAsUnexpectedEOF(t *testing.T) {
 	}
 	if _, err := fr.ReadFrame(); err != io.ErrUnexpectedEOF {
 		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
+	}
+}
+
+func TestS2SFrameVectors(t *testing.T) {
+	vectorPath := filepath.Join("..", "..", "s2-specs", "sdk", "vectors", "s2s-frames.json")
+	raw, err := os.ReadFile(vectorPath)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skip("s2-specs submodule not checked out")
+	}
+	if err != nil {
+		t.Fatalf("read vectors: %v", err)
+	}
+
+	var doc struct {
+		Cases []struct {
+			Rule  string `json:"rule"`
+			Name  string `json:"name"`
+			Bytes []struct {
+				Hex   string `json:"hex"`
+				Zeros int    `json:"zeros"`
+			} `json:"bytes"`
+			Expect struct {
+				Messages []struct {
+					PayloadHex       string `json:"payload_hex"`
+					PayloadLen       int    `json:"payload_len"`
+					PayloadSHA256    string `json:"payload_sha256"`
+					ReconnectAdvised bool   `json:"reconnect_advised"`
+				} `json:"messages"`
+				End struct {
+					Type   string `json:"type"`
+					Status int    `json:"status"`
+				} `json:"end"`
+			} `json:"expect"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal vectors: %v", err)
+	}
+
+	for _, tc := range doc.Cases {
+		t.Run(tc.Rule+"/"+tc.Name, func(t *testing.T) {
+			var input bytes.Buffer
+			for _, part := range tc.Bytes {
+				if part.Hex != "" {
+					b, err := hex.DecodeString(part.Hex)
+					if err != nil {
+						t.Fatalf("decode hex: %v", err)
+					}
+					input.Write(b)
+				}
+				if part.Zeros > 0 {
+					input.Write(make([]byte, part.Zeros))
+				}
+			}
+
+			fr := NewFrameReader(bytes.NewReader(input.Bytes()))
+			type gotMsg struct {
+				payload          []byte
+				reconnectAdvised bool
+			}
+			var gotMsgs []gotMsg
+			var endType string
+			var endStatus int
+
+			const (
+				endClean          = "clean"
+				endConnectionLost = "ConnectionLostError"
+				endProtocolError  = "ProtocolError"
+				endServerError    = "ServerError"
+			)
+			for {
+				frame, err := fr.ReadFrame()
+				if err != nil {
+					switch {
+					case errors.Is(err, io.EOF):
+						endType = endClean
+					case errors.Is(err, io.ErrUnexpectedEOF):
+						endType = endConnectionLost
+					case errors.Is(err, ErrMalformedFrame):
+						endType = endProtocolError
+					default:
+						t.Fatalf("unexpected read error: %v", err)
+					}
+					break
+				}
+				body, err := frame.DecompressedBody()
+				if err != nil {
+					endType = endProtocolError
+					break
+				}
+				if frame.Terminal {
+					if frame.StatusCode == nil || *frame.StatusCode < 300 || *frame.StatusCode > 599 {
+						endType = endProtocolError
+					} else {
+						endType = endServerError
+						endStatus = *frame.StatusCode
+					}
+					break
+				}
+				gotMsgs = append(gotMsgs, gotMsg{payload: body, reconnectAdvised: frame.ReconnectAdvised})
+			}
+
+			if len(gotMsgs) != len(tc.Expect.Messages) {
+				t.Fatalf("got %d messages, want %d (end=%s)", len(gotMsgs), len(tc.Expect.Messages), endType)
+			}
+			for i, want := range tc.Expect.Messages {
+				got := gotMsgs[i]
+				if got.reconnectAdvised != want.ReconnectAdvised {
+					t.Errorf("msg %d: reconnect_advised=%v, want %v", i, got.reconnectAdvised, want.ReconnectAdvised)
+				}
+				if want.PayloadHex != "" {
+					if gotHex := hex.EncodeToString(got.payload); gotHex != want.PayloadHex {
+						t.Errorf("msg %d: payload hex=%s, want %s", i, gotHex, want.PayloadHex)
+					}
+				}
+				if want.PayloadLen > 0 && len(got.payload) != want.PayloadLen {
+					t.Errorf("msg %d: payload len=%d, want %d", i, len(got.payload), want.PayloadLen)
+				}
+				if want.PayloadSHA256 != "" {
+					sum := sha256.Sum256(got.payload)
+					if gotSum := hex.EncodeToString(sum[:]); gotSum != want.PayloadSHA256 {
+						t.Errorf("msg %d: sha256=%s, want %s", i, gotSum, want.PayloadSHA256)
+					}
+				}
+			}
+			if endType != tc.Expect.End.Type {
+				t.Fatalf("end type=%q, want %q", endType, tc.Expect.End.Type)
+			}
+			if tc.Expect.End.Type == endServerError && endStatus != tc.Expect.End.Status {
+				t.Fatalf("end status=%d, want %d", endStatus, tc.Expect.End.Status)
+			}
+		})
 	}
 }

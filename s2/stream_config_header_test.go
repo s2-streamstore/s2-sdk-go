@@ -9,12 +9,8 @@ import (
 	"time"
 
 	pb "github.com/s2-streamstore/s2-sdk-go/generated"
-	internalframing "github.com/s2-streamstore/s2-sdk-go/internal/framing"
 	"google.golang.org/protobuf/proto"
 )
-
-// readSessionEndFrame ends a read session response cleanly whatever its options.
-var readSessionEndFrame = internalframing.CreateFrameWithStatus(nil, true, internalframing.CompressionNone, http.StatusOK)
 
 const testStreamConfigHeader = `{"delete_on_empty":{"min_age_secs":300},"retention_policy":{"age":3600}}`
 
@@ -112,16 +108,22 @@ func TestReadSessionStreamConfigAcrossAttempts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			requests := make(chan *http.Request, 2)
 			attempts := 0
+			recordFrame := buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("ok")}})
+			neverFail := make(chan struct{})
 			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				requests <- req
 				attempts++
-				status, body := http.StatusOK, readSessionEndFrame
 				if attempts == 1 {
-					status, body = http.StatusInternalServerError, nil
+					return &http.Response{
+						StatusCode: http.StatusInternalServerError,
+						Body:       io.NopCloser(bytes.NewReader(nil)),
+						Header:     make(http.Header),
+						Request:    req,
+					}, nil
 				}
 				return &http.Response{
-					StatusCode: status,
-					Body:       io.NopCloser(bytes.NewReader(body)),
+					StatusCode: http.StatusOK,
+					Body:       newFailingReadBody(recordFrame, neverFail),
 					Header:     make(http.Header),
 					Request:    req,
 				}, nil
@@ -135,12 +137,10 @@ func TestReadSessionStreamConfigAcrossAttempts(t *testing.T) {
 				t.Fatalf("read session: %v", err)
 			}
 			defer session.Close()
-			if session.Next() {
-				t.Fatal("unexpected record")
+			if !session.Next() {
+				t.Fatalf("expected record on attempt 2, err=%v", session.Err())
 			}
-			if err := session.Err(); err != nil {
-				t.Fatalf("read session error: %v", err)
-			}
+			session.Close()
 			if ctx.Err() != nil {
 				t.Fatal("read session timed out")
 			}
@@ -179,16 +179,11 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 			const expectedHeader = `{"delete_on_empty":{"min_age_secs":300},"retention_policy":{"age":3600},"storage_class":"express","timestamping":{"mode":"client-prefer","uncapped":false}}`
 			headers := make(chan string, 2)
 			attempts := 0
+			recordFrame := buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("ok")}})
+			neverFail := make(chan struct{})
 			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				headers <- req.Header.Get(s2StreamConfigHeader)
 				attempts++
-				status, body := http.StatusOK, []byte(nil)
-				switch operation {
-				case "append session":
-					status = http.StatusInternalServerError
-				case "read session":
-					body = readSessionEndFrame
-				}
 				if attempts == 1 {
 					*config.DeleteOnEmpty.MinAgeSecs = 600
 					*config.RetentionPolicy.Age = 7200
@@ -200,11 +195,24 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 					config.Timestamping.Mode = nil
 					config.Timestamping.Uncapped = nil
 					*config = StreamConfig{}
-					status, body = http.StatusInternalServerError, nil
+					return &http.Response{
+						StatusCode: http.StatusInternalServerError,
+						Body:       io.NopCloser(bytes.NewReader(nil)),
+						Header:     make(http.Header),
+						Request:    req,
+					}, nil
+				}
+				status := http.StatusOK
+				var respBody io.ReadCloser = io.NopCloser(bytes.NewReader(nil))
+				switch operation {
+				case "append session":
+					status = http.StatusInternalServerError
+				case "read session":
+					respBody = newFailingReadBody(recordFrame, neverFail)
 				}
 				return &http.Response{
 					StatusCode: status,
-					Body:       io.NopCloser(bytes.NewReader(body)),
+					Body:       respBody,
 					Header:     make(http.Header),
 					Request:    req,
 				}, nil
@@ -254,12 +262,10 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 					t.Fatalf("read session: %v", err)
 				}
 				defer session.Close()
-				if session.Next() {
-					t.Fatal("unexpected record")
+				if !session.Next() {
+					t.Fatalf("expected record on attempt 2, err=%v", session.Err())
 				}
-				if err := session.Err(); err != nil {
-					t.Fatalf("read session error: %v", err)
-				}
+				session.Close()
 			}
 			if ctx.Err() != nil {
 				t.Fatal("operation timed out")

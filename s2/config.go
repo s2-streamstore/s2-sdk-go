@@ -158,18 +158,18 @@ func normalizeForURLParsing(input string) string {
 func newEndpointTemplate(endpoint string) (*endpointTemplate, error) {
 	raw := strings.TrimSpace(endpoint)
 	if raw == "" {
-		return nil, fmt.Errorf("endpoint cannot be empty")
+		return nil, newValidationError("endpoint cannot be empty")
 	}
 
 	explicitPathProvided := hasExplicitPath(raw)
 	parsed, err := url.Parse(normalizeForURLParsing(raw))
 	if err != nil {
-		return nil, err
+		return nil, newValidationError(fmt.Sprintf("invalid endpoint: %v", err))
 	}
 
 	scheme := strings.ToLower(parsed.Scheme)
 	if scheme != schemeHTTP && scheme != schemeHTTPS {
-		return nil, fmt.Errorf("unsupported scheme: %s", parsed.Scheme)
+		return nil, newValidationError(fmt.Sprintf("unsupported scheme: %s", parsed.Scheme))
 	}
 	// Request URLs are built by appending routes to the endpoint, so a query
 	// or fragment would swallow the route.
@@ -181,6 +181,15 @@ func newEndpointTemplate(endpoint string) (*endpointTemplate, error) {
 	}
 
 	hostTemplate := strings.ReplaceAll(parsed.Hostname(), basinPlaceholderSentinel, basinPlaceholder)
+	if hostTemplate == "" {
+		return nil, newValidationError("endpoint host cannot be empty")
+	}
+	if strings.HasPrefix(parsed.Host, "[") && net.ParseIP(parsed.Hostname()) == nil {
+		return nil, newValidationError(fmt.Sprintf("invalid IPv6 endpoint host: %q", parsed.Hostname()))
+	}
+	if strings.HasSuffix(parsed.Host, ":") {
+		return nil, newValidationError("endpoint port cannot be empty")
+	}
 	port := parsed.Port()
 	if port != "" {
 		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {

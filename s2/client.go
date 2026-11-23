@@ -83,10 +83,24 @@ type Client struct {
 	NetworkPolicies *NetworkPoliciesClient
 }
 
+func validateAccessToken(token string) error {
+	if token == "" {
+		return newValidationError("access token cannot be empty")
+	}
+	// Reject control bytes (including CR, LF, NUL) invalid in HTTP header values (spec C1).
+	for i := range len(token) {
+		b := token[i]
+		if (b < 0x20 && b != '\t') || b == 0x7f {
+			return newValidationError("access token contains characters invalid in an HTTP header value")
+		}
+	}
+	return nil
+}
+
 // Create a new Client.
 func New(accessToken string, opts *ClientOptions) *Client {
-	if accessToken == "" {
-		panic("access token cannot be empty")
+	if err := validateAccessToken(accessToken); err != nil {
+		panic(err)
 	}
 	if opts == nil {
 		opts = &ClientOptions{}
@@ -140,20 +154,25 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		userAgent: defaultUserAgent(),
 	}
 
-	makeBasinBaseURL := opts.MakeBasinBaseURL
-	if makeBasinBaseURL == nil {
+	customMakeBasinBaseURL := opts.MakeBasinBaseURL
+	var makeBasinBaseURL func(basin string) string
+	if customMakeBasinBaseURL == nil {
 		makeBasinBaseURL = func(basin string) string {
 			return fmt.Sprintf("https://%s.b.s2.dev/v1", basin)
 		}
 	} else {
 		makeBasinBaseURL = func(basin string) string {
-			return normalizeBaseURL(opts.MakeBasinBaseURL(basin))
+			return normalizeBaseURL(customMakeBasinBaseURL(basin))
 		}
 	}
 
-	retryConfig := opts.RetryConfig
-	if retryConfig == nil {
-		retryConfig = DefaultRetryConfig
+	var retryConfig *RetryConfig
+	if opts.RetryConfig != nil {
+		cfgCopy := *opts.RetryConfig
+		retryConfig = &cfgCopy
+	} else if DefaultRetryConfig != nil {
+		cfgCopy := *DefaultRetryConfig
+		retryConfig = &cfgCopy
 	}
 
 	connectionTimeout := opts.ConnectionTimeout
@@ -203,6 +222,7 @@ func newUnaryHTTPTransport(base http.RoundTripper, connectionTimeout time.Durati
 		Timeout:   connectionTimeout,
 		KeepAlive: defaultTCPKeepAlive,
 	}).DialContext
+	transport.TLSHandshakeTimeout = connectionTimeout
 	transport.ForceAttemptHTTP2 = true
 	transport.MaxIdleConnsPerHost = defaultMaxIdleConnsPerHost
 	return transport
@@ -259,20 +279,34 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 		}
 	}
 	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+		dialCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
 		defer cancel()
-		return dialer.dial(ctx, schemeHTTP, network, addr)
+		conn, err := dialer.dial(dialCtx, schemeHTTP, network, addr)
+		if err != nil {
+			if ctx.Err() == nil {
+				return nil, &connectError{err: err}
+			}
+			return nil, err
+		}
+		return conn, nil
 	}
 	// Handshake here rather than via TLSClientConfig so that dial, proxy and
 	// TLS share one ConnectionTimeout, and so that a server that does not
 	// negotiate h2 is rejected instead of net/http falling back to HTTP/1.1.
 	dialTLSContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+		dialCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
 		defer cancel()
 
-		conn, err := dialer.dial(ctx, schemeHTTPS, network, addr)
+		wrapConnectErr := func(err error) error {
+			if ctx.Err() == nil {
+				return &connectError{err: err}
+			}
+			return err
+		}
+
+		conn, err := dialer.dial(dialCtx, schemeHTTPS, network, addr)
 		if err != nil {
-			return nil, err
+			return nil, wrapConnectErr(err)
 		}
 		cfg := &tls.Config{}
 		if tlsConfig != nil {
@@ -287,13 +321,13 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 		}
 		cfg.NextProtos = []string{"h2"}
 		tlsConn := tls.Client(conn, cfg)
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
+		if err := tlsConn.HandshakeContext(dialCtx); err != nil {
 			conn.Close()
-			return nil, err
+			return nil, wrapConnectErr(err)
 		}
 		if proto := tlsConn.ConnectionState().NegotiatedProtocol; proto != "h2" {
 			tlsConn.Close()
-			return nil, fmt.Errorf("server at %s did not negotiate HTTP/2 (got %q)", addr, proto)
+			return nil, wrapConnectErr(fmt.Errorf("server at %s did not negotiate HTTP/2 (got %q)", addr, proto))
 		}
 		return tlsConn, nil
 	}
@@ -340,7 +374,7 @@ func NewFromEnvironment(opts *ClientOptions) *Client {
 	envConfig := loadConfigFromEnv()
 
 	if envConfig.AccessToken == "" {
-		panic("S2_ACCESS_TOKEN environment variable is required")
+		panic(newValidationError("S2_ACCESS_TOKEN environment variable is required"))
 	}
 	if opts.BaseURL == "" && opts.MakeBasinBaseURL == nil {
 		envConfig.requireEndpointPair()

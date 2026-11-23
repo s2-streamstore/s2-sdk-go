@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	appendAckChannelBuffer = 20
+	appendAckChannelBuffer  = 20
+	appendSessionAckContext = "append session ack"
 )
 
 // AppendSession provides ordered, pipelined appends with automatic retries.
@@ -216,7 +217,11 @@ func (r *AppendSession) Close() error {
 func (r *AppendSession) LastAckedPosition() *AppendAck {
 	r.stateMu.RLock()
 	defer r.stateMu.RUnlock()
-	return r.lastAckedPosition
+	if r.lastAckedPosition == nil {
+		return nil
+	}
+	cp := *r.lastAckedPosition
+	return &cp
 }
 
 // Adds a capacity-reserved entry to the inflight queue unless shutdown has already started.
@@ -632,21 +637,48 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 	r.inflightMu.Lock()
 
 	if len(r.inflightQueue) == 0 {
+		if session.completedElsewhere > 0 {
+			session.completedElsewhere--
+			r.inflightMu.Unlock()
+			return
+		}
 		r.inflightMu.Unlock()
+		err := makeProtocolError(
+			errors.New("received append ack with no unacked batch in flight"),
+			appendSessionAckContext,
+		)
+		logError(r.streamClient.logger, "append session unexpected ack",
+			"stream", string(r.streamClient.name),
+			"error", err)
+		r.failAllInflight(err)
 		return
 	}
 
 	entry := r.inflightQueue[0]
 
 	if !entry.wasSentOnSessionLocked(session) {
+		if session.completedElsewhere > 0 {
+			session.completedElsewhere--
+			r.inflightMu.Unlock()
+			return
+		}
 		r.inflightMu.Unlock()
+		err := makeProtocolError(
+			errors.New("received append ack for batch not sent on this session"),
+			appendSessionAckContext,
+		)
+		logError(r.streamClient.logger, "append session unexpected ack",
+			"stream", string(r.streamClient.name),
+			"error", err)
+		r.failAllInflight(err)
 		return
 	}
 
 	r.stateMu.RLock()
 	last := r.lastAckedPosition
 	r.stateMu.RUnlock()
-	if ack != nil && last != nil && ack.End.SeqNum <= last.End.SeqNum {
+	if session.completedElsewhere > 0 && ack != nil && last != nil && ack.End.SeqNum <= last.End.SeqNum {
+		session.completedElsewhere--
 		r.inflightMu.Unlock()
 		return // stale ack for an already-completed entry
 	}
@@ -669,7 +701,11 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 
 	r.inflightQueue[0] = nil
 	r.inflightQueue = r.inflightQueue[1:]
-	sessionsToClose := r.releaseEntrySessionsLocked(entry)
+	if len(r.inflightQueue) > 0 && !r.inflightQueue[0].attemptStart.IsZero() {
+		// Spec T7c: timeout for the next oldest unacked batch starts when it becomes the head.
+		r.inflightQueue[0].attemptStart = time.Now()
+	}
+	sessionsToClose := r.releaseEntrySessionsLocked(entry, session)
 
 	r.stateMu.Lock()
 	r.lastAckedPosition = ack
@@ -691,20 +727,26 @@ func (r *AppendSession) handleAck(session *transportAppendSession, ack *AppendAc
 
 func (r *AppendSession) validateAckLocked(entry *inflightEntry, ack *AppendAck) error {
 	if ack == nil {
-		return fmt.Errorf("append ack invariant violated: received nil ack")
+		return makeProtocolError(errors.New("append ack invariant violated: received nil ack"), appendSessionAckContext)
 	}
 
 	start := ack.Start.SeqNum
 	end := ack.End.SeqNum
 
 	if end < start {
-		return fmt.Errorf("append ack invariant violated: end seq %d is less than start seq %d", end, start)
+		return makeProtocolError(
+			fmt.Errorf("append ack invariant violated: end seq %d is less than start seq %d", end, start),
+			appendSessionAckContext,
+		)
 	}
 
 	ackCount := end - start
 	if ackCount != uint64(entry.expectedCount) {
-		return fmt.Errorf("append ack invariant violated: expected %d records, got %d (start=%d, end=%d)",
-			entry.expectedCount, ackCount, start, end)
+		return makeProtocolError(
+			fmt.Errorf("append ack invariant violated: expected %d records, got %d (start=%d, end=%d)",
+				entry.expectedCount, ackCount, start, end),
+			appendSessionAckContext,
+		)
 	}
 
 	r.stateMu.RLock()
@@ -713,9 +755,12 @@ func (r *AppendSession) validateAckLocked(entry *inflightEntry, ack *AppendAck) 
 
 	if last != nil {
 		prevEnd := last.End.SeqNum
-		if end <= prevEnd {
-			return fmt.Errorf("append ack invariant violated: end seq %d is not greater than previous end %d",
-				end, prevEnd)
+		if start < prevEnd {
+			return makeProtocolError(
+				fmt.Errorf("append ack invariant violated: start seq %d is less than previous end %d",
+					start, prevEnd),
+				appendSessionAckContext,
+			)
 		}
 	}
 
@@ -909,6 +954,9 @@ func (r *AppendSession) handleClaimedSessionError(failedSession *transportAppend
 // reported as side-effect free for those entries.
 func (r *AppendSession) markInflightUncertainty(failedSession *transportAppendSession, err error) {
 	if isNoSideEffectsError(err) {
+		return
+	}
+	if failedSession != nil && !failedSession.effectSignalled() {
 		return
 	}
 	r.inflightMu.Lock()
@@ -1136,9 +1184,12 @@ func (entry *inflightEntry) wasSentOnSessionLocked(session *transportAppendSessi
 }
 
 // Caller must hold inflightMu.
-func (r *AppendSession) releaseEntrySessionsLocked(entry *inflightEntry) []*transportAppendSession {
+func (r *AppendSession) releaseEntrySessionsLocked(entry *inflightEntry, completedBy *transportAppendSession) []*transportAppendSession {
 	var sessionsToClose []*transportAppendSession
 	for _, session := range entry.sentOnSessions {
+		if session != completedBy {
+			session.completedElsewhere++
+		}
 		count, ok := r.sessionRefs[session]
 		if !ok {
 			continue

@@ -148,9 +148,16 @@ func calculateRetryBackoff(config *RetryConfig, attempt int) time.Duration {
 		maxBaseDelay = defaultMaxBaseDelay
 	}
 
-	// baseDelay = min((minBaseDelay * 2^(n-1)), maxBaseDelay)
-	baseDelay := minBaseDelay << (attempt - 1)                // minBaseDelay * 2^(attempt-1)
-	if baseDelay > maxBaseDelay || baseDelay < minBaseDelay { // overflow check
+	// baseDelay = min((minBaseDelay * 2^(n-1)), maxBaseDelay) without int64 shift overflow.
+	baseDelay := minBaseDelay
+	for range attempt - 1 {
+		if baseDelay >= maxBaseDelay || baseDelay > maxBaseDelay/2 {
+			baseDelay = maxBaseDelay
+			break
+		}
+		baseDelay *= 2
+	}
+	if baseDelay > maxBaseDelay {
 		baseDelay = maxBaseDelay
 	}
 
@@ -278,9 +285,27 @@ func shouldRetryNetworkError(config *RetryConfig) bool {
 	return config.AppendRetryPolicy != AppendRetryPolicyNoSideEffects
 }
 
+// connectError marks an error from connection establishment (TCP dial, proxy
+// CONNECT, or TLS handshake) before any request bytes were sent (spec E3, T7a).
+type connectError struct {
+	err error
+}
+
+func (e *connectError) Error() string {
+	return e.err.Error()
+}
+
+func (e *connectError) Unwrap() error {
+	return e.err
+}
+
 // isConnectError reports whether err came from establishing a connection,
 // so no request bytes were sent and the attempt had no side effects.
 func isConnectError(err error) bool {
+	var connErr *connectError
+	if errors.As(err, &connErr) {
+		return true
+	}
 	var opErr *net.OpError
 	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
