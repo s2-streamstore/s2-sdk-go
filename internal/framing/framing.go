@@ -21,7 +21,7 @@ package framing
 //	└─────────────┴────────────┴─────────────┴───────────────┘
 //
 // LENGTH = size of (FLAGS + PAYLOAD), does NOT include length header itself
-// Protocol maximum: 2 MiB
+// Protocol maximum: 2.5 MiB
 
 import (
 	"bytes"
@@ -35,8 +35,11 @@ import (
 )
 
 const (
-	// Maximum S2S frame size (2 MiB per protocol spec).
-	MaxFrameSize = 2 * 1024 * 1024
+	// Maximum S2S frame length (flag + body), 2.5 MiB per protocol spec.
+	MaxFrameSize = 5 * 512 * 1024
+
+	// Maximum size a frame body may decompress to, per protocol spec.
+	MaxDecompressedSize = MaxFrameSize - 1
 
 	// Minimum spare buffer capacity offered to each network read.
 	readChunkSize = 64 * 1024

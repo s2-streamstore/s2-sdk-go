@@ -3,11 +3,16 @@ package framing
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/klauspost/compress/zstd"
 )
+
+// ErrDecompressedTooLarge reports a payload that decompresses past
+// MaxDecompressedSize.
+var ErrDecompressedTooLarge = fmt.Errorf("decompressed size exceeds %d bytes", MaxDecompressedSize)
 
 // Returns the frame payload after applying the compression
 // described in the frame header.
@@ -31,18 +36,21 @@ func gunzip(data []byte) ([]byte, error) {
 	}
 	defer reader.Close()
 
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, reader); err != nil {
+	out, err := io.ReadAll(io.LimitReader(reader, MaxDecompressedSize+1))
+	if err != nil {
 		return nil, fmt.Errorf("gzip decompress: %w", err)
 	}
-	return buf.Bytes(), nil
+	if len(out) > MaxDecompressedSize {
+		return nil, ErrDecompressedTooLarge
+	}
+	return out, nil
 }
 
 // Shared decoder for DecodeAll, which is safe for concurrent use and spawns
 // no goroutines (those are streaming-only). Concurrency 0 (GOMAXPROCS) sets
 // the number of pooled decoder states, bounding concurrent DecodeAll calls.
 var zstdDecoder = func() *zstd.Decoder {
-	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(0))
+	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(0), zstd.WithDecoderMaxMemory(MaxDecompressedSize))
 	if err != nil {
 		panic(err)
 	}
@@ -51,6 +59,9 @@ var zstdDecoder = func() *zstd.Decoder {
 
 func unzstd(data []byte) ([]byte, error) {
 	out, err := zstdDecoder.DecodeAll(data, nil)
+	if errors.Is(err, zstd.ErrDecoderSizeExceeded) {
+		return nil, ErrDecompressedTooLarge
+	}
 	if err != nil {
 		return nil, fmt.Errorf("zstd decompress: %w", err)
 	}

@@ -99,7 +99,12 @@ func (h *httpClient) requestWithHeadersResult(ctx context.Context, method, path 
 	}
 
 	if result != nil && resp.StatusCode != http.StatusNoContent {
-		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logError(h.logger, "s2 http read response error", "error", err, "method", method, "path", path)
+			return nil, makeConnectionLostError(err, "response body read")
+		}
+		if err := json.Unmarshal(data, result); err != nil {
 			logError(h.logger, "s2 http decode response error", "error", err, "method", method, "path", path)
 			return nil, fmt.Errorf("decode response: %w", err)
 		}
@@ -195,21 +200,7 @@ func (h *httpClient) requestProto(
 	logInfo(h.logger, "s2 http proto response", "method", method, "path", path, "status", resp.StatusCode)
 
 	if resp.StatusCode >= 400 {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		if readErr != nil {
-			bodyErr := newBodyReadError(resp.StatusCode, body, readErr)
-			logError(h.logger, "s2 http proto error response body read failed", "method", method, "path", path, "status", resp.StatusCode, "error", readErr)
-			return bodyErr
-		}
-		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
-			respCompression := internalframing.ParseContentEncoding(encoding)
-			decompressed, err := internalframing.Decompress(body, respCompression)
-			if err != nil {
-				return fmt.Errorf("decompress error response body: %w", err)
-			}
-			body = decompressed
-		}
-		apiErr := decodeAPIError(resp.StatusCode, body)
+		apiErr := parseHTTPError(resp)
 		logError(h.logger, "s2 http proto error response", "method", method, "path", path, "status", resp.StatusCode, "message", apiErr.Error())
 		return apiErr
 	}
@@ -217,14 +208,14 @@ func (h *httpClient) requestProto(
 	if result != nil && resp.StatusCode != http.StatusNoContent {
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return fmt.Errorf("read proto response: %w", err)
+			return makeConnectionLostError(err, "response body read")
 		}
 
 		if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
 			respCompression := internalframing.ParseContentEncoding(encoding)
 			data, err = internalframing.Decompress(data, respCompression)
 			if err != nil {
-				return fmt.Errorf("decompress response body: %w", err)
+				return makeProtocolError(err, "response body decompression")
 			}
 		}
 

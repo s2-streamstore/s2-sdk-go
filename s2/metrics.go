@@ -160,7 +160,7 @@ func (m *MetricsClient) fetchMetrics(ctx context.Context, endpoint string, set s
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("reading response: %w", err)
+			return nil, makeConnectionLostError(err, "response body read")
 		}
 
 		var result MetricSetResponse

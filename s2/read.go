@@ -102,9 +102,17 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		streamConfig = cloneStreamConfigPtr(opts.StreamConfig)
 	}
 
+	client := s.basinClient.httpClient
+	if opts != nil && opts.Wait != nil && *opts.Wait > 0 && client.Timeout > 0 {
+		// A long poll may legitimately hold the response for up to wait.
+		extended := *client
+		extended.Timeout += time.Duration(*opts.Wait) * time.Second
+		client = &extended
+	}
+
 	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
 		httpClient := &httpClient{
-			client:      s.basinClient.httpClient,
+			client:      client,
 			baseURL:     s.basinClient.baseURL,
 			accessToken: s.basinClient.accessToken,
 			logger:      s.logger,
@@ -558,8 +566,17 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		}
 
 		if fr.err != nil {
-			if fr.err == io.EOF || isExpectedFrameReadError(fr.err) {
+			if fr.err == io.EOF && hasReadStopOption(opts) {
 				return nil
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			// The server ends a response cleanly only on a stop condition,
+			// so any other end means the connection was lost.
+			if fr.err == io.EOF || isExpectedFrameReadError(fr.err) {
+				logError(r.logger, "s2 read session response ended early", "stream", string(r.streamClient.name), "error", fr.err)
+				return makeConnectionLostError(fr.err, "read session")
 			}
 			logError(r.logger, "s2 read session frame error", "stream", string(r.streamClient.name), "error", fr.err)
 			return fmt.Errorf("read frame error: %w", fr.err)
@@ -568,7 +585,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		body, err := fr.frame.DecompressedBody()
 		if err != nil {
 			logError(r.logger, "s2 read session frame decompress error", "stream", string(r.streamClient.name), "error", err)
-			return err
+			return makeProtocolError(err, "read session frame decompression")
 		}
 
 		if fr.frame.Terminal {
@@ -689,6 +706,10 @@ func readBatchCaughtUp(batch *ReadBatch) bool {
 	}
 	n := len(batch.Records)
 	return n == 0 || batch.Records[n-1].SeqNum+1 == batch.Tail.SeqNum
+}
+
+func hasReadStopOption(opts *ReadOptions) bool {
+	return opts != nil && (opts.Count != nil || opts.Bytes != nil || opts.Until != nil || opts.Wait != nil)
 }
 
 func (r *streamReader) limitsReached() bool {

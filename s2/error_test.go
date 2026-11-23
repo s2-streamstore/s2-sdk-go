@@ -86,33 +86,37 @@ func TestWithPriorUncertainty(t *testing.T) {
 	}
 }
 
-func TestDecodeAPIError_RangeNotSatisfiable_PlainBody(t *testing.T) {
-	err := decodeAPIError(http.StatusRequestedRangeNotSatisfiable, []byte("custom range error"))
+func TestDecodeAPIError_RangeNotSatisfiableWithoutTailIsPlain(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantCode    string
+		wantMessage string
+	}{
+		{name: "plain body", body: "custom range error", wantMessage: "custom range error"},
+		{name: "empty body", body: "", wantMessage: http.StatusText(http.StatusRequestedRangeNotSatisfiable)},
+		{name: "empty object", body: "{}", wantMessage: "{}"},
+		{name: "null", body: "null", wantMessage: "null"},
+		{name: "null tail", body: `{"tail":null}`, wantMessage: `{"tail":null}`},
+		{name: "api error", body: `{"code":"x","message":"y"}`, wantCode: "x", wantMessage: "y"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := decodeAPIError(http.StatusRequestedRangeNotSatisfiable, []byte(tt.body))
 
-	var rangeErr *RangeNotSatisfiableError
-	if !errors.As(err, &rangeErr) {
-		t.Fatalf("expected RangeNotSatisfiableError, got %T", err)
-	}
-	if rangeErr.Status != http.StatusRequestedRangeNotSatisfiable {
-		t.Fatalf("expected status 416, got %d", rangeErr.Status)
-	}
-	if rangeErr.Message != "custom range error" {
-		t.Fatalf("expected message %q, got %q", "custom range error", rangeErr.Message)
-	}
-	if rangeErr.Tail != nil {
-		t.Fatal("expected Tail to be nil for plain body")
-	}
-}
-
-func TestDecodeAPIError_RangeNotSatisfiable_EmptyBody(t *testing.T) {
-	err := decodeAPIError(http.StatusRequestedRangeNotSatisfiable, nil)
-
-	var rangeErr *RangeNotSatisfiableError
-	if !errors.As(err, &rangeErr) {
-		t.Fatalf("expected RangeNotSatisfiableError, got %T", err)
-	}
-	if rangeErr.Tail != nil {
-		t.Fatal("expected Tail to be nil for empty body")
+			var rangeErr *RangeNotSatisfiableError
+			if errors.As(err, &rangeErr) {
+				t.Fatalf("expected plain S2Error, got RangeNotSatisfiableError with tail %v", rangeErr.Tail)
+			}
+			var s2Err *S2Error
+			if !errors.As(err, &s2Err) {
+				t.Fatalf("expected S2Error, got %T", err)
+			}
+			if s2Err.Status != http.StatusRequestedRangeNotSatisfiable || s2Err.Code != tt.wantCode || s2Err.Message != tt.wantMessage {
+				t.Fatalf("expected status 416, code %q, message %q; got %d, %q, %q",
+					tt.wantCode, tt.wantMessage, s2Err.Status, s2Err.Code, s2Err.Message)
+			}
+		})
 	}
 }
 
