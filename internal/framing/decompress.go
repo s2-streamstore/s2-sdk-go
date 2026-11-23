@@ -57,33 +57,45 @@ var zstdDecoder = func() *zstd.Decoder {
 	return decoder
 }()
 
-// Fallback decoder for streaming zstd frames whose header declares a window
-// larger than MaxDecompressedSize (e.g. zstd.NewWriter's default 8 MiB window).
-// DecodeAll writes directly into dst without allocating WindowSize, and
-// WithDecodeAllCapLimit enforces the MaxDecompressedSize output limit.
-var zstdLargeWindowDecoder = func() *zstd.Decoder {
-	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(0), zstd.WithDecodeAllCapLimit(true))
-	if err != nil {
-		panic(err)
-	}
-	return decoder
-}()
+// Maximum zstd window accepted on the streaming fallback path (matches
+// zstd's default streaming encoder window of 8 MiB).
+const maxZstdWindowSize = 8 << 20
 
 func unzstd(data []byte) ([]byte, error) {
 	out, err := zstdDecoder.DecodeAll(data, nil)
 	if errors.Is(err, zstd.ErrWindowSizeExceeded) {
-		out, err = zstdLargeWindowDecoder.DecodeAll(data, make([]byte, 0, MaxDecompressedSize))
-		if err == nil && len(out) < cap(out)/2 {
-			shrunk := make([]byte, len(out))
-			copy(shrunk, out)
-			out = shrunk
-		}
+		return unzstdStream(data)
 	}
 	if errors.Is(err, zstd.ErrDecoderSizeExceeded) {
 		return nil, ErrDecompressedTooLarge
 	}
 	if err != nil {
 		return nil, fmt.Errorf("zstd decompress: %w", err)
+	}
+	return out, nil
+}
+
+// unzstdStream handles valid streaming zstd frames whose declared window
+// exceeds MaxDecompressedSize (e.g. zstd.NewWriter's default 8 MiB window)
+// while bounding both the window and the decompressed output size.
+func unzstdStream(data []byte) ([]byte, error) {
+	reader, err := zstd.NewReader(
+		bytes.NewReader(data),
+		zstd.WithDecoderConcurrency(1),
+		zstd.WithDecoderLowmem(true),
+		zstd.WithDecoderMaxWindow(maxZstdWindowSize),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("zstd reader: %w", err)
+	}
+	defer reader.Close()
+
+	out, err := io.ReadAll(io.LimitReader(reader, MaxDecompressedSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("zstd decompress: %w", err)
+	}
+	if len(out) > MaxDecompressedSize {
+		return nil, ErrDecompressedTooLarge
 	}
 	return out, nil
 }
