@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -123,5 +124,62 @@ func TestStreamingClientUsesUserProxy(t *testing.T) {
 	}
 	if got := connects.Load(); got != 1 {
 		t.Fatalf("expected 1 CONNECT through the proxy, got %d", got)
+	}
+}
+
+func TestRedirectsAreNotFollowed(t *testing.T) {
+	var leaked atomic.Int32
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(s2EncryptionKeyHeader) != "" {
+			leaked.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	target.EnableHTTP2 = true
+	target.StartTLS()
+	t.Cleanup(target.Close)
+	origin := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	}))
+	origin.EnableHTTP2 = true
+	origin.StartTLS()
+	t.Cleanup(origin.Close)
+
+	key, err := NewEncryptionKeyFromBytes([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := New("token", &ClientOptions{
+		BaseURL:          origin.URL,
+		MakeBasinBaseURL: func(string) string { return origin.URL },
+		HTTPClient:       &http.Client{Transport: trustingTransport(origin, target)},
+		RetryConfig:      &RetryConfig{MaxAttempts: 1},
+	})
+	stream := client.Basin("test-basin").StreamWithOptions("test", &StreamOptions{EncryptionKey: &key})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	assertRedirectError := func(name string, err error) {
+		t.Helper()
+		var s2Err *S2Error
+		if !errors.As(err, &s2Err) || s2Err.Status != http.StatusTemporaryRedirect {
+			t.Errorf("%s: expected S2Error with status 307, got %v", name, err)
+		}
+	}
+	_, err = stream.Read(ctx, &ReadOptions{Count: Uint64(1)})
+	assertRedirectError("read", err)
+
+	session, err := stream.ReadSession(ctx, &ReadOptions{Count: Uint64(1)})
+	if err != nil {
+		t.Fatalf("read session: %v", err)
+	}
+	defer session.Close()
+	if session.Next() {
+		t.Fatal("unexpected record")
+	}
+	assertRedirectError("read session", session.Err())
+
+	if got := leaked.Load(); got != 0 {
+		t.Fatalf("encryption key sent to redirect target %d times", got)
 	}
 }

@@ -361,7 +361,14 @@ type userAgentRoundTripper struct {
 func (rt userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	reqCtx := req.Clone(req.Context())
 	reqCtx.Header.Set("User-Agent", rt.userAgent)
-	return rt.base.RoundTrip(reqCtx)
+	resp, err := rt.base.RoundTrip(reqCtx)
+	if err == nil && resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		// S2 never redirects. Fail here, below http.Client's redirect policy
+		// (which may be the caller's), so headers such as s2-encryption-key
+		// are never forwarded to the redirect target.
+		return nil, parseHTTPError(resp)
+	}
+	return resp, err
 }
 
 func (rt userAgentRoundTripper) CloseIdleConnections() {
