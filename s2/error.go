@@ -335,6 +335,15 @@ func makeStreamResetError(err error, context string) error {
 	}
 }
 
+func makeConnectionLostError(message string) error {
+	return &S2Error{
+		Message: message,
+		Code:    "CONNECTION_LOST",
+		Status:  502,
+		Origin:  "network",
+	}
+}
+
 func makeAppendPreconditionError(status int, jsonMap map[string]interface{}) error {
 	if seqNumMismatch, exists := jsonMap["seq_num_mismatch"]; exists {
 		if expectedSeqNum, ok := seqNumMismatch.(float64); ok {

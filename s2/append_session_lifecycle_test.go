@@ -337,6 +337,10 @@ func TestAppendSession_IdleRequestEndUsesNoBudget(t *testing.T) {
 		name string
 		end  func(*transportAppendSession)
 	}{
+		{"clean end", func(transport *transportAppendSession) {
+			close(transport.errorsCh)
+			close(transport.acksCh)
+		}},
 		{"connection breaks", func(transport *transportAppendSession) {
 			transport.reportError(fmt.Errorf("read frame error: %w", io.ErrUnexpectedEOF))
 		}},
@@ -433,5 +437,24 @@ func TestAppendSession_AdviceDuringWriteIsNotAFailure(t *testing.T) {
 	}
 	if !entries[0].wasSentOnSessionLocked(transport) || entries[1].wasSentOnSessionLocked(transport) || !writer.closed {
 		t.Fatal("the in-progress batch should finish sending before the request is half-closed")
+	}
+}
+
+func TestAppendSession_CleanEndWithUnackedIsConnectionLost(t *testing.T) {
+	session, transport, entries := newAppendAckDrainSession(t, &RetryConfig{
+		MaxAttempts:       2,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}, 1)
+	close(transport.errorsCh)
+	close(transport.acksCh)
+	session.readAcks(transport)
+
+	select {
+	case result := <-entries[0].resultCh:
+		t.Fatalf("unacked batch should be retried, got %+v", result)
+	default:
+	}
+	if session.currentSession != nil || session.currentAttempt != 1 || session.retryAt.IsZero() {
+		t.Fatal("a clean end with an unacked batch was not retried as a lost connection")
 	}
 }

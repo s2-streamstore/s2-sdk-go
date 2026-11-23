@@ -548,8 +548,10 @@ func (r *AppendSession) readAcks(session *transportAppendSession) {
 	endedCleanly := false
 	reconnectAccepted := false
 	defer func() {
-		if endedCleanly && reconnectAccepted && r.hasUnackedOnSession(session) {
-			r.handleSessionError(session, fmt.Errorf("append session ended before acknowledging all appends"))
+		// A clean end is a lost connection unless nothing is left unacked
+		// or queued, which handleClaimedSessionError treats as idle.
+		if endedCleanly {
+			r.handleSessionError(session, makeConnectionLostError("append session response ended before acknowledging all appends"))
 		}
 	}()
 	adviceHandled := false
