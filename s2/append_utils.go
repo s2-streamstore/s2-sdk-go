@@ -119,6 +119,10 @@ func MeteredBatchBytes(records []AppendRecord) int64 {
 func applyAppendSessionDefaults(opts *AppendSessionOptions, baseRetry *RetryConfig) (*AppendSessionOptions, error) {
 	if opts == nil {
 		opts = &AppendSessionOptions{}
+	} else {
+		clone := *opts
+		clone.StreamConfig = cloneStreamConfigPtr(opts.StreamConfig)
+		opts = &clone
 	}
 
 	if opts.MaxInflightBytes == 0 {

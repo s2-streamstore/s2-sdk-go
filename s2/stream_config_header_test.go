@@ -161,7 +161,7 @@ func TestReadSessionStreamConfigAcrossAttempts(t *testing.T) {
 }
 
 func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
-	for _, operation := range []string{"append", "read session"} {
+	for _, operation := range []string{"append", "read", "read session", "append session"} {
 		t.Run(operation, func(t *testing.T) {
 			config := &StreamConfig{
 				DeleteOnEmpty:   &DeleteOnEmptyConfig{MinAgeSecs: Int64(300)},
@@ -179,6 +179,9 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 				headers <- req.Header.Get(s2StreamConfigHeader)
 				attempts++
 				status := http.StatusOK
+				if operation == "append session" {
+					status = http.StatusInternalServerError
+				}
 				if attempts == 1 {
 					*config.DeleteOnEmpty.MinAgeSecs = 600
 					*config.RetentionPolicy.Age = 7200
@@ -216,6 +219,27 @@ func TestStreamConfigSnapshotAcrossRetries(t *testing.T) {
 					StreamConfig: config,
 				}); err != nil {
 					t.Fatalf("append failed: %v", err)
+				}
+			case "read":
+				if _, err := stream.Read(ctx, &ReadOptions{StreamConfig: config}); err != nil {
+					t.Fatalf("read failed: %v", err)
+				}
+			case "append session":
+				session, err := stream.AppendSession(ctx, &AppendSessionOptions{StreamConfig: config})
+				if err != nil {
+					t.Fatalf("append session: %v", err)
+				}
+				defer session.Close()
+				future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte("hello")}}})
+				if err != nil {
+					t.Fatalf("submit: %v", err)
+				}
+				ticket, err := future.Wait(ctx)
+				if err != nil {
+					t.Fatalf("submit wait: %v", err)
+				}
+				if _, err := ticket.Ack(ctx); err == nil {
+					t.Fatal("expected append session to fail after exhausting attempts")
 				}
 			case "read session":
 				session, err := stream.ReadSession(ctx, &ReadOptions{StreamConfig: config})

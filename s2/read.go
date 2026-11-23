@@ -99,7 +99,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 
 	var streamConfig *StreamConfig
 	if opts != nil {
-		streamConfig = opts.StreamConfig
+		streamConfig = cloneStreamConfigPtr(opts.StreamConfig)
 	}
 
 	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
