@@ -46,6 +46,11 @@ type AppendSession struct {
 	lastAckedPosition *AppendAck
 	stateMu           sync.RWMutex
 
+	// submitTail is closed once the most recent submission has been queued
+	// or has failed; each submission waits on its predecessor's.
+	submitTail chan struct{}
+	submitMu   sync.Mutex
+
 	wakeup            chan struct{}
 	currentAttempt    int
 	retryAt           time.Time
@@ -84,6 +89,7 @@ func (s *StreamClient) AppendSession(ctx context.Context, opts *AppendSessionOpt
 
 // Submit an append request.
 // Returns a [SubmitFuture] that resolves to a submit ticket once the batch is enqueued (has capacity).
+// Batches are enqueued, and appended, in the order of Submit calls.
 // Call ticket.Wait() to get a [SubmitFuture] for the [AppendAck] once the batch is durable.
 // This method applies backpressure and will block if capacity limits are reached.
 func (r *AppendSession) Submit(input *AppendInput) (*SubmitFuture, error) {
@@ -123,7 +129,19 @@ func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *Subm
 	ticketCh := make(chan *BatchSubmitTicket, 1)
 	errCh := make(chan error, 1)
 
+	// Capacity is granted, and batches are queued, in Submit order: each
+	// submission waits for its predecessor to be queued or to fail.
+	done := make(chan struct{})
+	r.submitMu.Lock()
+	prev := r.submitTail
+	r.submitTail = done
+	r.submitMu.Unlock()
+
 	go func() {
+		defer close(done)
+		if prev != nil {
+			<-prev
+		}
 		if err := r.capacity.reserve(r.pumpCtx, size); err != nil {
 			errCh <- err
 			return

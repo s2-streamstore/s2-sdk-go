@@ -1,6 +1,7 @@
 package s2
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -193,5 +194,73 @@ func TestAppendSession_ReadAcksBufferedReconnect(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAppendSession_SubmitOrderSurvivesBackpressure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stream := newTestStreamClientForAppend(DefaultRetryConfig)
+	writes := make(chan struct{}, 3)
+	transport := newTransportSession(stream, &signalWriteCloser{signal: writes})
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		return transport, nil
+	}
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{MaxInflightBytes: minInflightBytes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	submit := func(size int) *SubmitFuture {
+		future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: make([]byte, size)}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return future
+	}
+	awaitWrite := func() {
+		select {
+		case <-writes:
+		case <-ctx.Done():
+			t.Fatal("batch was not sent")
+		}
+	}
+	ack := func(seq uint64) {
+		transport.acksCh <- &AppendAck{
+			Start: StreamPosition{SeqNum: seq},
+			End:   StreamPosition{SeqNum: seq + 1},
+			Tail:  StreamPosition{SeqNum: seq + 1},
+		}
+	}
+
+	if _, err := submit(700_000).Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	awaitWrite()
+	// b waits for capacity; c would fit alongside the first batch.
+	b, c := submit(400_000), submit(100_000)
+	ack(0)
+	tickets := make([]*BatchSubmitTicket, 0, 2)
+	for _, future := range []*SubmitFuture{b, c} {
+		ticket, err := future.Wait(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tickets = append(tickets, ticket)
+	}
+	awaitWrite()
+	awaitWrite()
+	ack(1)
+	ack(2)
+	for i, ticket := range tickets {
+		got, err := ticket.Ack(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Start.SeqNum != uint64(i+1) {
+			t.Fatalf("batch %d was appended at %d, out of submission order", i+1, got.Start.SeqNum)
+		}
 	}
 }
