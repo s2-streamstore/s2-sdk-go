@@ -170,6 +170,13 @@ func isNetworkError(ctx context.Context, err error) bool {
 		return false
 	}
 
+	// A response error raised inside RoundTrip (see userAgentRoundTripper)
+	// arrives wrapped in *url.Error, which is itself a net.Error.
+	var s2Err *S2Error
+	if errors.As(err, &s2Err) {
+		return false
+	}
+
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return true

@@ -137,7 +137,7 @@ func TestStreamingClientUsesUserProxy(t *testing.T) {
 }
 
 func TestRedirectsAreNotFollowed(t *testing.T) {
-	var leaked atomic.Int32
+	var leaked, requests atomic.Int32
 	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get(s2EncryptionKeyHeader) != "" {
 			leaked.Add(1)
@@ -148,6 +148,7 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 	target.StartTLS()
 	t.Cleanup(target.Close)
 	origin := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
 	}))
 	origin.EnableHTTP2 = true
@@ -158,25 +159,42 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := New("token", &ClientOptions{
-		BaseURL:          origin.URL,
-		MakeBasinBaseURL: func(string) string { return origin.URL },
-		HTTPClient:       &http.Client{Transport: trustingTransport(origin, target)},
-		RetryConfig:      &RetryConfig{MaxAttempts: 1},
-	})
-	stream := client.Basin("test-basin").StreamWithOptions("test", &StreamOptions{EncryptionKey: &key})
+	newStream := func(policy AppendRetryPolicy) *StreamClient {
+		client := New("token", &ClientOptions{
+			BaseURL:          origin.URL,
+			MakeBasinBaseURL: func(string) string { return origin.URL },
+			HTTPClient:       &http.Client{Transport: trustingTransport(origin, target)},
+			RetryConfig: &RetryConfig{
+				MaxAttempts:       3,
+				MinBaseDelay:      time.Millisecond,
+				MaxBaseDelay:      time.Millisecond,
+				AppendRetryPolicy: policy,
+			},
+		})
+		return client.Basin("test-basin").StreamWithOptions("test", &StreamOptions{EncryptionKey: &key})
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// A redirect fails the operation with its status, on the first attempt.
 	assertRedirectError := func(name string, err error) {
 		t.Helper()
 		var s2Err *S2Error
 		if !errors.As(err, &s2Err) || s2Err.Status != http.StatusTemporaryRedirect {
 			t.Errorf("%s: expected S2Error with status 307, got %v", name, err)
 		}
+		if got := requests.Swap(0); got != 1 {
+			t.Errorf("%s: expected 1 request, got %d", name, got)
+		}
 	}
+	stream := newStream(AppendRetryPolicyAll)
 	_, err = stream.Read(ctx, &ReadOptions{Count: Uint64(1)})
 	assertRedirectError("read", err)
+
+	for _, policy := range []AppendRetryPolicy{AppendRetryPolicyAll, AppendRetryPolicyNoSideEffects} {
+		_, err = newStream(policy).Append(ctx, &AppendInput{Records: []AppendRecord{{Body: []byte("hello")}}})
+		assertRedirectError("append "+string(policy), err)
+	}
 
 	session, err := stream.ReadSession(ctx, &ReadOptions{Count: Uint64(1)})
 	if err != nil {
