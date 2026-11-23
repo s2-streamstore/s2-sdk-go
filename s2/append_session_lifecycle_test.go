@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -375,6 +376,28 @@ func TestAppendSession_IdleRequestEndUsesNoBudget(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestAppendSession_ProductiveRequestEndSparesQueuedBatch(t *testing.T) {
+	session, transport, _ := newAppendAckDrainSession(t, &RetryConfig{
+		MaxAttempts:       1,
+		AppendRetryPolicy: AppendRetryPolicyAll,
+	}, 0)
+	transport.ackReceived.Store(true)
+	entry, err := session.enqueueReservedEntry(&AppendInput{Records: []AppendRecord{{Body: []byte("x")}}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session.sessionMu.Lock()
+	session.currentSession = nil
+	session.failuresPending.Add(1)
+	session.sessionMu.Unlock()
+	session.handleClaimedSessionError(transport, makeConnectionLostError(nil, "test"))
+
+	if atomic.LoadInt32(&entry.completed) != 0 {
+		t.Fatal("a batch queued but never sent was failed when an acked request ended")
 	}
 }
 

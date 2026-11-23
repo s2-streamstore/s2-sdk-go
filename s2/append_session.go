@@ -765,6 +765,17 @@ func (r *AppendSession) inflightEmpty() bool {
 	return len(r.inflightQueue) == 0
 }
 
+// endedIdle reports whether a request ended with nothing of its own unacked.
+// Batches queued but not yet sent on it count only if the request made
+// progress, so a server that ends every request at once still exhausts the
+// retry budget rather than being redialed in a loop.
+func (r *AppendSession) endedIdle(session *transportAppendSession) bool {
+	if r.inflightEmpty() {
+		return true
+	}
+	return session != nil && session.ackReceived.Load() && !r.hasUnackedOnSession(session)
+}
+
 func (r *AppendSession) hasUnackedOnSession(session *transportAppendSession) bool {
 	r.inflightMu.RLock()
 	defer r.inflightMu.RUnlock()
@@ -823,9 +834,9 @@ func (r *AppendSession) handleClaimedSessionError(failedSession *transportAppend
 
 	var s2Err *S2Error
 	isS2Err := errors.As(err, &s2Err)
-	if (!isS2Err || s2Err.IsRetryable()) && r.inflightEmpty() {
-		// Nothing is unacked or queued, so nothing failed; the next batch
-		// opens a new request.
+	if (!isS2Err || s2Err.IsRetryable()) && r.endedIdle(failedSession) {
+		// Nothing sent on this request is unacked, so nothing failed; queued
+		// batches go out on a new request.
 		logDebug(r.streamClient.logger, "append session idle request ended",
 			"stream", string(r.streamClient.name),
 			"error", err)
