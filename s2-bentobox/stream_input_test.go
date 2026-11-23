@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	s2 "github.com/s2-streamstore/s2-sdk-go/s2"
 )
@@ -134,5 +135,71 @@ func TestAckAfterCloseDoesNotUpdateCache(t *testing.T) {
 	got, _ := inner.Get(context.Background(), stream)
 	if got != 103 {
 		t.Fatalf("expected durable cache to advance to 103 after ack, got %d", got)
+	}
+}
+
+// Yields queued records, then blocks like an idle stream until closed.
+type idleSession struct {
+	records chan s2.SequencedRecord
+	closed  chan struct{}
+	once    sync.Once
+	current s2.SequencedRecord
+}
+
+func (s *idleSession) Next() bool {
+	select {
+	case s.current = <-s.records:
+		return true
+	case <-s.closed:
+		return false
+	}
+}
+
+func (s *idleSession) Record() s2.SequencedRecord { return s.current }
+func (s *idleSession) Err() error                 { return nil }
+func (s *idleSession) Close() error {
+	s.once.Do(func() { close(s.closed) })
+	return nil
+}
+
+// A nacked batch must be redelivered even while the session is idle and
+// ReadBatch is already waiting for the next record.
+func TestNackRedeliveredWhileSessionIdle(t *testing.T) {
+	session := &idleSession{records: make(chan s2.SequencedRecord, 1), closed: make(chan struct{})}
+	session.records <- s2.SequencedRecord{SeqNum: 7}
+	cache := newSeqNumCache(nil, silentLogger{})
+	si := newStreamInput("demo", session, func() {}, cache, 0, 8, silentLogger{})
+	defer si.Close(context.Background())
+
+	ctx := context.Background()
+	_, ackFunc, err := si.ReadBatch(ctx)
+	if err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+
+	type result struct {
+		batch []s2.SequencedRecord
+		err   error
+	}
+	redelivered := make(chan result, 1)
+	go func() {
+		batch, _, err := si.ReadBatch(ctx)
+		redelivered <- result{batch, err}
+	}()
+
+	// Let the second ReadBatch park on the idle session before nacking.
+	time.Sleep(50 * time.Millisecond)
+	if err := ackFunc(ctx, errors.New("downstream failed")); err != nil {
+		t.Fatalf("nack: %v", err)
+	}
+
+	select {
+	case r := <-redelivered:
+		if r.err != nil || len(r.batch) != 1 || r.batch[0].SeqNum != 7 {
+			t.Fatalf("expected nacked record 7 redelivered, got %+v (err %v)", r.batch, r.err)
+		}
+	case <-time.After(time.Second):
+		session.Close()
+		t.Fatal("nacked batch was not redelivered while the session was idle")
 	}
 }
