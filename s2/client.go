@@ -36,6 +36,7 @@ const (
 type ClientOptions struct {
 	// Endpoint to connect to S2.
 	// Defaults to "https://a.s2.dev/v1".
+	// A custom BaseURL requires MakeBasinBaseURL, and vice versa.
 	BaseURL string
 	// HTTP client used for requests.
 	HTTPClient *http.Client
@@ -96,6 +97,12 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	baseURL := DefaultBaseURL
 	if opts.BaseURL != "" {
 		baseURL = normalizeBaseURL(opts.BaseURL)
+	}
+	// Either endpoint alone would send the other kind of request, with this
+	// token, to S2 Cloud. An explicit DefaultBaseURL is S2 Cloud already.
+	if (opts.MakeBasinBaseURL == nil && baseURL != DefaultBaseURL) ||
+		(opts.MakeBasinBaseURL != nil && opts.BaseURL == "") {
+		panic(newValidationError("BaseURL and MakeBasinBaseURL must be set together"))
 	}
 
 	httpClient := opts.HTTPClient
@@ -294,7 +301,8 @@ func newStreamingTransport(connectionTimeout time.Duration, tlsConfig *tls.Confi
 // Create a client using configuration from environment variables.
 // Environment variables: S2_ACCESS_TOKEN, S2_ACCOUNT_ENDPOINT, S2_BASIN_ENDPOINT.
 // ClientOptions fields override environment variables.
-// Panics if S2_ACCESS_TOKEN is not set.
+// Panics if S2_ACCESS_TOKEN is not set, or if only one of S2_ACCOUNT_ENDPOINT
+// and S2_BASIN_ENDPOINT is set.
 func NewFromEnvironment(opts *ClientOptions) *Client {
 	if opts == nil {
 		opts = &ClientOptions{}

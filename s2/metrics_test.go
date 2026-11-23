@@ -47,8 +47,9 @@ func TestAccountMetricsEstimatedBillableUsage(t *testing.T) {
 				return jsonResponse(http.StatusOK, "", body), nil
 			})
 			client := New("token", &ClientOptions{
-				BaseURL:    "http://account.test",
-				HTTPClient: &http.Client{Transport: rt},
+				BaseURL:          "http://account.test",
+				MakeBasinBaseURL: testBasinBaseURL,
+				HTTPClient:       &http.Client{Transport: rt},
 			})
 			response, err := client.Metrics.Account(context.Background(), &AccountMetricsArgs{
 				Set:      AccountMetricSetEstimatedBillableUsage,

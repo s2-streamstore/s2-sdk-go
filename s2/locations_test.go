@@ -23,8 +23,9 @@ func TestLocationsClientList(t *testing.T) {
 	})
 
 	client := New("token", &ClientOptions{
-		BaseURL:    "http://account.test",
-		HTTPClient: &http.Client{Transport: rt, Timeout: time.Second},
+		BaseURL:          "http://account.test",
+		MakeBasinBaseURL: testBasinBaseURL,
+		HTTPClient:       &http.Client{Transport: rt, Timeout: time.Second},
 	})
 
 	locations, err := client.Locations.List(context.Background())
@@ -61,8 +62,9 @@ func TestLocationsClientGetDefault(t *testing.T) {
 	})
 
 	client := New("token", &ClientOptions{
-		BaseURL:    "http://account.test",
-		HTTPClient: &http.Client{Transport: rt, Timeout: time.Second},
+		BaseURL:          "http://account.test",
+		MakeBasinBaseURL: testBasinBaseURL,
+		HTTPClient:       &http.Client{Transport: rt, Timeout: time.Second},
 	})
 
 	location, err := client.Locations.GetDefault(context.Background())
@@ -100,8 +102,9 @@ func TestLocationsClientSetDefault(t *testing.T) {
 	})
 
 	client := New("token", &ClientOptions{
-		BaseURL:    "http://account.test",
-		HTTPClient: &http.Client{Transport: rt, Timeout: time.Second},
+		BaseURL:          "http://account.test",
+		MakeBasinBaseURL: testBasinBaseURL,
+		HTTPClient:       &http.Client{Transport: rt, Timeout: time.Second},
 	})
 
 	location, err := client.Locations.SetDefault(context.Background(), want)
@@ -114,7 +117,7 @@ func TestLocationsClientSetDefault(t *testing.T) {
 }
 
 func TestLocationsClientSetDefaultEmptyLocation(t *testing.T) {
-	client := New("token", &ClientOptions{BaseURL: "http://account.test"})
+	client := New("token", &ClientOptions{BaseURL: "http://account.test", MakeBasinBaseURL: testBasinBaseURL})
 	if _, err := client.Locations.SetDefault(context.Background(), ""); err == nil {
 		t.Fatal("expected error for empty location")
 	}

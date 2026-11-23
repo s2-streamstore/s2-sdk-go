@@ -22,8 +22,9 @@ func TestNetworkPoliciesIterPagesBySlug(t *testing.T) {
 	})
 
 	client := New("token", &ClientOptions{
-		BaseURL:    "http://account.test",
-		HTTPClient: &http.Client{Transport: rt, Timeout: time.Second},
+		BaseURL:          "http://account.test",
+		MakeBasinBaseURL: testBasinBaseURL,
+		HTTPClient:       &http.Client{Transport: rt, Timeout: time.Second},
 	})
 
 	var policies []NetworkPolicyInfo

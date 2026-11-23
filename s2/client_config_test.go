@@ -166,7 +166,7 @@ func TestClient_NormalizesBaseURL(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			client := New("token", &ClientOptions{BaseURL: tc.baseURL})
+			client := New("token", &ClientOptions{BaseURL: tc.baseURL, MakeBasinBaseURL: testBasinBaseURL})
 			if client.baseURL != tc.want {
 				t.Fatalf("expected base URL %q, got %q", tc.want, client.baseURL)
 			}
@@ -198,7 +198,7 @@ func TestClient_NormalizesMakeBasinBaseURL(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			client := New("token", &ClientOptions{MakeBasinBaseURL: tc.makeBasinBaseURL})
+			client := New("token", &ClientOptions{BaseURL: "http://account.test", MakeBasinBaseURL: tc.makeBasinBaseURL})
 			if client.Basin("demo").baseURL != tc.want {
 				t.Fatalf("expected basin base URL %q, got %q", tc.want, client.Basin("demo").baseURL)
 			}
@@ -233,5 +233,33 @@ func TestSharedBasinEndpoint_UsesBasinHeader(t *testing.T) {
 	}
 	if rt.url != "http://shared.test/v1/streams" {
 		t.Fatalf("expected request URL %q, got %q", "http://shared.test/v1/streams", rt.url)
+	}
+}
+
+func TestClient_RequiresBothEndpoints(t *testing.T) {
+	expectValidationPanic := func(name string, construct func()) {
+		t.Helper()
+		defer func() {
+			err, _ := recover().(*S2Error)
+			if err == nil || err.Code != "VALIDATION" {
+				t.Errorf("%s: expected validation panic, got %v", name, err)
+			}
+		}()
+		construct()
+	}
+
+	expectValidationPanic("account only", func() {
+		New("token", &ClientOptions{BaseURL: "http://localhost:8080"})
+	})
+	expectValidationPanic("basin only", func() {
+		New("token", &ClientOptions{MakeBasinBaseURL: testBasinBaseURL})
+	})
+	t.Setenv(envAccessToken, "token")
+	t.Setenv(envAccountEndpoint, "")
+	t.Setenv(envBasinEndpoint, "localhost:8080")
+	expectValidationPanic("basin env only", func() { NewFromEnvironment(nil) })
+
+	if got := New("token", &ClientOptions{BaseURL: DefaultBaseURL}).Basin("demo").baseURL; got != "https://demo.b.s2.dev/v1" {
+		t.Fatalf("expected default basin endpoint with explicit DefaultBaseURL, got %q", got)
 	}
 }

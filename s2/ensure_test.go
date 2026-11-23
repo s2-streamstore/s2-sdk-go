@@ -56,8 +56,9 @@ func TestBasinsEnsure(t *testing.T) {
 	})
 
 	client := New("token", &ClientOptions{
-		BaseURL:    "http://account.test",
-		HTTPClient: &http.Client{Transport: rt, Timeout: time.Second},
+		BaseURL:          "http://account.test",
+		MakeBasinBaseURL: testBasinBaseURL,
+		HTTPClient:       &http.Client{Transport: rt, Timeout: time.Second},
 	})
 
 	resp, err := client.Basins.Ensure(context.Background(), EnsureBasinArgs{
@@ -120,6 +121,7 @@ func TestStreamsEnsure(t *testing.T) {
 	})
 
 	client := New("token", &ClientOptions{
+		BaseURL:    "http://account.test",
 		HTTPClient: &http.Client{Transport: rt, Timeout: time.Second},
 		MakeBasinBaseURL: func(string) string {
 			return "http://basin.test"

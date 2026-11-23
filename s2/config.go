@@ -63,6 +63,10 @@ func loadConfigFromEnv() *Config {
 		cfg.BasinTemplate = template
 	}
 
+	if (cfg.AccountTemplate == nil) != (cfg.BasinTemplate == nil) {
+		panic(newValidationError(envAccountEndpoint + " and " + envBasinEndpoint + " must be set together"))
+	}
+
 	return cfg
 }
 
