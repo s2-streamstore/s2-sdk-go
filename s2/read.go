@@ -585,7 +585,7 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		body, err := fr.frame.DecompressedBody()
 		if err != nil {
 			logError(r.logger, "s2 read session frame decompress error", "stream", string(r.streamClient.name), "error", err)
-			return err
+			return makeProtocolError(err, "read session frame decompression")
 		}
 
 		if fr.frame.Terminal {

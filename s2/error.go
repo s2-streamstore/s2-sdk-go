@@ -350,6 +350,16 @@ func makeConnectionLostError(err error, context string) *S2Error {
 	}
 }
 
+// makeProtocolError reports a response or session message that violates the
+// protocol. Retrying would not help, and the request may have taken effect.
+func makeProtocolError(err error, context string) *S2Error {
+	return &S2Error{
+		Message: fmt.Sprintf("Protocol error during %s: %s", context, err.Error()),
+		Code:    "PROTOCOL",
+		Origin:  "sdk",
+	}
+}
+
 func makeAppendPreconditionError(status int, jsonMap map[string]interface{}) error {
 	if seqNumMismatch, exists := jsonMap["seq_num_mismatch"]; exists {
 		if expectedSeqNum, ok := seqNumMismatch.(float64); ok {

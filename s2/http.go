@@ -229,7 +229,7 @@ func (h *httpClient) requestProto(
 			respCompression := internalframing.ParseContentEncoding(encoding)
 			data, err = internalframing.Decompress(data, respCompression)
 			if err != nil {
-				return fmt.Errorf("decompress response body: %w", err)
+				return makeProtocolError(err, "response body decompression")
 			}
 		}
 
