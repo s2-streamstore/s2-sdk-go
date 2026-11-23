@@ -407,43 +407,57 @@ func TestBatcher_AddReportsRecordsDroppedOnCancel(t *testing.T) {
 }
 
 // Close must not block when Batches is full and nobody is draining it yet,
-// e.g. when the consumer is the goroutine calling Close. The final batch must
-// still be delivered once the consumer drains.
+// e.g. when the consumer is the goroutine calling Close, whether the pending
+// batch is still buffered or a linger flush is already waiting to send it. The
+// final batch must still be delivered once the consumer drains.
 func TestBatcher_CloseDoesNotBlockOnFullChannel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	for _, tc := range []struct {
+		name   string
+		linger time.Duration
+		// Long enough for the linger flush to block on the full channel.
+		wait time.Duration
+	}{
+		{"buffered", time.Hour, 0},
+		{"linger flush pending", 10 * time.Millisecond, 50 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-	batcher := NewBatcher(ctx, &BatchingOptions{
-		Linger:        time.Hour,
-		ChannelBuffer: 1,
-	})
-	if err := batcher.Add(AppendRecord{Body: []byte("a")}, nil); err != nil {
-		t.Fatalf("add a: %v", err)
-	}
-	batcher.Flush()
-	if err := batcher.Add(AppendRecord{Body: []byte("b")}, nil); err != nil {
-		t.Fatalf("add b: %v", err)
-	}
+			batcher := NewBatcher(ctx, &BatchingOptions{
+				Linger:        tc.linger,
+				ChannelBuffer: 1,
+			})
+			if err := batcher.Add(AppendRecord{Body: []byte("a")}, nil); err != nil {
+				t.Fatalf("add a: %v", err)
+			}
+			batcher.Flush()
+			if err := batcher.Add(AppendRecord{Body: []byte("b")}, nil); err != nil {
+				t.Fatalf("add b: %v", err)
+			}
+			time.Sleep(tc.wait)
 
-	closed := make(chan struct{})
-	go func() {
-		batcher.Close()
-		close(closed)
-	}()
-	select {
-	case <-closed:
-	case <-time.After(time.Second):
-		cancel()
-		t.Fatal("Close blocked on a full, undrained batch channel")
-	}
+			closed := make(chan struct{})
+			go func() {
+				batcher.Close()
+				close(closed)
+			}()
+			select {
+			case <-closed:
+			case <-time.After(time.Second):
+				cancel()
+				t.Fatal("Close blocked on a full, undrained batch channel")
+			}
 
-	var bodies []string
-	for batch := range batcher.Batches() {
-		for _, r := range batch.Input.Records {
-			bodies = append(bodies, string(r.Body))
-		}
-	}
-	if len(bodies) != 2 || bodies[0] != "a" || bodies[1] != "b" {
-		t.Fatalf("expected records [a b], got %q", bodies)
+			var bodies []string
+			for batch := range batcher.Batches() {
+				for _, r := range batch.Input.Records {
+					bodies = append(bodies, string(r.Body))
+				}
+			}
+			if len(bodies) != 2 || bodies[0] != "a" || bodies[1] != "b" {
+				t.Fatalf("expected records [a b], got %q", bodies)
+			}
+		})
 	}
 }

@@ -3,6 +3,7 @@ package s2
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,6 +23,10 @@ type Batcher struct {
 	nextMatchSeqNum *uint64
 
 	batchesCh chan *BatchOutput
+	// Set by Close before it takes mu, which a flush blocked on a full
+	// Batches may hold until the consumer drains.
+	closing   atomic.Bool
+	closeOnce sync.Once
 	closeDone chan struct{}
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -67,7 +72,7 @@ func (b *Batcher) shutdownCause() error {
 	if b.closeErr != nil {
 		return b.closeErr
 	}
-	if b.closed {
+	if b.closed || b.closing.Load() {
 		return ErrSessionClosed
 	}
 	if err := b.ctx.Err(); err != nil {
@@ -133,7 +138,7 @@ func (b *Batcher) addWithPermit(record AppendRecord, resultCh chan *producerOutc
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.closed {
+	if b.closed || b.closing.Load() {
 		return ErrSessionClosed
 	}
 	if err := b.ctx.Err(); err != nil {
@@ -302,12 +307,19 @@ func (b *Batcher) close() error {
 	return b.closeErr
 }
 
+// Runs off the caller's goroutine: the consumer may be the goroutine calling
+// Close, and a flush blocked on a full Batches holds mu until it drains.
 func (b *Batcher) startClose() {
+	b.closeOnce.Do(func() {
+		b.closing.Store(true)
+		go b.finishClose()
+	})
+}
+
+func (b *Batcher) finishClose() {
+	defer close(b.closeDone)
+
 	b.mu.Lock()
-	if b.closed {
-		b.mu.Unlock()
-		return
-	}
 	b.closed = true
 	output := b.takeBatchLocked()
 	if b.timer != nil {
@@ -316,22 +328,17 @@ func (b *Batcher) startClose() {
 	}
 	b.mu.Unlock()
 
-	// Send outside mu and off the caller's goroutine: the consumer may be the
-	// goroutine calling Close, or may have stopped draining.
-	go func() {
-		defer close(b.closeDone)
-		if output != nil {
-			if err := b.send(output); err != nil {
-				b.mu.Lock()
-				if b.closeErr == nil {
-					b.closeErr = err
-				}
-				b.mu.Unlock()
+	if output != nil {
+		if err := b.send(output); err != nil {
+			b.mu.Lock()
+			if b.closeErr == nil {
+				b.closeErr = err
 			}
+			b.mu.Unlock()
 		}
-		b.cancel()
-		close(b.batchesCh)
-	}()
+	}
+	b.cancel()
+	close(b.batchesCh)
 }
 
 // Flushes any remaining records and closes the batcher. Later calls to Add
