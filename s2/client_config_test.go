@@ -314,13 +314,14 @@ func TestClient_InvalidBasinNameSendsNothing(t *testing.T) {
 		sent.Add(1)
 		return nil, errors.New("request sent to " + req.URL.Host)
 	})
-	client := New("token", &ClientOptions{
+	t.Setenv(envAccessToken, "token")
+	t.Setenv(envAccountEndpoint, "https://a.example.com")
+	t.Setenv(envBasinEndpoint, "https://{basin}.b.example.com")
+	client := NewFromEnvironment(&ClientOptions{
 		HTTPClient:  &http.Client{Transport: transport},
 		RetryConfig: &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond},
 	})
 	client.streamingClient = &http.Client{Transport: transport}
-	basin := client.Basin("evil.com#")
-	stream := basin.Stream("s")
 
 	expectValidation := func(name string, err error) {
 		t.Helper()
@@ -330,17 +331,23 @@ func TestClient_InvalidBasinNameSendsNothing(t *testing.T) {
 		}
 	}
 
-	_, err := basin.Streams.List(ctx, nil)
-	expectValidation("list streams", err)
-	_, err = stream.CheckTail(ctx)
-	expectValidation("check tail", err)
-	_, err = stream.Append(ctx, &AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
-	expectValidation("append", err)
+	for _, name := range []string{"evil.com#", "a b", ""} {
+		t.Run(name, func(t *testing.T) {
+			basin := client.Basin(name)
+			stream := basin.Stream("s")
 
-	_, err = stream.AppendSession(ctx, nil)
-	expectValidation("append session", err)
-	_, err = stream.ReadSession(ctx, nil)
-	expectValidation("read session", err)
+			_, err := basin.Streams.List(ctx, nil)
+			expectValidation("list streams", err)
+			_, err = stream.CheckTail(ctx)
+			expectValidation("check tail", err)
+			_, err = stream.Append(ctx, &AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+			expectValidation("append", err)
+			_, err = stream.AppendSession(ctx, nil)
+			expectValidation("append session", err)
+			_, err = stream.ReadSession(ctx, nil)
+			expectValidation("read session", err)
+		})
+	}
 
 	if n := sent.Load(); n != 0 {
 		t.Fatalf("expected no requests, got %d", n)

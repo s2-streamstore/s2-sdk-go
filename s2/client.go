@@ -406,13 +406,9 @@ func NewFromEnvironment(opts *ClientOptions) *Client {
 
 // Create a new BasinClient.
 func (c *Client) Basin(name string) *BasinClient {
-	if name == "" {
-		panic("basin name cannot be empty")
-	}
 	basin := &BasinClient{
 		client:             c,
 		name:               name,
-		baseURL:            c.makeBasinBaseURL(name),
 		accessToken:        c.accessToken,
 		httpClient:         c.httpClient,
 		retryConfig:        c.retryConfig,
@@ -425,11 +421,14 @@ func (c *Client) Basin(name string) *BasinClient {
 
 	// The name becomes part of the request host, so an invalid one could send
 	// requests and the access token to another host. Calls through this
-	// handle fail with the ValidationError instead (spec C9).
+	// handle fail with the ValidationError instead (spec C9). It is checked
+	// before the endpoint mapping sees the name, which may panic on it.
 	if err := validateBasinName(BasinName(name)); err != nil {
 		basin.invalidNameErr = err
 		basin.baseURL = "https://invalid-basin-name.invalid/v1"
 		basin.httpClient = &http.Client{Transport: rejectTransport{err: err}}
+	} else {
+		basin.baseURL = c.makeBasinBaseURL(name)
 	}
 
 	basin.Streams = &StreamsClient{basin: basin}
