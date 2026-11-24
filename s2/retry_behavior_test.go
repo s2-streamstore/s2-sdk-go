@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"net/url"
 	"syscall"
 	"testing"
@@ -263,19 +264,23 @@ func TestWithAppendRetries_NoSideEffectsDoesNotRetryUnavailable(t *testing.T) {
 }
 
 func TestWithAppendRetries_NoSideEffectsNetworkError(t *testing.T) {
-	ctx := context.Background()
-	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
+	// "no_side_effects" is the spec's spelling and must not fall back to all.
+	for _, policy := range []AppendRetryPolicy{AppendRetryPolicyNoSideEffects, "no_side_effects"} {
+		t.Run(string(policy), func(t *testing.T) {
+			cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: policy}
 
-	attempts := 0
-	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
-		attempts++
-		return nil, fakeNetErr{}
-	})
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if attempts != 1 {
-		t.Fatalf("expected 1 attempt, got %d", attempts)
+			attempts := 0
+			_, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+				attempts++
+				return nil, fakeNetErr{}
+			})
+			if err == nil {
+				t.Fatalf("expected error")
+			}
+			if attempts != 1 {
+				t.Fatalf("expected 1 attempt, got %d", attempts)
+			}
+		})
 	}
 }
 
@@ -391,5 +396,66 @@ func TestIsNetworkError_NetError(t *testing.T) {
 	urlErr := &url.Error{Err: fakeNetErr{}}
 	if !isNetworkError(context.Background(), urlErr) {
 		t.Fatalf("expected urlErr to be treated as network error")
+	}
+}
+
+// Issuing a token and creating a network policy carry no request token, so a
+// retry after an attempt that may have succeeded would end in a conflict (and
+// lose the issued token's secret). Only definite errors are retried.
+func TestNonIdempotentCallsRetryOnlyDefiniteErrors(t *testing.T) {
+	calls := []struct {
+		name string
+		call func(*Client) error
+	}{
+		{"issue access token", func(c *Client) error {
+			_, err := c.AccessTokens.Issue(context.Background(), IssueAccessTokenArgs{ID: "token-1"})
+			return err
+		}},
+		{"create network policy", func(c *Client) error {
+			_, err := c.NetworkPolicies.Create(context.Background(), CreateNetworkPolicyArgs{Slug: "policy"})
+			return err
+		}},
+	}
+	failures := []struct {
+		name         string
+		fail         func() (*http.Response, error)
+		wantAttempts int
+	}{
+		{"definite rate limit is retried", func() (*http.Response, error) {
+			return jsonResponse(http.StatusTooManyRequests, "", `{"code":"rate_limited","message":"slow down"}`), nil
+		}, 2},
+		{"indefinite unavailable is not retried", func() (*http.Response, error) {
+			return jsonResponse(http.StatusServiceUnavailable, "", `{"code":"unavailable","message":"unavailable"}`), nil
+		}, 1},
+		{"connection reset after sending is not retried", func() (*http.Response, error) {
+			return nil, &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}
+		}, 1},
+		{"refused connection is retried", func() (*http.Response, error) {
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+		}, 2},
+	}
+	for _, call := range calls {
+		for _, failure := range failures {
+			t.Run(call.name+"/"+failure.name, func(t *testing.T) {
+				attempts := 0
+				client := New("token", &ClientOptions{
+					HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+						attempts++
+						if attempts == 1 {
+							return failure.fail()
+						}
+						return jsonResponse(http.StatusCreated, "", `{}`), nil
+					})},
+					RetryConfig: &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond},
+				})
+				err := call.call(client)
+				if attempts != failure.wantAttempts {
+					t.Fatalf("expected %d attempts, got %d (err %v)", failure.wantAttempts, attempts, err)
+				}
+				if (failure.wantAttempts == 2) != (err == nil) {
+					t.Fatalf("unexpected result after %d attempts: %v", attempts, err)
+				}
+			})
+		}
 	}
 }

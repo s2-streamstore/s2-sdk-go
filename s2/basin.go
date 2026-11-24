@@ -1,6 +1,7 @@
 package s2
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -19,6 +20,9 @@ type BasinClient struct {
 	connectionTimeout  time.Duration
 	requestTimeout     time.Duration
 	compression        CompressionType
+	// Set when the basin name is invalid; every request then fails with it
+	// before anything is sent.
+	invalidNameErr error
 
 	Streams *StreamsClient
 }
@@ -28,10 +32,22 @@ func (b *BasinClient) Name() string {
 	return b.name
 }
 
+// rejectTransport fails every request without sending it.
+type rejectTransport struct{ err error }
+
+func (t rejectTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, t.err
+}
+
 // basinHeaderValue returns the basin name if includeBasinHeader is true, otherwise empty string.
 func (b *BasinClient) basinHeaderValue() string {
 	if b.includeBasinHeader {
 		return b.name
 	}
 	return ""
+}
+
+// Format keeps the access token out of every fmt verb (spec L3).
+func (b BasinClient) Format(f fmt.State, _ rune) {
+	fmt.Fprintf(f, "s2.BasinClient{name: %q, baseURL: %q}", b.name, b.baseURL)
 }

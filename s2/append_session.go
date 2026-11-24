@@ -64,6 +64,9 @@ func (s *StreamClient) AppendSession(ctx context.Context, opts *AppendSessionOpt
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := s.basinClient.invalidNameErr; err != nil {
+		return nil, err
+	}
 
 	opts, err := applyAppendSessionDefaults(opts, s.basinClient.retryConfig)
 	if err != nil {
@@ -1117,7 +1120,7 @@ func (r *AppendSession) checkTimeouts() {
 }
 
 func (r *AppendSession) requiresNoSideEffectsRetries() bool {
-	return r.options.RetryConfig != nil && r.options.RetryConfig.AppendRetryPolicy == AppendRetryPolicyNoSideEffects
+	return r.options.RetryConfig != nil && r.options.RetryConfig.AppendRetryPolicy.isNoSideEffects()
 }
 
 type inflightEntry struct {

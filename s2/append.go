@@ -23,7 +23,15 @@ const (
 	AppendRetryPolicyAll AppendRetryPolicy = "all"
 	// Only retry append operations that are guaranteed to have no side effects.
 	AppendRetryPolicyNoSideEffects AppendRetryPolicy = "noSideEffects"
+
+	// The spec's spelling. Treated as AppendRetryPolicyNoSideEffects, so a
+	// policy read from configuration never silently falls back to all.
+	appendRetryPolicyNoSideEffectsSpec AppendRetryPolicy = "no_side_effects"
 )
+
+func (p AppendRetryPolicy) isNoSideEffects() bool {
+	return p == AppendRetryPolicyNoSideEffects || p == appendRetryPolicyNoSideEffectsSpec
+}
 
 // Appends one or more records to the stream.
 // All records in a single append call must use the same format (either all string or all bytes).

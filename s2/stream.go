@@ -80,6 +80,9 @@ func setStreamConfigHeader(headers http.Header, config *StreamConfig) error {
 }
 
 func (s *StreamClient) getHTTPClient() *http.Client {
+	if err := s.basinClient.invalidNameErr; err != nil {
+		return &http.Client{Transport: rejectTransport{err: err}}
+	}
 	return s.basinClient.client.streamingClient
 }
 
@@ -499,7 +502,7 @@ func shouldRetryError(err error, config *RetryConfig) bool {
 		return false
 	}
 
-	if config.AppendRetryPolicy == AppendRetryPolicyNoSideEffects {
+	if config.AppendRetryPolicy.isNoSideEffects() {
 		return s2Err.HasNoSideEffects()
 	}
 

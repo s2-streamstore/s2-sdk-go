@@ -109,6 +109,9 @@ type ReadSession struct {
 // Opens a streaming read session.
 // Call Close when done consuming records.
 func (s *StreamClient) ReadSession(ctx context.Context, opts *ReadOptions) (*ReadSession, error) {
+	if err := s.basinClient.invalidNameErr; err != nil {
+		return nil, err
+	}
 	reader, err := s.newStreamReader(ctx, opts)
 	if err != nil {
 		return nil, err

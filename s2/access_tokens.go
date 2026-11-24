@@ -108,7 +108,7 @@ func (a *AccessTokensClient) Issue(ctx context.Context, args IssueAccessTokenArg
 		}
 	}
 
-	return withRetries(ctx, a.client.retryConfig, a.client.logger, func() (*IssueAccessTokenResponse, error) {
+	return withDefiniteRetries(ctx, a.client.retryConfig, a.client.logger, func() (*IssueAccessTokenResponse, error) {
 		httpClient := &httpClient{
 			client:      a.client.httpClient,
 			baseURL:     a.client.baseURL,

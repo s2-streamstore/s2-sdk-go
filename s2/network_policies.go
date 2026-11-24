@@ -100,7 +100,7 @@ func (n *NetworkPoliciesClient) Create(ctx context.Context, args CreateNetworkPo
 		ctx = context.Background()
 	}
 
-	return withRetries(ctx, n.client.retryConfig, n.client.logger, func() (*NetworkPolicyInfo, error) {
+	return withDefiniteRetries(ctx, n.client.retryConfig, n.client.logger, func() (*NetworkPolicyInfo, error) {
 		var result NetworkPolicyInfo
 		if err := n.http().request(ctx, "POST", "/network-policies", args, &result); err != nil {
 			return nil, err
