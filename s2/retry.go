@@ -18,6 +18,7 @@ type RetryConfig struct {
 	MinBaseDelay time.Duration
 	// Maximum base delay for exponential backoff. Defaults to 1s.
 	// Note: actual delay with jitter can be up to 2x this value.
+	// A unary call waits longer when the server sends a larger retry-after-ms.
 	MaxBaseDelay time.Duration
 	// Policy for retrying append operations.
 	AppendRetryPolicy AppendRetryPolicy
@@ -87,7 +88,7 @@ func retryOperation[T any](ctx context.Context, config *RetryConfig, logger *slo
 
 		if isNetworkError(ctx, err) {
 			if attemptNo < maxAttempts {
-				delay := retryDelay(config, attemptNo, err)
+				delay := calculateRetryBackoff(config, attemptNo)
 				logInfo(logger, "s2 retrying after network error",
 					"attempt", attemptNo,
 					"max_attempts", maxAttempts,
@@ -272,7 +273,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 			if !sentNothing {
 				priorUncertainty = true
 			}
-			delay := retryDelay(config, attemptNo, err)
+			delay := calculateRetryBackoff(config, attemptNo)
 			logInfo(logger, "s2 append retrying after network error",
 				"attempt", attemptNo,
 				"max_attempts", maxAttempts,
