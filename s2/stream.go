@@ -119,7 +119,7 @@ func parseHTTPError(resp *http.Response) error {
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	if readErr != nil {
-		return newBodyReadError(resp.StatusCode, body, readErr)
+		return withRetryAfter(newBodyReadError(resp.StatusCode, body, readErr), resp.Header)
 	}
 	// Requests that set Accept-Encoding themselves get compressed error
 	// bodies back as-is.
