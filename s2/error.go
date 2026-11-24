@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 	"unicode/utf8"
 )
 
@@ -28,6 +29,9 @@ type S2Error struct {
 	Code    string
 	Status  int
 	Origin  string // "server", "sdk", "network"
+
+	// retryAfter is the server's retry-after-ms hint, or zero if absent.
+	retryAfter time.Duration
 }
 
 type ErrorInfo struct {

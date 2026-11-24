@@ -16,7 +16,10 @@ import (
 )
 
 const maxErrorBodyBytes = 64 * 1024 // 64 KiB
-const provisionResultHeader = "s2-provision-result"
+const (
+	provisionResultHeader = "s2-provision-result"
+	retryAfterMsHeader    = "retry-after-ms"
+)
 
 type httpClient struct {
 	client      *http.Client

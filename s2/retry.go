@@ -87,7 +87,7 @@ func retryOperation[T any](ctx context.Context, config *RetryConfig, logger *slo
 
 		if isNetworkError(ctx, err) {
 			if attemptNo < maxAttempts {
-				delay := calculateRetryBackoff(config, attemptNo)
+				delay := retryDelay(config, attemptNo, err)
 				logInfo(logger, "s2 retrying after network error",
 					"attempt", attemptNo,
 					"max_attempts", maxAttempts,
@@ -118,7 +118,7 @@ func retryOperation[T any](ctx context.Context, config *RetryConfig, logger *slo
 			return zero, s2Err
 		}
 
-		delay := calculateRetryBackoff(config, attemptNo)
+		delay := retryDelay(config, attemptNo, err)
 		logInfo(logger, "s2 retrying after retryable error",
 			"attempt", attemptNo,
 			"max_attempts", maxAttempts,
@@ -148,6 +148,18 @@ func waitForRetryBackoff(ctx context.Context, delay time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+// retryDelay is the backoff before the next attempt, raised to the server's
+// retry-after-ms hint when err carries one; the hint is not capped by
+// MaxBaseDelay (spec T3).
+func retryDelay(config *RetryConfig, attempt int, err error) time.Duration {
+	delay := calculateRetryBackoff(config, attempt)
+	var s2Err *S2Error
+	if errors.As(err, &s2Err) && s2Err.retryAfter > delay {
+		return s2Err.retryAfter
+	}
+	return delay
 }
 
 func calculateRetryBackoff(config *RetryConfig, attempt int) time.Duration {
@@ -260,7 +272,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 			if !sentNothing {
 				priorUncertainty = true
 			}
-			delay := calculateRetryBackoff(config, attemptNo)
+			delay := retryDelay(config, attemptNo, err)
 			logInfo(logger, "s2 append retrying after network error",
 				"attempt", attemptNo,
 				"max_attempts", maxAttempts,
@@ -280,7 +292,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 		if !HasNoSideEffects(err) {
 			priorUncertainty = true
 		}
-		delay := calculateRetryBackoff(config, attemptNo)
+		delay := retryDelay(config, attemptNo, err)
 		logInfo(logger, "s2 append retrying after error",
 			"attempt", attemptNo,
 			"max_attempts", maxAttempts,
