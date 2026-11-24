@@ -406,7 +406,7 @@ func (x *SequencedRecord) GetBody() []byte {
 type ReadBatch struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Records that are durably sequenced on the stream, retrieved based on the requested criteria.
-	// This can only be empty in response to a unary read if the request cannot be satisfied without violating an explicit bound (`count`, `bytes`, or `until`).
+	// This can only be empty in response to a unary read if the request cannot be satisfied without violating an explicit bound (`count`, `bytes`, `until`, or `wait`).
 	// In the context of a session, it can be empty as a heartbeat message. A heartbeat will be sent whenever a switch to following in real-time happens, and then at a randomized gap between 5 and 15 seconds if no records have become available.
 	Records []*SequencedRecord `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
 	// Sequence number that will be assigned to the next record on the stream, and timestamp of the last record.
