@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.27.0] - 2026-11-24
+
+### Bug Fixes
+
+- Resolve spec doc drift from s2-specs bc3ee92 ([#464](https://github.com/s2-streamstore/s2-sdk-go/issues/464))
+- [**breaking**] Spec conformance omnibus for remaining Detail bugs ([#460](https://github.com/s2-streamstore/s2-sdk-go/issues/460))
+- Close four safety gaps found in the r1 conformance audit ([#467](https://github.com/s2-streamstore/s2-sdk-go/issues/467))
+
+### Refactor
+
+- Use net/http's HTTP/2 client instead of deprecated x/net/http2 transport ([#428](https://github.com/s2-streamstore/s2-sdk-go/issues/428))
+
+### Documentation
+
+- Remove test matrices superseded by the SDK spec ([#465](https://github.com/s2-streamstore/s2-sdk-go/issues/465))
+
+### Miscellaneous Tasks
+
+- Reuse a single PR for s2-specs sync updates ([#462](https://github.com/s2-streamstore/s2-sdk-go/issues/462))
+- Update s2-specs to bc3ee92 ([#463](https://github.com/s2-streamstore/s2-sdk-go/issues/463))
+- Update s2-specs to 9d13bef ([#466](https://github.com/s2-streamstore/s2-sdk-go/issues/466))
+- Update s2-specs to 56d3b98 ([#468](https://github.com/s2-streamstore/s2-sdk-go/issues/468))
+
 ## [v0.26.0] - 2026-11-22
 
 ### Features
