@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -116,7 +119,7 @@ func parseHTTPError(resp *http.Response) error {
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	if readErr != nil {
-		return newBodyReadError(resp.StatusCode, body, readErr)
+		return withRetryAfter(newBodyReadError(resp.StatusCode, body, readErr), resp.Header)
 	}
 	// Requests that set Accept-Encoding themselves get compressed error
 	// bodies back as-is.
@@ -126,11 +129,26 @@ func parseHTTPError(resp *http.Response) error {
 			if errors.Is(err, internalframing.ErrDecompressedTooLarge) {
 				return makeProtocolError(err, "error response body decompression")
 			}
-			return decodeAPIError(resp.StatusCode, nil)
+			return withRetryAfter(decodeAPIError(resp.StatusCode, nil), resp.Header)
 		}
 		body = decompressed
 	}
-	return decodeAPIError(resp.StatusCode, body)
+	return withRetryAfter(decodeAPIError(resp.StatusCode, body), resp.Header)
+}
+
+// withRetryAfter records a valid retry-after-ms response header on err; a
+// malformed value is ignored (spec T3).
+func withRetryAfter(err error, header http.Header) error {
+	var s2Err *S2Error
+	if !errors.As(err, &s2Err) {
+		return err
+	}
+	ms, parseErr := strconv.ParseUint(header.Get(retryAfterMsHeader), 10, 64)
+	if parseErr != nil || ms > uint64(math.MaxInt64/time.Millisecond) {
+		return err
+	}
+	s2Err.retryAfter = time.Duration(ms) * time.Millisecond
+	return err
 }
 
 func decompressResponseBody(resp *http.Response, data []byte) ([]byte, error) {

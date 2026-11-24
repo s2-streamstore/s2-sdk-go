@@ -490,3 +490,33 @@ func TestIssueRetriesTLSHandshakeTimeout(t *testing.T) {
 		t.Fatalf("expected the handshake timeout to be retried (2 connections), got %d: %v", got, err)
 	}
 }
+
+// A 429's retry-after-ms raises the retry delay past MaxBaseDelay (spec T3).
+func TestRetryHonorsRetryAfterMs(t *testing.T) {
+	const retryAfter = 200 * time.Millisecond
+
+	var firstAttempt time.Time
+	rt := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		if firstAttempt.IsZero() {
+			firstAttempt = time.Now()
+			resp := jsonResponse(http.StatusTooManyRequests, "", `{"code":"rate_limited","message":"slow down"}`)
+			resp.Header.Set("retry-after-ms", "200")
+			return resp, nil
+		}
+		if waited := time.Since(firstAttempt); waited < retryAfter {
+			t.Errorf("retried after %v, want at least %v", waited, retryAfter)
+		}
+		return jsonResponse(http.StatusOK, "", `[]`), nil
+	})
+
+	client := New("token", &ClientOptions{
+		BaseURL:          "http://account.test",
+		MakeBasinBaseURL: testBasinBaseURL,
+		HTTPClient:       &http.Client{Transport: rt, Timeout: time.Second},
+		RetryConfig:      &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond},
+	})
+
+	if _, err := client.Locations.List(context.Background()); err != nil {
+		t.Fatalf("list locations: %v", err)
+	}
+}
