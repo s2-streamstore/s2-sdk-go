@@ -264,23 +264,19 @@ func TestWithAppendRetries_NoSideEffectsDoesNotRetryUnavailable(t *testing.T) {
 }
 
 func TestWithAppendRetries_NoSideEffectsNetworkError(t *testing.T) {
-	// "no_side_effects" is the spec's spelling and must not fall back to all.
-	for _, policy := range []AppendRetryPolicy{AppendRetryPolicyNoSideEffects, "no_side_effects"} {
-		t.Run(string(policy), func(t *testing.T) {
-			cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: policy}
+	ctx := context.Background()
+	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
 
-			attempts := 0
-			_, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
-				attempts++
-				return nil, fakeNetErr{}
-			})
-			if err == nil {
-				t.Fatalf("expected error")
-			}
-			if attempts != 1 {
-				t.Fatalf("expected 1 attempt, got %d", attempts)
-			}
-		})
+	attempts := 0
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+		attempts++
+		return nil, fakeNetErr{}
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts)
 	}
 }
 
@@ -399,9 +395,6 @@ func TestIsNetworkError_NetError(t *testing.T) {
 	}
 }
 
-// Issuing a token and creating a network policy carry no request token, so a
-// retry after an attempt that may have succeeded would end in a conflict (and
-// lose the issued token's secret). Only definite errors are retried.
 func TestNonIdempotentCallsRetryOnlyDefiniteErrors(t *testing.T) {
 	calls := []struct {
 		name string

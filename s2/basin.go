@@ -20,8 +20,7 @@ type BasinClient struct {
 	connectionTimeout  time.Duration
 	requestTimeout     time.Duration
 	compression        CompressionType
-	// Set when the basin name is invalid; every request then fails with it
-	// before anything is sent.
+	// Set when the basin name is invalid; calls fail with it before sending.
 	invalidNameErr error
 
 	Streams *StreamsClient
@@ -32,7 +31,6 @@ func (b *BasinClient) Name() string {
 	return b.name
 }
 
-// rejectTransport fails every request without sending it.
 type rejectTransport struct{ err error }
 
 func (t rejectTransport) RoundTrip(*http.Request) (*http.Response, error) {

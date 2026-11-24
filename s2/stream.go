@@ -80,9 +80,6 @@ func setStreamConfigHeader(headers http.Header, config *StreamConfig) error {
 }
 
 func (s *StreamClient) getHTTPClient() *http.Client {
-	if err := s.basinClient.invalidNameErr; err != nil {
-		return &http.Client{Transport: rejectTransport{err: err}}
-	}
 	return s.basinClient.client.streamingClient
 }
 

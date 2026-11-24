@@ -305,9 +305,6 @@ func TestClient_CompressesJSONRequests(t *testing.T) {
 	}
 }
 
-// A basin name becomes part of the request host, so an invalid one (here,
-// one that would move the request to another host) must fail every call with
-// a ValidationError without sending anything, on unary calls and sessions.
 func TestClient_InvalidBasinNameSendsNothing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
