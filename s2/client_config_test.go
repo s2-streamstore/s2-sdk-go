@@ -3,9 +3,12 @@ package s2
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -202,8 +205,8 @@ func TestClient_NormalizesMakeBasinBaseURL(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			client := New("token", &ClientOptions{BaseURL: "http://account.test", MakeBasinBaseURL: tc.makeBasinBaseURL})
-			if client.Basin("demo").baseURL != tc.want {
-				t.Fatalf("expected basin base URL %q, got %q", tc.want, client.Basin("demo").baseURL)
+			if client.Basin("my-basin").baseURL != tc.want {
+				t.Fatalf("expected basin base URL %q, got %q", tc.want, client.Basin("my-basin").baseURL)
 			}
 		})
 	}
@@ -224,15 +227,15 @@ func TestSharedBasinEndpoint_UsesBasinHeader(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	_, err := client.Basin("demo").Streams.List(ctx, nil)
+	_, err := client.Basin("my-basin").Streams.List(ctx, nil)
 	if err != nil {
 		t.Fatalf("list streams failed: %v", err)
 	}
 	if rt.requests != 1 {
 		t.Fatalf("expected 1 request, got %d", rt.requests)
 	}
-	if rt.header != "demo" {
-		t.Fatalf("expected basin header %q, got %q", "demo", rt.header)
+	if rt.header != "my-basin" {
+		t.Fatalf("expected basin header %q, got %q", "my-basin", rt.header)
 	}
 	if rt.url != "http://shared.test/v1/streams" {
 		t.Fatalf("expected request URL %q, got %q", "http://shared.test/v1/streams", rt.url)
@@ -263,7 +266,7 @@ func TestClient_RequiresBothEndpoints(t *testing.T) {
 	expectValidationPanic("basin env only", func() { NewFromEnvironment(nil) })
 	NewFromEnvironment(&ClientOptions{BaseURL: "http://localhost:9000", MakeBasinBaseURL: testBasinBaseURL})
 
-	if got := New("token", &ClientOptions{BaseURL: DefaultBaseURL}).Basin("demo").baseURL; got != "https://demo.b.s2.dev/v1" {
+	if got := New("token", &ClientOptions{BaseURL: DefaultBaseURL}).Basin("my-basin").baseURL; got != "https://my-basin.b.s2.dev/v1" {
 		t.Fatalf("expected default basin endpoint with explicit DefaultBaseURL, got %q", got)
 	}
 }
@@ -299,5 +302,66 @@ func TestClient_CompressesJSONRequests(t *testing.T) {
 	decompressed, err := internalframing.Decompress(gotBody, internalframing.CompressionZstd)
 	if err != nil || !bytes.Contains(decompressed, []byte(`"my-basin"`)) {
 		t.Fatalf("expected valid zstd JSON body, err=%v body=%q", err, decompressed)
+	}
+}
+
+func TestClient_InvalidBasinNameSendsNothing(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var sent atomic.Int32
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		sent.Add(1)
+		return nil, errors.New("request sent to " + req.URL.Host)
+	})
+	t.Setenv(envAccessToken, "token")
+	t.Setenv(envAccountEndpoint, "https://a.example.com")
+	t.Setenv(envBasinEndpoint, "https://{basin}.b.example.com")
+	client := NewFromEnvironment(&ClientOptions{
+		HTTPClient:  &http.Client{Transport: transport},
+		RetryConfig: &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond},
+	})
+	client.streamingClient = &http.Client{Transport: transport}
+
+	expectValidation := func(name string, err error) {
+		t.Helper()
+		var s2Err *S2Error
+		if !errors.As(err, &s2Err) || s2Err.Code != validationErrorCode {
+			t.Errorf("%s: expected ValidationError, got %v", name, err)
+		}
+	}
+
+	for _, name := range []string{"evil.com#", "a b", ""} {
+		t.Run(name, func(t *testing.T) {
+			basin := client.Basin(name)
+			stream := basin.Stream("s")
+
+			_, err := basin.Streams.List(ctx, nil)
+			expectValidation("list streams", err)
+			_, err = stream.CheckTail(ctx)
+			expectValidation("check tail", err)
+			_, err = stream.Append(ctx, &AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+			expectValidation("append", err)
+			_, err = stream.AppendSession(ctx, nil)
+			expectValidation("append session", err)
+			_, err = stream.ReadSession(ctx, nil)
+			expectValidation("read session", err)
+		})
+	}
+
+	if n := sent.Load(); n != 0 {
+		t.Fatalf("expected no requests, got %d", n)
+	}
+}
+
+func TestClientFormattingRedactsAccessToken(t *testing.T) {
+	client := New("secret-token", nil)
+	basin := client.Basin("my-basin")
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%d", "%x", "%q"} {
+		for name, value := range map[string]any{"client": client, "*client": *client, "basin": basin, "*basin": *basin} {
+			if out := fmt.Sprintf(verb, value); strings.Contains(out, "secret-token") || strings.Contains(out, fmt.Sprintf("%x", "secret-token")) {
+				t.Errorf("%s with %s leaks the token: %s", name, verb, out)
+			}
+		}
 	}
 }

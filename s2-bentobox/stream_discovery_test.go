@@ -71,7 +71,7 @@ func TestPrefixedDiscoveryPagesAcrossCalls(t *testing.T) {
 		BaseURL:          srv.URL,
 		MakeBasinBaseURL: func(string) string { return srv.URL },
 		RetryConfig:      &s2.RetryConfig{MaxAttempts: 1},
-	}).Basin("basin")
+	}).Basin("my-basin")
 
 	ctx := context.Background()
 	d := newStreamDiscovery(PrefixedInputStreams{Prefix: prefix})

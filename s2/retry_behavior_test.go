@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"net/url"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -391,5 +393,100 @@ func TestIsNetworkError_NetError(t *testing.T) {
 	urlErr := &url.Error{Err: fakeNetErr{}}
 	if !isNetworkError(context.Background(), urlErr) {
 		t.Fatalf("expected urlErr to be treated as network error")
+	}
+}
+
+func TestNonIdempotentCallsRetryOnlyDefiniteErrors(t *testing.T) {
+	calls := []struct {
+		name string
+		call func(*Client) error
+	}{
+		{"issue access token", func(c *Client) error {
+			_, err := c.AccessTokens.Issue(context.Background(), IssueAccessTokenArgs{ID: "token-1"})
+			return err
+		}},
+		{"create network policy", func(c *Client) error {
+			_, err := c.NetworkPolicies.Create(context.Background(), CreateNetworkPolicyArgs{Slug: "policy"})
+			return err
+		}},
+	}
+	failures := []struct {
+		name         string
+		fail         func() (*http.Response, error)
+		wantAttempts int
+	}{
+		{"definite rate limit is retried", func() (*http.Response, error) {
+			return jsonResponse(http.StatusTooManyRequests, "", `{"code":"rate_limited","message":"slow down"}`), nil
+		}, 2},
+		{"indefinite unavailable is not retried", func() (*http.Response, error) {
+			return jsonResponse(http.StatusServiceUnavailable, "", `{"code":"unavailable","message":"unavailable"}`), nil
+		}, 1},
+		{"connection reset after sending is not retried", func() (*http.Response, error) {
+			return nil, &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}
+		}, 1},
+		{"server error quoting a handshake timeout is not retried", func() (*http.Response, error) {
+			return jsonResponse(http.StatusServiceUnavailable, "", `{"code":"unavailable","message":"upstream: net/http: TLS handshake timeout"}`), nil
+		}, 1},
+		{"refused connection is retried", func() (*http.Response, error) {
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+		}, 2},
+	}
+	for _, call := range calls {
+		for _, failure := range failures {
+			t.Run(call.name+"/"+failure.name, func(t *testing.T) {
+				attempts := 0
+				client := New("token", &ClientOptions{
+					HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+						attempts++
+						if attempts == 1 {
+							return failure.fail()
+						}
+						return jsonResponse(http.StatusCreated, "", `{}`), nil
+					})},
+					RetryConfig: &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond},
+				})
+				err := call.call(client)
+				if attempts != failure.wantAttempts {
+					t.Fatalf("expected %d attempts, got %d (err %v)", failure.wantAttempts, attempts, err)
+				}
+				if (failure.wantAttempts == 2) != (err == nil) {
+					t.Fatalf("unexpected result after %d attempts: %v", attempts, err)
+				}
+			})
+		}
+	}
+}
+
+func TestIssueRetriesTLSHandshakeTimeout(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	var accepted atomic.Int32
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			defer conn.Close() // hold the connection without ever answering the handshake
+		}
+	}()
+
+	endpoint := "https://" + ln.Addr().String()
+	client := New("token", &ClientOptions{
+		BaseURL:           endpoint,
+		MakeBasinBaseURL:  func(string) string { return endpoint },
+		ConnectionTimeout: 100 * time.Millisecond,
+		RetryConfig:       &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond},
+	})
+	_, err = client.AccessTokens.Issue(context.Background(), IssueAccessTokenArgs{ID: "token-1"})
+	if err == nil {
+		t.Fatal("expected the handshake to time out")
+	}
+	if got := accepted.Load(); got != 2 {
+		t.Fatalf("expected the handshake timeout to be retried (2 connections), got %d: %v", got, err)
 	}
 }

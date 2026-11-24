@@ -39,6 +39,19 @@ var DefaultRetryConfig = &RetryConfig{
 }
 
 func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, operation func() (T, error)) (T, error) {
+	return retryOperation(ctx, config, logger, nil, operation)
+}
+
+// withDefiniteRetries is for non-idempotent calls without a request token,
+// such as issuing an access token: an attempt that may have taken effect is
+// never repeated, or a lost success would come back as a conflict (spec T2d).
+func withDefiniteRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, operation func() (T, error)) (T, error) {
+	return retryOperation(ctx, config, logger, HasNoSideEffects, operation)
+}
+
+// retryOperation retries operation per config; a non-nil safeToRepeat must
+// also approve each error before it is retried.
+func retryOperation[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, safeToRepeat func(error) bool, operation func() (T, error)) (T, error) {
 	var zero T
 
 	if config == nil {
@@ -67,6 +80,10 @@ func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.L
 		}
 
 		lastError = err
+
+		if safeToRepeat != nil && !safeToRepeat(err) {
+			return zero, err
+		}
 
 		if isNetworkError(ctx, err) {
 			if attemptNo < maxAttempts {
@@ -282,7 +299,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 }
 
 func shouldRetryNetworkError(config *RetryConfig) bool {
-	return config.AppendRetryPolicy != AppendRetryPolicyNoSideEffects
+	return !config.AppendRetryPolicy.isNoSideEffects()
 }
 
 // connectError marks an error from connection establishment (TCP dial, proxy
@@ -307,5 +324,16 @@ func isConnectError(err error) bool {
 		return true
 	}
 	var opErr *net.OpError
-	return errors.As(err, &opErr) && opErr.Op == "dial"
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	// net/http reports an expired TLSHandshakeTimeout as an unexported
+	// net.Error with this exact message. Match that error itself, so text in
+	// a server response can't pass for it. The handshake precedes the request.
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if netErr, ok := e.(net.Error); ok && netErr.Timeout() && netErr.Error() == "net/http: TLS handshake timeout" {
+			return true
+		}
+	}
+	return false
 }

@@ -499,7 +499,7 @@ func shouldRetryError(err error, config *RetryConfig) bool {
 		return false
 	}
 
-	if config.AppendRetryPolicy == AppendRetryPolicyNoSideEffects {
+	if config.AppendRetryPolicy.isNoSideEffects() {
 		return s2Err.HasNoSideEffects()
 	}
 
