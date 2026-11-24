@@ -7,8 +7,16 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - Resolve spec doc drift from s2-specs bc3ee92 ([#464](https://github.com/s2-streamstore/s2-sdk-go/issues/464))
-- [**breaking**] Spec conformance omnibus for remaining Detail bugs ([#460](https://github.com/s2-streamstore/s2-sdk-go/issues/460))
-- Close four safety gaps found in the r1 conformance audit ([#467](https://github.com/s2-streamstore/s2-sdk-go/issues/467))
+- [**breaking**] Spec conformance omnibus for remaining Detail bugs ([#460](https://github.com/s2-streamstore/s2-sdk-go/issues/460)). Before upgrading:
+  - Set both `BaseURL` and `MakeBasinBaseURL`, or neither. With environment variables, set both `S2_ACCOUNT_ENDPOINT` and `S2_BASIN_ENDPOINT`, or neither. Setting only one makes `New` panic.
+  - Pass a nonempty access token without control characters such as a trailing newline. Otherwise `New` panics.
+  - Keep reading from `Batches()` while `Batcher.Close()` runs. `Close()` now waits until the final batch is taken or the batcher's context is canceled.
+  - The full list of behavior changes is in [#460](https://github.com/s2-streamstore/s2-sdk-go/pull/460)'s description.
+- Close four safety gaps found in the r1 conformance audit ([#467](https://github.com/s2-streamstore/s2-sdk-go/issues/467)):
+  - `Client.Basin()` validates the basin name. Before, a name such as `evil.com#` sent requests, with the access token, to another host. Calls through a handle with an invalid name now fail with a `ValidationError`, so test fixtures with short names such as `"test"` need a valid one.
+  - Formatting a `Client` or `BasinClient` with `fmt` no longer prints the access token.
+  - `AccessTokens.Issue` and `NetworkPolicies.Create` no longer retry after errors that may have taken effect, so a retry can't lose an issued token's secret.
+  - `AppendRetryPolicy("no_side_effects")` now behaves as `AppendRetryPolicyNoSideEffects` instead of `all`.
 
 ### Refactor
 
@@ -17,6 +25,7 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - Remove test matrices superseded by the SDK spec ([#465](https://github.com/s2-streamstore/s2-sdk-go/issues/465))
+- List wait among ReadBatch.Records bounds ([#470](https://github.com/s2-streamstore/s2-sdk-go/issues/470))
 
 ### Miscellaneous Tasks
 
