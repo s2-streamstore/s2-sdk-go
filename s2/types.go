@@ -563,7 +563,7 @@ func (r SequencedRecord) IsCommandRecord() bool {
 type ReadBatch struct {
 	// Records that are durably sequenced on the stream, retrieved based on the requested criteria.
 	// This can only be empty in response to a unary read (i.e. not SSE),
-	// if the request cannot be satisfied without violating an explicit bound (`count`, `bytes`, or `until`).
+	// if the request cannot be satisfied without violating an explicit bound (`count`, `bytes`, `until`, or `wait`).
 	Records []SequencedRecord `json:"records"`
 	// Sequence number that will be assigned to the next record on the stream, and timestamp of the last record.
 	// This will only be present when reading recent records.
