@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -324,5 +325,10 @@ func isConnectError(err error) bool {
 		return true
 	}
 	var opErr *net.OpError
-	return errors.As(err, &opErr) && opErr.Op == "dial"
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	// net/http reports an expired TLSHandshakeTimeout only by this message
+	// (its type is unexported). The handshake precedes the request.
+	return strings.Contains(err.Error(), "net/http: TLS handshake timeout")
 }

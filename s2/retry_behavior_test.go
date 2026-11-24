@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -450,5 +451,39 @@ func TestNonIdempotentCallsRetryOnlyDefiniteErrors(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestIssueRetriesTLSHandshakeTimeout(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	var accepted atomic.Int32
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			defer conn.Close() // hold the connection without ever answering the handshake
+		}
+	}()
+
+	endpoint := "https://" + ln.Addr().String()
+	client := New("token", &ClientOptions{
+		BaseURL:           endpoint,
+		MakeBasinBaseURL:  func(string) string { return endpoint },
+		ConnectionTimeout: 100 * time.Millisecond,
+		RetryConfig:       &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond},
+	})
+	_, err = client.AccessTokens.Issue(context.Background(), IssueAccessTokenArgs{ID: "token-1"})
+	if err == nil {
+		t.Fatal("expected the handshake to time out")
+	}
+	if got := accepted.Load(); got != 2 {
+		t.Fatalf("expected the handshake timeout to be retried (2 connections), got %d: %v", got, err)
 	}
 }
