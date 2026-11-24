@@ -424,6 +424,9 @@ func TestNonIdempotentCallsRetryOnlyDefiniteErrors(t *testing.T) {
 		{"connection reset after sending is not retried", func() (*http.Response, error) {
 			return nil, &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}
 		}, 1},
+		{"server error quoting a handshake timeout is not retried", func() (*http.Response, error) {
+			return jsonResponse(http.StatusServiceUnavailable, "", `{"code":"unavailable","message":"upstream: net/http: TLS handshake timeout"}`), nil
+		}, 1},
 		{"refused connection is retried", func() (*http.Response, error) {
 			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
 		}, 2},
