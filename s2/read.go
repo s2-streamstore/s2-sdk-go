@@ -656,7 +656,8 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 			}
 			// The server ends a response cleanly only on a stop condition,
 			// so any other end means the connection was lost.
-			if fr.err == io.EOF || isExpectedFrameReadError(fr.err) {
+			// A response cut off mid-frame is a lost connection too (spec T9).
+			if fr.err == io.EOF || errors.Is(fr.err, io.ErrUnexpectedEOF) || isExpectedFrameReadError(fr.err) {
 				logError(r.logger, "s2 read session response ended early", "stream", string(r.streamClient.name), "error", fr.err)
 				return makeConnectionLostError(fr.err, "read session")
 			}

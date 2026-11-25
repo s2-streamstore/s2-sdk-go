@@ -28,18 +28,6 @@ func TestDecodeAPIError_WithMessageAndCode(t *testing.T) {
 	}
 }
 
-func TestDecodeAPIError_FallbackStatusText(t *testing.T) {
-	err := decodeAPIError(http.StatusInternalServerError, nil)
-
-	var s2Err *S2Error
-	if !errors.As(err, &s2Err) {
-		t.Fatalf("expected S2Error, got %T", err)
-	}
-	if s2Err.Message != http.StatusText(http.StatusInternalServerError) {
-		t.Fatalf("expected fallback message %q, got %q", http.StatusText(http.StatusInternalServerError), s2Err.Message)
-	}
-}
-
 func TestDecodeAPIError_RangeNotSatisfiable_WithTail(t *testing.T) {
 	body := []byte(`{"tail":{"seq_num":42,"timestamp":1234}}`)
 	err := decodeAPIError(http.StatusRequestedRangeNotSatisfiable, body)
@@ -98,7 +86,7 @@ func TestDecodeAPIError_RangeNotSatisfiableWithoutTailIsPlain(t *testing.T) {
 		wantMessage string
 	}{
 		{name: "plain body", body: "custom range error", wantMessage: "custom range error"},
-		{name: "empty body", body: "", wantMessage: http.StatusText(http.StatusRequestedRangeNotSatisfiable)},
+		{name: "empty body", body: "", wantMessage: "416"},
 		{name: "partial tail", body: `{"tail":{"seq_num":1}}`, wantMessage: `{"tail":{"seq_num":1}}`},
 		{name: "api error", body: `{"code":"x","message":"y"}`, wantCode: "x", wantMessage: "y"},
 	}
@@ -313,6 +301,7 @@ func TestErrorVectors(t *testing.T) {
 		Type                string `json:"type"`
 		Status              int    `json:"status"`
 		Code                string `json:"code"`
+		Message             string `json:"message"`
 		IsRetryable         bool   `json:"is_retryable"`
 		HasNoSideEffects    bool   `json:"has_no_side_effects"`
 		AssignableSeqNum    string `json:"assignable_seq_num"`
@@ -388,7 +377,23 @@ func TestErrorVectors(t *testing.T) {
 				if s2Err.Code != want.Code {
 					t.Errorf("code=%q, want %q", s2Err.Code, want.Code)
 				}
+				if s2Err.Message != want.Message {
+					t.Errorf("message=%q, want %q", s2Err.Message, want.Message)
+				}
 			}
 		})
+	}
+}
+
+func TestDecodeAPIError_InvalidUTF8BodyIsPlain(t *testing.T) {
+	err := decodeAPIError(http.StatusPreconditionFailed, []byte("{\"fencing_token_mismatch\":\"\xff\"}"))
+
+	var fenceErr *FencingTokenMismatchError
+	if errors.As(err, &fenceErr) {
+		t.Fatalf("expected a plain error, got FencingTokenMismatchError with token %q", fenceErr.ExpectedFencingToken)
+	}
+	var s2Err *S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 412 || s2Err.Message != "412" {
+		t.Fatalf("expected a plain 412 with message \"412\", got %v", err)
 	}
 }

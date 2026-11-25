@@ -1235,3 +1235,22 @@ func TestReadSessionRequestTimeoutEndsStalledAttempt(t *testing.T) {
 		})
 	}
 }
+
+func TestReadSessionTruncatedFrameIsConnectionLost(t *testing.T) {
+	frame := buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("abc")}})
+	streamClient := newFrameServedStreamClient(&staticStatusRoundTripper{status: http.StatusOK, body: frame[:len(frame)-1]})
+	streamClient.basinClient.retryConfig.MaxAttempts = 1
+
+	session, err := streamClient.ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
+	if err != nil {
+		t.Fatalf("open read session: %v", err)
+	}
+	defer session.Close()
+	for session.Next() {
+	}
+
+	var s2Err *S2Error
+	if err := session.Err(); !errors.As(err, &s2Err) || s2Err.Code != "CONNECTION_LOST" {
+		t.Fatalf("expected a connection-lost error, got %v", err)
+	}
+}
