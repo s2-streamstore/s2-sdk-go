@@ -1052,8 +1052,10 @@ func TestAppendSession_PersistentDrainExhaustsRetries(t *testing.T) {
 	if got := requests.Load(); got != int32(retryCfg.MaxAttempts) {
 		t.Fatalf("expected %d requests, got %d", retryCfg.MaxAttempts, got)
 	}
-	if err := session.Close(); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := session.Close(); !isServerDraining(err) {
+			t.Fatalf("expected Close to return the session's failure, got %v", err)
+		}
 	}
 }
 

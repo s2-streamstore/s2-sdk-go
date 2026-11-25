@@ -43,6 +43,8 @@ type AppendSession struct {
 	closed    bool
 	closedMu  sync.RWMutex
 	closeOnce sync.Once
+	// failure is the session's failure, returned by Close (spec A8a, A9).
+	failure error
 
 	lastAckedPosition *AppendAck
 	stateMu           sync.RWMutex
@@ -166,8 +168,6 @@ func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *Subm
 // Closes the session after all inflight batches have been acknowledged.
 // New submissions after Close is called will be rejected.
 func (r *AppendSession) Close() error {
-	var closeErr error
-
 	r.closeOnce.Do(func() {
 		r.closing.Store(true)
 		r.capacity.Close()
@@ -213,7 +213,9 @@ func (r *AppendSession) Close() error {
 		r.readWG.Wait()
 	})
 
-	return closeErr
+	r.closedMu.RLock()
+	defer r.closedMu.RUnlock()
+	return r.failure
 }
 
 // Returns the last acknowledged position, if any.
@@ -1004,6 +1006,11 @@ func (r *AppendSession) failAllInflight(err error) {
 }
 
 func (r *AppendSession) failAllInflightLocked(err error) []*transportAppendSession {
+	// Nothing awaiting an outcome means nothing was lost, so the close is clean.
+	var failure error
+	if len(r.inflightQueue) > 0 {
+		failure = err
+	}
 	for _, entry := range r.inflightQueue {
 		if atomic.CompareAndSwapInt32(&entry.completed, 0, 1) {
 			result := withPriorUncertainty(err, entry.priorUncertainty)
@@ -1011,6 +1018,10 @@ func (r *AppendSession) failAllInflightLocked(err error) []*transportAppendSessi
 				// An abort (canceled session context) can end a batch already
 				// written to the server, so it may have taken effect (spec A8c).
 				result = &AppendIndefiniteFailureError{FinalAttemptError: err}
+			}
+			// Spec A9: wrapped if any batch's outcome was wrapped.
+			if _, ok := result.(*AppendIndefiniteFailureError); ok {
+				failure = result
 			}
 			select {
 			case entry.resultCh <- &inflightResult{err: result}:
@@ -1028,6 +1039,9 @@ func (r *AppendSession) failAllInflightLocked(err error) []*transportAppendSessi
 	if !r.closed {
 		r.closed = true
 		r.capacity.Close()
+	}
+	if r.failure == nil {
+		r.failure = failure
 	}
 	r.closedMu.Unlock()
 	r.closing.Store(true)
