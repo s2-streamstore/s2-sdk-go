@@ -106,9 +106,15 @@ func applyBatchingDefaults(opts *BatchingOptions) *BatchingOptions {
 
 // Create a new [Batcher] that accumulates AppendRecords and emits them as batches based on
 // configurable size, count, or time thresholds.
+//
+// Panics with a validation error if opts.Linger is negative.
 func NewBatcher(ctx context.Context, opts *BatchingOptions) *Batcher {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	// Spec C2: linger must be ≥ 0. A negative linger would never flush.
+	if opts != nil && opts.Linger < 0 {
+		panic(newValidationError("linger must not be negative"))
 	}
 	opts = applyBatchingDefaults(opts)
 	batchCtx, cancel := context.WithCancel(ctx)
