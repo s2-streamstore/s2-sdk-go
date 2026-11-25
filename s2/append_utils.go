@@ -42,9 +42,10 @@ func newSubmitFuture(cancelWait context.CancelFunc) *SubmitFuture {
 // Blocks until the batch is accepted by the [AppendSession] and returns
 // a [BatchSubmitTicket] that can be used to wait for the append acknowledgment.
 //
-// If ctx ends before the batch is accepted, the batch is withdrawn and will
-// not be appended; Wait returns ctx's error, as does every later Wait. If
-// acceptance has already begun, Wait returns its result instead.
+// When ctx ends, Wait tries to withdraw the batch. If withdrawal wins,
+// the batch will not be appended, and this and later calls to Wait return
+// ctx's error. If acceptance starts first, Wait returns the submission
+// result instead, even if ctx has already ended.
 func (f *SubmitFuture) Wait(ctx context.Context) (*BatchSubmitTicket, error) {
 	if ctx == nil {
 		ctx = context.Background()

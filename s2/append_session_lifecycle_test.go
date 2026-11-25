@@ -332,6 +332,27 @@ func TestAppendSession_CanceledSubmitWaitAcceptsNothing(t *testing.T) {
 	}
 }
 
+func TestSubmitFutureCanceledWaitReturnsTicketOnceAcceptanceBegins(t *testing.T) {
+	future := newSubmitFuture(nil)
+	if !future.beginAccept() {
+		t.Fatal("expected a pending future to begin acceptance")
+	}
+
+	// Wait runs with ctx already ended while acceptance is still in progress;
+	// it must block for the outcome rather than withdraw the batch.
+	want := &BatchSubmitTicket{}
+	time.AfterFunc(50*time.Millisecond, func() { future.accept(want) })
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if ticket, err := future.Wait(canceled); err != nil || ticket != want {
+		t.Fatalf("a batch being accepted must return its ticket, got ticket=%p err=%v", ticket, err)
+	}
+	if ticket, err := future.Wait(canceled); err != nil || ticket != want {
+		t.Fatalf("expected a later Wait to return the same ticket, got ticket=%p err=%v", ticket, err)
+	}
+}
+
 // newFreshRequestSession returns a session and a function that submits a
 // batch, expects it on a new request, and acks it there with the given advice.
 func newFreshRequestSession(t *testing.T, ctx context.Context, retryCfg *RetryConfig) (*AppendSession, func(seq uint64, advise bool) *transportAppendSession) {
