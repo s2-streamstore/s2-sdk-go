@@ -134,6 +134,8 @@ func (r *AppendSession) producerMaxInflightBytes() int64 {
 func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *SubmitFuture {
 	ticketCh := make(chan *BatchSubmitTicket, 1)
 	errCh := make(chan error, 1)
+	waitCtx, cancelWait := context.WithCancel(r.pumpCtx)
+	future := &SubmitFuture{ticketCh: ticketCh, errCh: errCh, cancelWait: cancelWait}
 
 	// Capacity is granted, and batches are queued, in Submit order: each
 	// submission waits for its predecessor to be queued or to fail.
@@ -145,10 +147,19 @@ func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *Subm
 
 	go func() {
 		defer close(done)
+		defer cancelWait()
 		if prev != nil {
 			<-prev
 		}
-		if err := r.capacity.reserve(r.pumpCtx, size); err != nil {
+		err := r.capacity.reserve(waitCtx, size)
+		if !future.state.CompareAndSwap(submitPending, submitSettled) {
+			// Withdrawn by a canceled Wait.
+			if err == nil {
+				r.capacity.release(size)
+			}
+			return
+		}
+		if err != nil {
 			errCh <- err
 			return
 		}
@@ -162,7 +173,7 @@ func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *Subm
 		ticketCh <- &BatchSubmitTicket{ackCh: entry.resultCh}
 	}()
 
-	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}
+	return future
 }
 
 // Closes the session after all inflight batches have an outcome, and returns

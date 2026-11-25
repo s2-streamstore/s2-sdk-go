@@ -356,23 +356,8 @@ func (p *Producer) processBatch(batch *BatchOutput) {
 }
 
 func (p *Producer) waitForBatchSubmission(future *SubmitFuture) (*BatchSubmitTicket, error) {
-	select {
-	case ticket := <-future.ticketCh:
-		return ticket, nil
-	case err := <-future.errCh:
-		return nil, err
-	case <-p.ctx.Done():
-		// Prefer a result that was already available when termination raced the
-		// select. This preserves the AppendSession's exact terminal cause.
-		select {
-		case ticket := <-future.ticketCh:
-			return ticket, nil
-		case err := <-future.errCh:
-			return nil, err
-		default:
-			return nil, p.ctx.Err()
-		}
-	}
+	// Keeps the session's result if it settled the batch, else withdraws it.
+	return future.Wait(p.ctx)
 }
 
 func (p *Producer) waitForBatchAck(ticket *BatchSubmitTicket) (*AppendAck, error) {
