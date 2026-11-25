@@ -417,6 +417,12 @@ func (p *transportAppendSession) readAcksLoop(conn *http.Response) {
 	for {
 		frame, err := frameReader.ReadFrame()
 		if err != nil {
+			// A response cut off mid-frame is a lost connection (spec T9).
+			// Record it before closing so blocked writes report it too.
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				p.reportErrorIfOpen(makeConnectionLostError(err, "append session"))
+				return
+			}
 			if isExpectedFrameReadError(err) {
 				return
 			}

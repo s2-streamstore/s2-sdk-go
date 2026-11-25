@@ -222,8 +222,6 @@ func isExpectedFrameReadError(err error) bool {
 
 	switch {
 	case errors.Is(err, io.EOF),
-		// A response cut off mid-frame is a lost connection (spec T9).
-		errors.Is(err, io.ErrUnexpectedEOF),
 		errors.Is(err, io.ErrClosedPipe),
 		errors.Is(err, net.ErrClosed),
 		errors.Is(err, context.Canceled),

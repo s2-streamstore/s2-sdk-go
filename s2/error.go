@@ -276,6 +276,10 @@ func (e *RangeNotSatisfiableError) Unwrap() error {
 
 func decodeAPIError(status int, body []byte) error {
 	trimmed := bytes.TrimSpace(body)
+	// Spec E2: a body that is not valid UTF-8 carries no payload or code.
+	if !utf8.Valid(trimmed) {
+		trimmed = nil
+	}
 
 	if status == http.StatusPreconditionFailed && len(trimmed) > 0 {
 		var payload struct {

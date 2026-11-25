@@ -384,3 +384,16 @@ func TestErrorVectors(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeAPIError_InvalidUTF8BodyIsPlain(t *testing.T) {
+	err := decodeAPIError(http.StatusPreconditionFailed, []byte("{\"fencing_token_mismatch\":\"\xff\"}"))
+
+	var fenceErr *FencingTokenMismatchError
+	if errors.As(err, &fenceErr) {
+		t.Fatalf("expected a plain error, got FencingTokenMismatchError with token %q", fenceErr.ExpectedFencingToken)
+	}
+	var s2Err *S2Error
+	if !errors.As(err, &s2Err) || s2Err.Status != 412 || s2Err.Message != "412" {
+		t.Fatalf("expected a plain 412 with message \"412\", got %v", err)
+	}
+}
