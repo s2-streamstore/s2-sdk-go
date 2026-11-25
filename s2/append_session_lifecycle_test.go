@@ -311,6 +311,20 @@ func TestAppendSession_CanceledSubmitWaitAcceptsNothing(t *testing.T) {
 	if _, err := b.Wait(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected deadline exceeded, got %v", err)
 	}
+	// Waiting again returns the withdrawal error rather than hanging.
+	again := make(chan error, 1)
+	go func() {
+		_, err := b.Wait(context.Background())
+		again <- err
+	}()
+	select {
+	case err := <-again:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected a later wait to return the withdrawal error, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a later wait on a withdrawn batch hung")
+	}
 	c := submit("c")
 
 	transport.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 0}, End: StreamPosition{SeqNum: 1}, Tail: StreamPosition{SeqNum: 1}}

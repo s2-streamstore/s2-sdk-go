@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sync"
 	"sync/atomic"
 )
 
@@ -20,6 +21,15 @@ type SubmitFuture struct {
 	// state decides whether a canceled Wait or the session settles the batch.
 	state      atomic.Int32
 	cancelWait context.CancelFunc
+	// withdrawn is closed once a canceled Wait withdraws the batch.
+	withdrawnOnce sync.Once
+	withdrawn     chan struct{}
+	withdrawErr   error
+}
+
+func (f *SubmitFuture) withdrawnCh() chan struct{} {
+	f.withdrawnOnce.Do(func() { f.withdrawn = make(chan struct{}) })
+	return f.withdrawn
 }
 
 const (
@@ -31,31 +41,39 @@ const (
 // Blocks until the batch is accepted by the [AppendSession] and returns
 // a [BatchSubmitTicket] that can be used to wait for the append acknowledgment.
 //
-// If ctx ends first, the batch is withdrawn and never appended, unless the
-// session has already settled it, in which case Wait returns that result.
+// If ctx ends first, the batch is withdrawn and never appended, and every
+// Wait returns ctx's error. If the session already settled the batch, Wait
+// returns that result instead.
 func (f *SubmitFuture) Wait(ctx context.Context) (*BatchSubmitTicket, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	withdrawn := f.withdrawnCh()
 	select {
 	case ticket := <-f.ticketCh:
 		return ticket, nil
 	case err := <-f.errCh:
 		return nil, err
+	case <-withdrawn:
+		return nil, f.withdrawErr
 	case <-ctx.Done():
 	}
 	// Spec A4c: a canceled submit accepts nothing.
 	if f.state.CompareAndSwap(submitPending, submitWithdrawn) {
+		f.withdrawErr = ctx.Err()
+		close(withdrawn)
 		if f.cancelWait != nil {
 			f.cancelWait()
 		}
-		return nil, ctx.Err()
+		return nil, f.withdrawErr
 	}
 	select {
 	case ticket := <-f.ticketCh:
 		return ticket, nil
 	case err := <-f.errCh:
 		return nil, err
+	case <-withdrawn:
+		return nil, f.withdrawErr
 	}
 }
 
