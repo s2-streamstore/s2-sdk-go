@@ -165,8 +165,9 @@ func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *Subm
 	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}
 }
 
-// Closes the session after all inflight batches have been acknowledged.
-// New submissions after Close is called will be rejected.
+// Closes the session after all inflight batches have an outcome, and returns
+// the session's failure, if any. New submissions after Close is called will be
+// rejected. Every call returns the same result.
 func (r *AppendSession) Close() error {
 	r.closeOnce.Do(func() {
 		r.closing.Store(true)

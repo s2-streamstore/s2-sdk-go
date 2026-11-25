@@ -749,6 +749,10 @@ func TestAppendSession_AbortReportsSentBatchAsIndefinite(t *testing.T) {
 	if HasNoSideEffects(err) {
 		t.Fatalf("sent batch reported as side-effect free after abort: %v", err)
 	}
+	var indefinite *AppendIndefiniteFailureError
+	if err := session.Close(); !errors.As(err, &indefinite) {
+		t.Fatalf("expected Close to return the indefinite failure, got %v", err)
+	}
 }
 
 func TestAppendSession_NoSideEffectsNoRetryWithNonIdempotentSentPipeline(t *testing.T) {
