@@ -166,7 +166,10 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 }
 
 // errReconnectAdvised is a planned handover, not a failure.
-var errReconnectAdvised = errors.New("reconnect advised")
+var (
+	errReconnectAdvised   = errors.New("reconnect advised")
+	errReadRequestTimeout = errors.New("read session request timed out")
+)
 
 type readDelivery struct {
 	records      []SequencedRecord
@@ -509,8 +512,10 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 	reqURL := r.streamClient.basinClient.baseURL + path
 
 	ctx, capture := capturePoisonHandle(ctx)
+	reqCtx, cancelReq := context.WithCancelCause(ctx)
+	defer cancelReq(nil)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -531,8 +536,32 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 		}
 	}
 
+	// Spec T7b: bound the wait until a 2xx response begins, or until a non-2xx
+	// body is read. The heartbeat watchdog below covers the 2xx body.
+	requestTimeout := r.streamClient.basinClient.requestTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = defaultRequestTimeout
+	}
+	responseTimer := time.AfterFunc(requestTimeout, func() { cancelReq(errReadRequestTimeout) })
+	defer responseTimer.Stop()
+	// An error decoded in full before the timer fired is kept.
+	timedOut := func(err error) bool {
+		var s2Err *S2Error
+		return errors.Is(context.Cause(reqCtx), errReadRequestTimeout) &&
+			(!errors.As(err, &s2Err) || s2Err.Origin == "network")
+	}
+	timeoutErr := &S2Error{
+		Message: fmt.Sprintf("read session request timed out after %v", requestTimeout),
+		Code:    "REQUEST_TIMEOUT",
+		Status:  408,
+		Origin:  errorOriginSDK,
+	}
+
 	resp, err := r.streamClient.getHTTPClient().Do(req)
 	if err != nil {
+		if timedOut(err) {
+			return timeoutErr
+		}
 		if isStreamResetError(err) {
 			logError(r.logger, "s2 read session stream reset", "stream", string(r.streamClient.name), "error", err)
 			return makeStreamResetError(err, "read session")
@@ -544,6 +573,9 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		logError(r.logger, "s2 read session http status", "stream", string(r.streamClient.name), "status", resp.StatusCode)
 		err := parseHTTPError(resp)
+		if timedOut(err) {
+			return timeoutErr
+		}
 		if shouldRetireConnection(err) {
 			capture.poison()
 		}
@@ -557,6 +589,9 @@ func (r *streamReader) runOnce(ctx context.Context, opts *ReadOptions) error {
 	r.respBody = resp.Body
 	r.bodyMu.Unlock()
 	defer r.closeRespBody()
+	if !responseTimer.Stop() {
+		return timeoutErr // fired as the response began
+	}
 
 	frameReader := internalframing.NewFrameReader(resp.Body)
 	tailTimer := time.NewTimer(tailWatchdogTimeout)

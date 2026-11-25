@@ -1175,3 +1175,63 @@ func TestReadSessionHotServerRetiresConnection(t *testing.T) {
 		t.Fatalf("expected hot_server to retire connection and dial a fresh one, got connIDs=%v", connIDs)
 	}
 }
+
+// stallRoundTripper stalls until the request context ends, either before
+// headers or while sending a 503 body.
+type stallRoundTripper struct{ stallBody bool }
+
+func (r stallRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if !r.stallBody {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	}
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: ctxBlockedBody{req.Context()}, Header: make(http.Header), Request: req}, nil
+}
+
+type ctxBlockedBody struct{ ctx context.Context }
+
+func (b ctxBlockedBody) Read([]byte) (int, error) {
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+
+func (ctxBlockedBody) Close() error { return nil }
+
+func TestReadSessionRequestTimeoutEndsStalledAttempt(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stallBody bool
+	}{
+		{name: "no response headers", stallBody: false},
+		{name: "error body never completes", stallBody: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			streamClient := newFrameServedStreamClient(stallRoundTripper{stallBody: tc.stallBody})
+			streamClient.basinClient.requestTimeout = 50 * time.Millisecond
+			streamClient.basinClient.retryConfig.MaxAttempts = 1
+
+			session, err := streamClient.ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
+			if err != nil {
+				t.Fatalf("open read session: %v", err)
+			}
+			defer session.Close()
+
+			done := make(chan struct{})
+			go func() {
+				for session.Next() {
+				}
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("read session hung on a stalled response")
+			}
+
+			var s2Err *S2Error
+			if err := session.Err(); !errors.As(err, &s2Err) || s2Err.Status != 408 || s2Err.Code != "REQUEST_TIMEOUT" || s2Err.Origin != errorOriginSDK {
+				t.Fatalf("expected an SDK 408 REQUEST_TIMEOUT error, got %v", err)
+			}
+		})
+	}
+}
