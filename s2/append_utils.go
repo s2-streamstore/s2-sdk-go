@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sync"
+	"sync/atomic"
 )
 
 const (
@@ -15,94 +15,48 @@ const (
 // Represents a pending batch submission to an [AppendSession].
 // Call [SubmitFuture.Wait] to block until the batch is accepted.
 type SubmitFuture struct {
-	done chan struct{}
-	// cancelWait stops the session's capacity wait for a withdrawn batch.
+	ticketCh <-chan *BatchSubmitTicket
+	errCh    <-chan error
+	// state decides whether a canceled Wait or the session settles the batch.
+	state      atomic.Int32
 	cancelWait context.CancelFunc
-
-	mu     sync.Mutex
-	state  submitState
-	ticket *BatchSubmitTicket
-	err    error
 }
-
-type submitState uint8
 
 const (
-	submitPending submitState = iota
-	// submitAccepting means the session reserved capacity and is queuing the
-	// batch, so it can no longer be withdrawn.
-	submitAccepting
-	submitResolved
+	submitPending int32 = iota
+	submitSettled
+	submitWithdrawn
 )
-
-func newSubmitFuture(cancelWait context.CancelFunc) *SubmitFuture {
-	return &SubmitFuture{done: make(chan struct{}), cancelWait: cancelWait}
-}
 
 // Blocks until the batch is accepted by the [AppendSession] and returns
 // a [BatchSubmitTicket] that can be used to wait for the append acknowledgment.
 //
-// When ctx ends, Wait tries to withdraw the batch. If withdrawal wins,
-// the batch will not be appended, and this and later calls to Wait return
-// ctx's error. If acceptance starts first, Wait returns the submission
-// result instead, even if ctx has already ended.
+// If ctx ends first, the batch is withdrawn and never appended, unless the
+// session has already settled it, in which case Wait returns that result.
 func (f *SubmitFuture) Wait(ctx context.Context) (*BatchSubmitTicket, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	select {
-	case <-f.done:
+	case ticket := <-f.ticketCh:
+		return ticket, nil
+	case err := <-f.errCh:
+		return nil, err
 	case <-ctx.Done():
-		f.withdraw(ctx.Err())
-		<-f.done
 	}
-	return f.ticket, f.err
-}
-
-// withdraw resolves a batch that is not yet accepted with cause, so the
-// session skips it (spec A4c: a canceled submit accepts nothing).
-func (f *SubmitFuture) withdraw(cause error) {
-	f.mu.Lock()
-	withdrawn := f.state == submitPending
-	if withdrawn {
-		f.resolveLocked(nil, cause)
+	// Spec A4c: a canceled submit accepts nothing.
+	if f.state.CompareAndSwap(submitPending, submitWithdrawn) {
+		if f.cancelWait != nil {
+			f.cancelWait()
+		}
+		return nil, ctx.Err()
 	}
-	f.mu.Unlock()
-	if withdrawn && f.cancelWait != nil {
-		f.cancelWait()
+	select {
+	case ticket := <-f.ticketCh:
+		return ticket, nil
+	case err := <-f.errCh:
+		return nil, err
 	}
-}
-
-// beginAccept claims the batch for acceptance, reporting false if it was
-// withdrawn or already resolved.
-func (f *SubmitFuture) beginAccept() bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.state != submitPending {
-		return false
-	}
-	f.state = submitAccepting
-	return true
-}
-
-func (f *SubmitFuture) accept(ticket *BatchSubmitTicket) { f.resolve(ticket, nil) }
-
-func (f *SubmitFuture) fail(err error) { f.resolve(nil, err) }
-
-// resolve settles the future unless it is already settled (e.g. withdrawn).
-func (f *SubmitFuture) resolve(ticket *BatchSubmitTicket, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.state != submitResolved {
-		f.resolveLocked(ticket, err)
-	}
-}
-
-func (f *SubmitFuture) resolveLocked(ticket *BatchSubmitTicket, err error) {
-	f.state = submitResolved
-	f.ticket = ticket
-	f.err = err
-	close(f.done)
 }
 
 // Resolves with the [AppendAck] once the batch is durable.

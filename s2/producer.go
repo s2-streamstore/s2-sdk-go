@@ -356,9 +356,7 @@ func (p *Producer) processBatch(batch *BatchOutput) {
 }
 
 func (p *Producer) waitForBatchSubmission(future *SubmitFuture) (*BatchSubmitTicket, error) {
-	// On termination, a batch the session already accepted keeps its ticket,
-	// preserving the session's exact outcome; one not yet accepted is withdrawn
-	// so its records are not appended after reporting p.ctx's error.
+	// Keeps the session's result if it settled the batch, else withdraws it.
 	return future.Wait(p.ctx)
 }
 

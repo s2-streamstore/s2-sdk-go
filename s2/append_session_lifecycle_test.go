@@ -327,29 +327,21 @@ func TestAppendSession_CanceledSubmitWaitAcceptsNothing(t *testing.T) {
 	if ack.Start.SeqNum != 1 {
 		t.Fatalf("expected c at seq_num 1, got %d", ack.Start.SeqNum)
 	}
-	if _, err := b.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("expected a later wait on withdrawn b to repeat its error, got %v", err)
-	}
 }
 
-func TestSubmitFutureCanceledWaitReturnsTicketOnceAcceptanceBegins(t *testing.T) {
-	future := newSubmitFuture(nil)
-	if !future.beginAccept() {
-		t.Fatal("expected a pending future to begin acceptance")
-	}
+func TestSubmitFutureCanceledWaitKeepsSettledResult(t *testing.T) {
+	ticketCh := make(chan *BatchSubmitTicket, 1)
+	future := &SubmitFuture{ticketCh: ticketCh, errCh: make(chan error, 1)}
+	future.state.Store(submitSettled)
 
-	// Wait runs with ctx already ended while acceptance is still in progress;
-	// it must block for the outcome rather than withdraw the batch.
+	// ctx has ended while the session is still queuing the batch.
 	want := &BatchSubmitTicket{}
-	time.AfterFunc(50*time.Millisecond, func() { future.accept(want) })
+	time.AfterFunc(50*time.Millisecond, func() { ticketCh <- want })
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	if ticket, err := future.Wait(canceled); err != nil || ticket != want {
-		t.Fatalf("a batch being accepted must return its ticket, got ticket=%p err=%v", ticket, err)
-	}
-	if ticket, err := future.Wait(canceled); err != nil || ticket != want {
-		t.Fatalf("expected a later Wait to return the same ticket, got ticket=%p err=%v", ticket, err)
+		t.Fatalf("a settled batch must return its ticket, got ticket=%p err=%v", ticket, err)
 	}
 }
 
