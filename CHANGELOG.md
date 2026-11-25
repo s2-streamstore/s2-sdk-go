@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.28.0] - 2026-11-25
+
+### Features
+
+- Honor retry-after-ms on unary retries ([#471](https://github.com/s2-streamstore/s2-sdk-go/issues/471))
+
+### Bug Fixes
+
+- *(read)* Time out read session attempts that never get a response ([#473](https://github.com/s2-streamstore/s2-sdk-go/issues/473))
+- *(append)* Return the session's failure from AppendSession.Close ([#475](https://github.com/s2-streamstore/s2-sdk-go/issues/475)). `Close()` used to always return nil; check its error.
+- *(client)* Use spec HTTP/2 keep-alive timings on both pools ([#476](https://github.com/s2-streamstore/s2-sdk-go/issues/476))
+- *(errors)* Decimal status for empty error bodies; truncated frames are lost connections ([#477](https://github.com/s2-streamstore/s2-sdk-go/issues/477))
+- *(append)* Withdraw a batch when its SubmitFuture wait is canceled ([#474](https://github.com/s2-streamstore/s2-sdk-go/issues/474)). A canceled `Wait` no longer appends the batch afterwards.
+- *(batcher)* Reject a negative linger ([#479](https://github.com/s2-streamstore/s2-sdk-go/issues/479)). `NewBatcher` panics on a negative `Linger`.
+
+### Documentation
+
+- *(agents)* Review the diff against the spec ([#478](https://github.com/s2-streamstore/s2-sdk-go/issues/478))
+
 ## [v0.27.0] - 2026-11-24
 
 ### Bug Fixes
