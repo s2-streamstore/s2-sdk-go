@@ -1175,3 +1175,82 @@ func TestReadSessionHotServerRetiresConnection(t *testing.T) {
 		t.Fatalf("expected hot_server to retire connection and dial a fresh one, got connIDs=%v", connIDs)
 	}
 }
+
+// stallFirstRoundTripper stalls the first attempt until its request context ends,
+// either before sending headers or while sending an error body, then serves body.
+type stallFirstRoundTripper struct {
+	stallBody bool
+	body      []byte
+	mu        sync.Mutex
+	calls     int
+}
+
+func (r *stallFirstRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.mu.Lock()
+	r.calls++
+	first := r.calls == 1
+	r.mu.Unlock()
+	if !first {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(r.body)), Header: make(http.Header), Request: req}, nil
+	}
+	if !r.stallBody {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	}
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: ctxBlockedBody{req.Context()}, Header: make(http.Header), Request: req}, nil
+}
+
+type ctxBlockedBody struct{ ctx context.Context }
+
+func (b ctxBlockedBody) Read([]byte) (int, error) {
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+
+func (ctxBlockedBody) Close() error { return nil }
+
+func TestReadSessionRequestTimeoutRetriesStalledResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stallBody bool
+	}{
+		{name: "no response headers", stallBody: false},
+		{name: "error body never completes", stallBody: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &stallFirstRoundTripper{
+				stallBody: tc.stallBody,
+				body:      buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("a")}}),
+			}
+			streamClient := newFrameServedStreamClient(rt)
+			streamClient.basinClient.requestTimeout = 50 * time.Millisecond
+
+			session, err := streamClient.ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
+			if err != nil {
+				t.Fatalf("open read session: %v", err)
+			}
+			defer session.Close()
+
+			done := make(chan []uint64, 1)
+			go func() {
+				var got []uint64
+				for session.Next() {
+					got = append(got, session.Record().SeqNum)
+				}
+				done <- got
+			}()
+
+			select {
+			case got := <-done:
+				if err := session.Err(); err != nil {
+					t.Fatalf("unexpected session error: %v", err)
+				}
+				if len(got) != 1 || got[0] != 0 {
+					t.Fatalf("expected record 0 after retry, got %v", got)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("read session hung on a stalled response instead of timing out the attempt")
+			}
+		})
+	}
+}
