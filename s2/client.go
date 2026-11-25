@@ -20,12 +20,14 @@ const (
 	defaultTCPKeepAlive        = 30 * time.Second
 	defaultMaxIdleConnsPerHost = 32
 
-	// HTTP/2 transport settings for streaming operations
+	// HTTP/2 transport settings
 	http2MaxReadFrameSize  = 1<<24 - 1 // HTTP/2's maximum; net/http ignores larger values
 	http2MaxHeaderListSize = 10 * 1024 * 1024
-	http2ReadIdleTimeout   = 30 * time.Second
-	http2PingTimeout       = 15 * time.Second
-	http2WriteByteTimeout  = 30 * time.Second
+	// Spec C13b: ping after 20 s without a frame; drop the connection if no
+	// ack arrives within 10 s.
+	http2ReadIdleTimeout  = 20 * time.Second
+	http2PingTimeout      = 10 * time.Second
+	http2WriteByteTimeout = 30 * time.Second
 	// Closes streaming connections that stay idle, including ones already
 	// removed from the pool after reconnect advice.
 	http2IdleConnTimeout = 90 * time.Second
@@ -225,6 +227,13 @@ func newUnaryHTTPTransport(base http.RoundTripper, connectionTimeout time.Durati
 	transport.TLSHandshakeTimeout = connectionTimeout
 	transport.ForceAttemptHTTP2 = true
 	transport.MaxIdleConnsPerHost = defaultMaxIdleConnsPerHost
+	h2 := http.HTTP2Config{}
+	if transport.HTTP2 != nil {
+		h2 = *transport.HTTP2
+	}
+	h2.SendPingTimeout = http2ReadIdleTimeout
+	h2.PingTimeout = http2PingTimeout
+	transport.HTTP2 = &h2
 	return transport
 }
 
