@@ -333,10 +333,9 @@ func decodeAPIError(status int, body []byte) error {
 	}
 }
 
+// statusFallbackMessage is the message for an empty or non-UTF-8 error body:
+// the decimal HTTP status (spec E2).
 func statusFallbackMessage(status int) string {
-	if text := http.StatusText(status); text != "" {
-		return text
-	}
 	return strconv.Itoa(status)
 }
 
