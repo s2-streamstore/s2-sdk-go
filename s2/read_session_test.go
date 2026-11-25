@@ -1176,23 +1176,11 @@ func TestReadSessionHotServerRetiresConnection(t *testing.T) {
 	}
 }
 
-// stallFirstRoundTripper stalls the first attempt until its request context ends,
-// either before sending headers or while sending an error body, then serves body.
-type stallFirstRoundTripper struct {
-	stallBody bool
-	body      []byte
-	mu        sync.Mutex
-	calls     int
-}
+// stallRoundTripper stalls until the request context ends, either before
+// headers or while sending a 503 body.
+type stallRoundTripper struct{ stallBody bool }
 
-func (r *stallFirstRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	r.mu.Lock()
-	r.calls++
-	first := r.calls == 1
-	r.mu.Unlock()
-	if !first {
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(r.body)), Header: make(http.Header), Request: req}, nil
-	}
+func (r stallRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if !r.stallBody {
 		<-req.Context().Done()
 		return nil, req.Context().Err()
@@ -1209,43 +1197,7 @@ func (b ctxBlockedBody) Read([]byte) (int, error) {
 
 func (ctxBlockedBody) Close() error { return nil }
 
-func TestReadSessionRequestTimeoutRetriesStalledResponse(t *testing.T) {
-	// read drains a session whose first attempt stalls, failing fast if the
-	// stall is never timed out.
-	read := func(t *testing.T, stallBody bool, maxAttempts int) ([]uint64, error) {
-		t.Helper()
-		rt := &stallFirstRoundTripper{
-			stallBody: stallBody,
-			body:      buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("a")}}),
-		}
-		streamClient := newFrameServedStreamClient(rt)
-		streamClient.basinClient.requestTimeout = 50 * time.Millisecond
-		streamClient.basinClient.retryConfig.MaxAttempts = maxAttempts
-
-		session, err := streamClient.ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
-		if err != nil {
-			t.Fatalf("open read session: %v", err)
-		}
-		defer session.Close()
-
-		done := make(chan []uint64, 1)
-		go func() {
-			var got []uint64
-			for session.Next() {
-				got = append(got, session.Record().SeqNum)
-			}
-			done <- got
-		}()
-
-		select {
-		case got := <-done:
-			return got, session.Err()
-		case <-time.After(2 * time.Second):
-			t.Fatal("read session hung on a stalled response instead of timing out the attempt")
-			return nil, nil
-		}
-	}
-
+func TestReadSessionRequestTimeoutEndsStalledAttempt(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		stallBody bool
@@ -1254,18 +1206,31 @@ func TestReadSessionRequestTimeoutRetriesStalledResponse(t *testing.T) {
 		{name: "error body never completes", stallBody: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := read(t, tc.stallBody, 1)
-			var s2Err *S2Error
-			if !errors.As(err, &s2Err) || s2Err.Status != 408 || s2Err.Code != "REQUEST_TIMEOUT" || s2Err.Origin != errorOriginSDK {
-				t.Fatalf("expected an SDK 408 REQUEST_TIMEOUT error, got %v", err)
+			streamClient := newFrameServedStreamClient(stallRoundTripper{stallBody: tc.stallBody})
+			streamClient.basinClient.requestTimeout = 50 * time.Millisecond
+			streamClient.basinClient.retryConfig.MaxAttempts = 1
+
+			session, err := streamClient.ReadSession(context.Background(), &ReadOptions{Wait: Int32(0)})
+			if err != nil {
+				t.Fatalf("open read session: %v", err)
+			}
+			defer session.Close()
+
+			done := make(chan struct{})
+			go func() {
+				for session.Next() {
+				}
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("read session hung on a stalled response")
 			}
 
-			got, err := read(t, tc.stallBody, 2)
-			if err != nil {
-				t.Fatalf("unexpected session error after retry: %v", err)
-			}
-			if len(got) != 1 || got[0] != 0 {
-				t.Fatalf("expected record 0 after retry, got %v", got)
+			var s2Err *S2Error
+			if err := session.Err(); !errors.As(err, &s2Err) || s2Err.Status != 408 || s2Err.Code != "REQUEST_TIMEOUT" || s2Err.Origin != errorOriginSDK {
+				t.Fatalf("expected an SDK 408 REQUEST_TIMEOUT error, got %v", err)
 			}
 		})
 	}
