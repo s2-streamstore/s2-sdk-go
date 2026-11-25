@@ -232,14 +232,13 @@ func (s *blockingSubmitSession) Submit(input *AppendInput) (*SubmitFuture, error
 		Tail:  StreamPosition{SeqNum: start + uint64(batchSize)},
 	}
 
-	ticketCh := make(chan *BatchSubmitTicket, 1)
-	errCh := make(chan error, 1)
+	future := newSubmitFuture(nil)
 	ackCh := make(chan *inflightResult, 1)
-	ticketCh <- &BatchSubmitTicket{ackCh: ackCh}
+	future.accept(&BatchSubmitTicket{ackCh: ackCh})
 	ackCh <- &inflightResult{ack: ack}
 	close(ackCh)
 
-	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}, nil
+	return future, nil
 }
 
 func (s *blockingSubmitSession) Close() error {
@@ -320,10 +319,9 @@ func (s *delayedAckSession) Submit(input *AppendInput) (*SubmitFuture, error) {
 		Tail:  StreamPosition{SeqNum: start + uint64(batchSize)},
 	}
 
-	ticketCh := make(chan *BatchSubmitTicket, 1)
-	errCh := make(chan error, 1)
+	future := newSubmitFuture(nil)
 	ackCh := make(chan *inflightResult, 1)
-	ticketCh <- &BatchSubmitTicket{ackCh: ackCh}
+	future.accept(&BatchSubmitTicket{ackCh: ackCh})
 
 	go func() {
 		<-s.ackGate
@@ -331,7 +329,7 @@ func (s *delayedAckSession) Submit(input *AppendInput) (*SubmitFuture, error) {
 		close(ackCh)
 	}()
 
-	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}, nil
+	return future, nil
 }
 
 func (s *delayedAckSession) Close() error {
@@ -353,8 +351,7 @@ func (s *delayedAcceptanceSession) Submit(input *AppendInput) (*SubmitFuture, er
 	default:
 	}
 
-	ticketCh := make(chan *BatchSubmitTicket, 1)
-	errCh := make(chan error, 1)
+	future := newSubmitFuture(nil)
 
 	go func() {
 		<-s.release
@@ -366,7 +363,7 @@ func (s *delayedAcceptanceSession) Submit(input *AppendInput) (*SubmitFuture, er
 		s.seqMu.Unlock()
 
 		ackCh := make(chan *inflightResult, 1)
-		ticketCh <- &BatchSubmitTicket{ackCh: ackCh}
+		future.accept(&BatchSubmitTicket{ackCh: ackCh})
 		ackCh <- &inflightResult{
 			ack: &AppendAck{
 				Start: StreamPosition{SeqNum: start},
@@ -377,7 +374,7 @@ func (s *delayedAcceptanceSession) Submit(input *AppendInput) (*SubmitFuture, er
 		close(ackCh)
 	}()
 
-	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}, nil
+	return future, nil
 }
 
 func (s *delayedAcceptanceSession) Close() error {

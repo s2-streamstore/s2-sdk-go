@@ -356,23 +356,10 @@ func (p *Producer) processBatch(batch *BatchOutput) {
 }
 
 func (p *Producer) waitForBatchSubmission(future *SubmitFuture) (*BatchSubmitTicket, error) {
-	select {
-	case ticket := <-future.ticketCh:
-		return ticket, nil
-	case err := <-future.errCh:
-		return nil, err
-	case <-p.ctx.Done():
-		// Prefer a result that was already available when termination raced the
-		// select. This preserves the AppendSession's exact terminal cause.
-		select {
-		case ticket := <-future.ticketCh:
-			return ticket, nil
-		case err := <-future.errCh:
-			return nil, err
-		default:
-			return nil, p.ctx.Err()
-		}
-	}
+	// On termination, a batch the session already accepted keeps its ticket,
+	// preserving the session's exact outcome; one not yet accepted is withdrawn
+	// so its records are not appended after reporting p.ctx's error.
+	return future.Wait(p.ctx)
 }
 
 func (p *Producer) waitForBatchAck(ticket *BatchSubmitTicket) (*AppendAck, error) {

@@ -2,6 +2,7 @@ package s2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -264,6 +265,70 @@ func TestAppendSession_SubmitOrderSurvivesBackpressure(t *testing.T) {
 		if got.Start.SeqNum != uint64(i+1) {
 			t.Fatalf("batch %d was appended at %d, out of submission order", i+1, got.Start.SeqNum)
 		}
+	}
+}
+
+func TestAppendSession_CanceledSubmitWaitAcceptsNothing(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	stream := newTestStreamClientForAppend(DefaultRetryConfig)
+	writes := make(chan struct{}, 3)
+	transport := newTransportSession(stream, &signalWriteCloser{signal: writes})
+	stream.appendSessionFactory = func(context.Context) (*transportAppendSession, error) {
+		return transport, nil
+	}
+	session, err := stream.AppendSession(ctx, &AppendSessionOptions{MaxInflightBatches: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	submit := func(body string) *SubmitFuture {
+		future, err := session.Submit(&AppendInput{Records: []AppendRecord{{Body: []byte(body)}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return future
+	}
+	awaitWrite := func() {
+		select {
+		case <-writes:
+		case <-ctx.Done():
+			t.Fatal("batch was not sent")
+		}
+	}
+
+	if _, err := submit("a").Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	awaitWrite()
+
+	// b waits for capacity behind a; canceling its wait withdraws it.
+	b := submit("b")
+	waitCtx, cancelWait := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancelWait()
+	if _, err := b.Wait(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got %v", err)
+	}
+	c := submit("c")
+
+	transport.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 0}, End: StreamPosition{SeqNum: 1}, Tail: StreamPosition{SeqNum: 1}}
+	ticket, err := c.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitWrite()
+	transport.acksCh <- &AppendAck{Start: StreamPosition{SeqNum: 1}, End: StreamPosition{SeqNum: 2}, Tail: StreamPosition{SeqNum: 2}}
+	ack, err := ticket.Ack(ctx)
+	if err != nil {
+		t.Fatalf("c was not acked by the next ack, so withdrawn b was sent ahead of it: %v", err)
+	}
+	if ack.Start.SeqNum != 1 {
+		t.Fatalf("expected c at seq_num 1, got %d", ack.Start.SeqNum)
+	}
+	if _, err := b.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected a later wait on withdrawn b to repeat its error, got %v", err)
 	}
 }
 

@@ -19,17 +19,16 @@ func (f *fakeAppendSession) Submit(input *AppendInput) (*SubmitFuture, error) {
 		Tail:  StreamPosition{SeqNum: start + uint64(batchSize)},
 	}
 
-	ticketCh := make(chan *BatchSubmitTicket, 1)
-	errCh := make(chan error, 1)
+	future := newSubmitFuture(nil)
 	ackCh := make(chan *inflightResult, 1)
 
-	ticketCh <- &BatchSubmitTicket{ackCh: ackCh}
+	future.accept(&BatchSubmitTicket{ackCh: ackCh})
 	go func() {
 		ackCh <- &inflightResult{ack: ack}
 		close(ackCh)
 	}()
 
-	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}, nil
+	return future, nil
 }
 
 func (f *fakeAppendSession) Close() error {

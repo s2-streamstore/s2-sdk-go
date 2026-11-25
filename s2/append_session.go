@@ -130,11 +130,11 @@ func (r *AppendSession) producerMaxInflightBytes() int64 {
 }
 
 func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *SubmitFuture {
-	ticketCh := make(chan *BatchSubmitTicket, 1)
-	errCh := make(chan error, 1)
+	waitCtx, cancelWait := context.WithCancel(r.pumpCtx)
+	future := newSubmitFuture(cancelWait)
 
 	// Capacity is granted, and batches are queued, in Submit order: each
-	// submission waits for its predecessor to be queued or to fail.
+	// submission waits for its predecessor to be queued, fail, or be withdrawn.
 	done := make(chan struct{})
 	r.submitMu.Lock()
 	prev := r.submitTail
@@ -143,24 +143,30 @@ func (r *AppendSession) createSubmitFuture(input *AppendInput, size int64) *Subm
 
 	go func() {
 		defer close(done)
+		defer cancelWait()
 		if prev != nil {
 			<-prev
 		}
-		if err := r.capacity.reserve(r.pumpCtx, size); err != nil {
-			errCh <- err
+		if err := r.capacity.reserve(waitCtx, size); err != nil {
+			// A no-op if the batch was withdrawn, which also ends the wait.
+			future.fail(err)
+			return
+		}
+		if !future.beginAccept() {
+			r.capacity.release(size)
 			return
 		}
 
 		entry, err := r.enqueueReservedEntry(input, size)
 		if err != nil {
 			r.capacity.release(size)
-			errCh <- err
+			future.fail(err)
 			return
 		}
-		ticketCh <- &BatchSubmitTicket{ackCh: entry.resultCh}
+		future.accept(&BatchSubmitTicket{ackCh: entry.resultCh})
 	}()
 
-	return &SubmitFuture{ticketCh: ticketCh, errCh: errCh}
+	return future
 }
 
 // Closes the session after all inflight batches have been acknowledged.

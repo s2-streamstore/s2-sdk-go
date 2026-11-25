@@ -13,18 +13,17 @@ import (
 const flushTestTimeout = 5 * time.Second
 
 type controlledAppendCall struct {
-	input    *AppendInput
-	ticketCh chan *BatchSubmitTicket
-	errCh    chan error
-	ackCh    chan *inflightResult
+	input  *AppendInput
+	future *SubmitFuture
+	ackCh  chan *inflightResult
 }
 
 func (c *controlledAppendCall) accept() {
-	c.ticketCh <- &BatchSubmitTicket{ackCh: c.ackCh}
+	c.future.accept(&BatchSubmitTicket{ackCh: c.ackCh})
 }
 
 func (c *controlledAppendCall) reject(err error) {
-	c.errCh <- err
+	c.future.fail(err)
 }
 
 func (c *controlledAppendCall) resolve(ack *AppendAck, err error) {
@@ -42,13 +41,12 @@ func newControlledAppendSession() *controlledAppendSession {
 
 func (s *controlledAppendSession) Submit(input *AppendInput) (*SubmitFuture, error) {
 	call := &controlledAppendCall{
-		input:    input,
-		ticketCh: make(chan *BatchSubmitTicket, 1),
-		errCh:    make(chan error, 1),
-		ackCh:    make(chan *inflightResult, 1),
+		input:  input,
+		future: newSubmitFuture(nil),
+		ackCh:  make(chan *inflightResult, 1),
 	}
 	s.calls <- call
-	return &SubmitFuture{ticketCh: call.ticketCh, errCh: call.errCh}, nil
+	return call.future, nil
 }
 
 func (s *controlledAppendSession) Close() error { return nil }

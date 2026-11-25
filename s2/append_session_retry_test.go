@@ -441,6 +441,7 @@ func TestAppendSession_CreateSubmitFutureReleasesCapacityWhenEnqueueRejected(t *
 	session := &AppendSession{
 		streamClient: newTestStreamClientForAppend(DefaultRetryConfig),
 		capacity:     newCapacityTracker(1024, 1),
+		pumpCtx:      ctx,
 		wakeup:       make(chan struct{}, 1),
 	}
 	session.closing.Store(true)
