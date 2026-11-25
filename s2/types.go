@@ -624,7 +624,7 @@ type AppendAck struct {
 }
 
 type BatchingOptions struct {
-	// Duration to wait before flushing a batch (default: 5ms)
+	// Duration to wait before flushing a batch (default: 5ms). Must not be negative.
 	Linger time.Duration
 	// Maximum number of records in a batch (default: 1000, max: 1000)
 	MaxRecords int
