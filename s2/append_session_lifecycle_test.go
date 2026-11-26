@@ -716,3 +716,41 @@ func TestTicketsReturnTheSameOutcomeToEveryAwait(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestTicketCanceledAwaitLeavesOutcomeForLaterAwaits(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	want := errors.New("append failed")
+
+	// A canceled pending await neither consumes nor settles the outcome, so a
+	// later await gets what the canceled one would have (spec A6, T8).
+	check := func(t *testing.T, await func(context.Context) error, deliver func()) {
+		t.Helper()
+		canceled, cancelAwait := context.WithCancel(ctx)
+		pending := make(chan error, 1)
+		go func() { pending <- await(canceled) }()
+		cancelAwait()
+		if err := <-pending; !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected the canceled await to return context.Canceled, got %v", err)
+		}
+		deliver()
+		for range 2 {
+			if err := await(ctx); !errors.Is(err, want) {
+				t.Fatalf("expected the delivered error, got %v", err)
+			}
+		}
+	}
+
+	t.Run("batch", func(t *testing.T) {
+		ch := make(chan *inflightResult, 1)
+		ticket := &BatchSubmitTicket{ackCh: ch}
+		check(t, func(ctx context.Context) error { _, err := ticket.Ack(ctx); return err },
+			func() { ch <- &inflightResult{err: want}; close(ch) })
+	})
+	t.Run("record", func(t *testing.T) {
+		ch := make(chan *producerOutcome, 1)
+		ticket := &RecordSubmitTicket{ackCh: ch}
+		check(t, func(ctx context.Context) error { _, err := ticket.Ack(ctx); return err },
+			func() { ch <- &producerOutcome{err: want}; close(ch) })
+	})
+}
