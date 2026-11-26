@@ -278,7 +278,7 @@ func TestProducer_FlushPropagatesTerminalAckError(t *testing.T) {
 	first.accept()
 	second := nextAppendCall(t, session)
 	second.accept()
-	conditionErr := newSeqNumMismatchError(http.StatusPreconditionFailed, 0)
+	conditionErr := newSeqNumMismatchError(http.StatusPreconditionFailed, `{"seq_num_mismatch":0}`, 0)
 	first.resolve(nil, conditionErr)
 
 	if err := waitFlush(t, flushDone); err != conditionErr {

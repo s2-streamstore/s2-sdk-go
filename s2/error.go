@@ -224,11 +224,11 @@ func (e *SeqNumMismatchError) Unwrap() error {
 	return e.S2Error
 }
 
-func newSeqNumMismatchError(status int, expectedSeqNum uint64) *SeqNumMismatchError {
+// Typed errors keep the body as their message and have no code (spec E2).
+func newSeqNumMismatchError(status int, body string, expectedSeqNum uint64) *SeqNumMismatchError {
 	return &SeqNumMismatchError{
 		S2Error: &S2Error{
-			Message: "Append condition failed: sequence number mismatch",
-			Code:    "APPEND_CONDITION_FAILED",
+			Message: body,
 			Status:  status,
 			Origin:  "server",
 		},
@@ -241,11 +241,10 @@ type FencingTokenMismatchError struct {
 	ExpectedFencingToken string
 }
 
-func newFencingTokenMismatchError(status int, expectedToken string) *FencingTokenMismatchError {
+func newFencingTokenMismatchError(status int, body string, expectedToken string) *FencingTokenMismatchError {
 	return &FencingTokenMismatchError{
 		S2Error: &S2Error{
-			Message: "Append condition failed: fencing token mismatch",
-			Code:    "APPEND_CONDITION_FAILED",
+			Message: body,
 			Status:  status,
 			Origin:  "server",
 		},
@@ -266,12 +265,11 @@ type RangeNotSatisfiableError struct {
 	Tail *StreamPosition
 }
 
-func newRangeNotSatisfiableError(status int, tail *StreamPosition) *RangeNotSatisfiableError {
+func newRangeNotSatisfiableError(status int, body string, tail *StreamPosition) *RangeNotSatisfiableError {
 	return &RangeNotSatisfiableError{
 		S2Error: &S2Error{
-			Message: http.StatusText(status),
+			Message: body,
 			Status:  status,
-			Code:    "RANGE_NOT_SATISFIABLE",
 			Origin:  "server",
 		},
 		Tail: tail,
@@ -299,10 +297,10 @@ func decodeAPIError(status int, body []byte) error {
 		}
 		if json.Unmarshal(trimmed, &payload) == nil {
 			if payload.SeqNumMismatch != nil {
-				return newSeqNumMismatchError(status, *payload.SeqNumMismatch)
+				return newSeqNumMismatchError(status, string(trimmed), *payload.SeqNumMismatch)
 			}
 			if payload.FencingTokenMismatch != nil {
-				return newFencingTokenMismatchError(status, *payload.FencingTokenMismatch)
+				return newFencingTokenMismatchError(status, string(trimmed), *payload.FencingTokenMismatch)
 			}
 		}
 	}
@@ -317,7 +315,7 @@ func decodeAPIError(status int, body []byte) error {
 			} `json:"tail"`
 		}
 		if json.Unmarshal(trimmed, &payload) == nil && payload.Tail != nil && payload.Tail.SeqNum != nil && payload.Tail.Timestamp != nil {
-			return newRangeNotSatisfiableError(status, &StreamPosition{
+			return newRangeNotSatisfiableError(status, string(trimmed), &StreamPosition{
 				SeqNum:    *payload.Tail.SeqNum,
 				Timestamp: *payload.Tail.Timestamp,
 			})
