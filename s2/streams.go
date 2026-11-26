@@ -212,7 +212,7 @@ func (s *StreamsClient) Delete(ctx context.Context, streamName StreamName) error
 		}
 		return &struct{}{}, nil
 	})
-	return err
+	return deleteResult(err, "stream_not_found")
 }
 
 // Get stream configuration.

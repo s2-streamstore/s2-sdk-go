@@ -1200,13 +1200,9 @@ func TestDeleteBasin_NonExistent(t *testing.T) {
 	t.Log("Testing: Delete non-existent basin")
 
 	client := testClient(t)
-	err := client.Basins.Delete(ctx, "nonexistent-basin-name-12345")
-
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 404 {
-		t.Errorf("Expected 404 error, got: %v", err)
+	if err := client.Basins.Delete(ctx, "nonexistent-basin-name-12345"); err != nil {
+		t.Errorf("Expected deleting a non-existent basin to succeed (spec M4), got: %v", err)
 	}
-	t.Logf("Got expected error: %v", err)
 }
 
 func TestDeleteBasin_AlreadyDeleting(t *testing.T) {

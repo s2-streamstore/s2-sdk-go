@@ -194,6 +194,17 @@ func HasNoSideEffects(err error) bool {
 
 // withPriorUncertainty wraps a definite final error when an earlier attempt may
 // have taken effect. Already indefinite errors are returned unchanged.
+// deleteResult treats the deleted resource's own not-found code as success:
+// after a retry, the SDK cannot tell whether an earlier attempt deleted it
+// (spec M4). Any other error, including another 404, fails as usual.
+func deleteResult(err error, notFoundCode string) error {
+	var s2Err *S2Error
+	if errors.As(err, &s2Err) && s2Err.Code == notFoundCode {
+		return nil
+	}
+	return err
+}
+
 func withPriorUncertainty(err error, priorUncertainty bool) error {
 	if err == nil || !priorUncertainty || !HasNoSideEffects(err) {
 		return err
