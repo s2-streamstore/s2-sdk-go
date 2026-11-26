@@ -119,7 +119,12 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		panic(newValidationError("BaseURL and MakeBasinBaseURL must be set together"))
 	}
 
-	httpClient := opts.HTTPClient
+	// Work on a copy so the caller's client is never modified (spec C10).
+	var httpClient *http.Client
+	if opts.HTTPClient != nil {
+		clientCopy := *opts.HTTPClient
+		httpClient = &clientCopy
+	}
 	if httpClient == nil {
 		requestTimeout := opts.RequestTimeout
 		if requestTimeout <= 0 {
@@ -138,10 +143,6 @@ func New(accessToken string, opts *ClientOptions) *Client {
 	baseTransport := httpClient.Transport
 	if baseTransport == nil {
 		baseTransport = http.DefaultTransport
-	}
-	// A client shared with an earlier New is already wrapped.
-	if wrapped, ok := baseTransport.(userAgentRoundTripper); ok {
-		baseTransport = wrapped.base
 	}
 	// Streaming uses its own HTTP/2 transport; carry over the TLS and proxy
 	// settings of a user-provided transport so it reaches the same endpoints.

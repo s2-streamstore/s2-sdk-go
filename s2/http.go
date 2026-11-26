@@ -35,6 +35,19 @@ type responseMeta struct {
 	header     http.Header
 }
 
+// snapshotBody marshals a request body once, before any attempt, so changes
+// the caller makes during retries have no effect (spec C10). A nil body stays nil.
+func snapshotBody(body interface{}) (interface{}, error) {
+	if body == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request body: %w", err)
+	}
+	return json.RawMessage(data), nil
+}
+
 func (h *httpClient) request(ctx context.Context, method, path string, body interface{}, result interface{}) error {
 	return h.requestWithHeaders(ctx, method, path, body, result, nil)
 }

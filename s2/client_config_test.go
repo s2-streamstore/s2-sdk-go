@@ -126,9 +126,6 @@ func TestClient_CustomHTTPClientPreserved(t *testing.T) {
 		RequestTimeout:    time.Second,
 		ConnectionTimeout: time.Second,
 	})
-	if client.httpClient != customClient {
-		t.Fatal("expected the caller-provided HTTP client to be retained")
-	}
 	if client.httpClient.Timeout != 23*time.Second {
 		t.Fatalf("expected caller-provided timeout to be retained, got %s", client.httpClient.Timeout)
 	}
@@ -363,5 +360,37 @@ func TestClientFormattingRedactsAccessToken(t *testing.T) {
 				t.Errorf("%s with %s leaks the token: %s", name, verb, out)
 			}
 		}
+	}
+}
+
+func TestCallerInputsAreReadOnce(t *testing.T) {
+	age := int64(100)
+	cfg := &StreamConfig{RetentionPolicy: &RetentionPolicy{Age: &age}}
+	var bodies []string
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(req.Body)
+		bodies = append(bodies, string(b))
+		if len(bodies) == 1 {
+			age = 999 // the caller changes its config while the call is retrying
+			return jsonResponse(http.StatusServiceUnavailable, "", `{"code":"unavailable","message":"retry"}`), nil
+		}
+		return jsonResponse(http.StatusCreated, "", `{"name":"s","created_at":"2026-01-01T00:00:00Z"}`), nil
+	})
+	hc := &http.Client{Transport: rt, Timeout: time.Second}
+	client := New("token", &ClientOptions{
+		BaseURL:          "http://account.test",
+		MakeBasinBaseURL: testBasinBaseURL,
+		HTTPClient:       hc,
+		RetryConfig:      &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond},
+	})
+	if _, wrapped := hc.Transport.(userAgentRoundTripper); wrapped {
+		t.Fatal("New modified the caller's http.Client")
+	}
+
+	if _, err := client.Basin("my-basin").Streams.Create(context.Background(), CreateStreamArgs{Stream: "s", Config: cfg}); err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+	if len(bodies) != 2 || bodies[0] != bodies[1] {
+		t.Fatalf("expected the retry to resend the original body, got %q", bodies)
 	}
 }

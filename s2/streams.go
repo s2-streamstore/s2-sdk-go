@@ -117,6 +117,10 @@ func (s *StreamsClient) Create(ctx context.Context, args CreateStreamArgs) (*Str
 
 	requestToken := newRequestToken()
 
+	reqBody, err := snapshotBody(args)
+	if err != nil {
+		return nil, err
+	}
 	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*StreamInfo, error) {
 		httpClient := &httpClient{
 			client:      s.basin.httpClient,
@@ -132,7 +136,7 @@ func (s *StreamsClient) Create(ctx context.Context, args CreateStreamArgs) (*Str
 		}
 
 		var result StreamInfo
-		if err := httpClient.requestWithHeaders(ctx, "POST", "/streams", args, &result, headers); err != nil {
+		if err := httpClient.requestWithHeaders(ctx, "POST", "/streams", reqBody, &result, headers); err != nil {
 			return nil, err
 		}
 
@@ -162,6 +166,10 @@ func (s *StreamsClient) Ensure(ctx context.Context, args EnsureStreamArgs) (*Ens
 		body = args.Config
 	}
 
+	reqBody, err := snapshotBody(body)
+	if err != nil {
+		return nil, err
+	}
 	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*EnsureStreamResponse, error) {
 		httpClient := &httpClient{
 			client:      s.basin.httpClient,
@@ -173,7 +181,7 @@ func (s *StreamsClient) Ensure(ctx context.Context, args EnsureStreamArgs) (*Ens
 		}
 
 		var stream StreamInfo
-		meta, err := httpClient.requestWithHeadersResult(ctx, "PUT", path, body, &stream, nil)
+		meta, err := httpClient.requestWithHeadersResult(ctx, "PUT", path, reqBody, &stream, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -257,6 +265,10 @@ func (s *StreamsClient) Reconfigure(ctx context.Context, args ReconfigureStreamA
 
 	path := fmt.Sprintf("/streams/%s", url.PathEscape(string(args.Stream)))
 
+	reqBody, err := snapshotBody(args.Config)
+	if err != nil {
+		return nil, err
+	}
 	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*StreamConfig, error) {
 		httpClient := &httpClient{
 			client:      s.basin.httpClient,
@@ -268,7 +280,7 @@ func (s *StreamsClient) Reconfigure(ctx context.Context, args ReconfigureStreamA
 		}
 
 		var result StreamConfig
-		if err := httpClient.request(ctx, "PATCH", path, args.Config, &result); err != nil {
+		if err := httpClient.request(ctx, "PATCH", path, reqBody, &result); err != nil {
 			return nil, err
 		}
 

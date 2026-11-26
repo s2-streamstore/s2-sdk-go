@@ -108,6 +108,10 @@ func (a *AccessTokensClient) Issue(ctx context.Context, args IssueAccessTokenArg
 		}
 	}
 
+	reqBody, err := snapshotBody(args)
+	if err != nil {
+		return nil, err
+	}
 	return withDefiniteRetries(ctx, a.client.retryConfig, a.client.logger, func() (*IssueAccessTokenResponse, error) {
 		httpClient := &httpClient{
 			client:      a.client.httpClient,
@@ -118,7 +122,7 @@ func (a *AccessTokensClient) Issue(ctx context.Context, args IssueAccessTokenArg
 		}
 
 		var result IssueAccessTokenResponse
-		err := httpClient.request(ctx, "POST", "/access-tokens", args, &result)
+		err := httpClient.request(ctx, "POST", "/access-tokens", reqBody, &result)
 		if err != nil {
 			return nil, err
 		}

@@ -100,9 +100,13 @@ func (n *NetworkPoliciesClient) Create(ctx context.Context, args CreateNetworkPo
 		ctx = context.Background()
 	}
 
+	reqBody, err := snapshotBody(args)
+	if err != nil {
+		return nil, err
+	}
 	return withDefiniteRetries(ctx, n.client.retryConfig, n.client.logger, func() (*NetworkPolicyInfo, error) {
 		var result NetworkPolicyInfo
-		if err := n.http().request(ctx, "POST", "/network-policies", args, &result); err != nil {
+		if err := n.http().request(ctx, "POST", "/network-policies", reqBody, &result); err != nil {
 			return nil, err
 		}
 		return &result, nil
