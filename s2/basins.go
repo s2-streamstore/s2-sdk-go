@@ -122,6 +122,10 @@ func (b *BasinsClient) Create(ctx context.Context, args CreateBasinArgs) (*Basin
 
 	requestToken := newRequestToken()
 
+	reqBody, err := snapshotBody(args)
+	if err != nil {
+		return nil, err
+	}
 	return withRetries(ctx, b.client.retryConfig, b.client.logger, func() (*BasinInfo, error) {
 		httpClient := &httpClient{
 			client:      b.client.httpClient,
@@ -132,7 +136,7 @@ func (b *BasinsClient) Create(ctx context.Context, args CreateBasinArgs) (*Basin
 		}
 
 		var result BasinInfo
-		if err := httpClient.requestWithHeaders(ctx, "POST", "/basins", args, &result, map[string]string{
+		if err := httpClient.requestWithHeaders(ctx, "POST", "/basins", reqBody, &result, map[string]string{
 			"s2-request-token": requestToken,
 		}); err != nil {
 			return nil, err
@@ -167,6 +171,10 @@ func (b *BasinsClient) Ensure(ctx context.Context, args EnsureBasinArgs) (*Ensur
 		}
 	}
 
+	reqBody, err := snapshotBody(body)
+	if err != nil {
+		return nil, err
+	}
 	return withRetries(ctx, b.client.retryConfig, b.client.logger, func() (*EnsureBasinResponse, error) {
 		httpClient := &httpClient{
 			client:      b.client.httpClient,
@@ -177,7 +185,7 @@ func (b *BasinsClient) Ensure(ctx context.Context, args EnsureBasinArgs) (*Ensur
 		}
 
 		var basin BasinInfo
-		meta, err := httpClient.requestWithHeadersResult(ctx, "PUT", path, body, &basin, nil)
+		meta, err := httpClient.requestWithHeadersResult(ctx, "PUT", path, reqBody, &basin, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -259,6 +267,10 @@ func (b *BasinsClient) Reconfigure(ctx context.Context, args ReconfigureBasinArg
 
 	path := fmt.Sprintf("/basins/%s", url.PathEscape(string(args.Basin)))
 
+	reqBody, err := snapshotBody(args.Config)
+	if err != nil {
+		return nil, err
+	}
 	return withRetries(ctx, b.client.retryConfig, b.client.logger, func() (*BasinConfig, error) {
 		httpClient := &httpClient{
 			client:      b.client.httpClient,
@@ -269,7 +281,7 @@ func (b *BasinsClient) Reconfigure(ctx context.Context, args ReconfigureBasinArg
 		}
 
 		var result BasinConfig
-		if err := httpClient.request(ctx, "PATCH", path, args.Config, &result); err != nil {
+		if err := httpClient.request(ctx, "PATCH", path, reqBody, &result); err != nil {
 			return nil, err
 		}
 
