@@ -79,23 +79,54 @@ func (f *SubmitFuture) Wait(ctx context.Context) (*BatchSubmitTicket, error) {
 
 // Resolves with the [AppendAck] once the batch is durable.
 type BatchSubmitTicket struct {
-	ackCh <-chan *inflightResult
+	ackCh   <-chan *inflightResult
+	outcome ticketOutcome[inflightResult]
 }
 
 // Resolves [BatchSubmitTicket] with the [AppendAck] once the batch is durable.
+// Every call returns the same outcome.
 func (t *BatchSubmitTicket) Ack(ctx context.Context) (*AppendAck, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	outcome, err := t.outcome.await(ctx, t.ackCh)
+	if err != nil {
+		return nil, err
+	}
+	if outcome == nil {
+		return nil, fmt.Errorf("batch submit ticket resolved without a payload")
+	}
+	return outcome.ack, outcome.err
+}
+
+// ticketOutcome keeps a ticket's outcome once received, so every await returns
+// it (spec A6). The sender sends one value and then closes the channel.
+type ticketOutcome[T any] struct {
+	once    sync.Once
+	settled chan struct{}
+	value   *T
+}
+
+func (o *ticketOutcome[T]) await(ctx context.Context, ch <-chan *T) (*T, error) {
+	o.once.Do(func() { o.settled = make(chan struct{}) })
 	select {
-	case outcome, ok := <-t.ackCh:
-		if !ok || outcome == nil {
-			return nil, fmt.Errorf("batch submit ticket resolved without a payload")
+	case <-o.settled:
+	case value, ok := <-ch:
+		if ok {
+			o.value = value
+			close(o.settled)
+			break
 		}
-		return outcome.ack, outcome.err
+		// Another await received the outcome; wait until it is recorded.
+		select {
+		case <-o.settled:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	return o.value, nil
 }
 
 // Create a new Fence command record.
