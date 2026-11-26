@@ -215,7 +215,7 @@ func (b *BasinsClient) Delete(ctx context.Context, basinName BasinName) error {
 		}
 		return &struct{}{}, nil
 	})
-	return err
+	return deleteResult(err, "basin_not_found")
 }
 
 // Get basin configuration.

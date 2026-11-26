@@ -153,7 +153,7 @@ func (a *AccessTokensClient) Revoke(ctx context.Context, args RevokeAccessTokenA
 		}
 		return &struct{}{}, nil
 	})
-	return err
+	return deleteResult(err, "access_token_not_found")
 }
 
 func validateAccessTokenID(id AccessTokenID) error {

@@ -663,24 +663,20 @@ func TestRevokeAccessToken_Existing(t *testing.T) {
 func TestRevokeAccessToken_NonExistent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), accessTokenTestTimeout)
 	defer cancel()
-	t.Log("Testing: Revoke non-existent access token (expects 404)")
+	t.Log("Testing: Revoke non-existent access token (succeeds, spec M4)")
 
 	client := testClient(t)
 	tokenID := uniqueTokenID("nonexistent")
 
-	err := client.AccessTokens.Revoke(ctx, s2.RevokeAccessTokenArgs{ID: tokenID})
-
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 404 {
-		t.Errorf("Expected 404 error, got: %v", err)
+	if err := client.AccessTokens.Revoke(ctx, s2.RevokeAccessTokenArgs{ID: tokenID}); err != nil {
+		t.Errorf("Expected revoking a non-existent token to succeed, got: %v", err)
 	}
-	t.Logf("Got expected 404 error for non-existent token: %v", err)
 }
 
 func TestRevokeAccessToken_AlreadyRevoked(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), accessTokenTestTimeout)
 	defer cancel()
-	t.Log("Testing: Revoke already revoked access token (expects 404)")
+	t.Log("Testing: Revoke already revoked access token (succeeds, spec M4)")
 
 	client := testClient(t)
 	tokenID := uniqueTokenID("test-double-revoke")
@@ -698,13 +694,9 @@ func TestRevokeAccessToken_AlreadyRevoked(t *testing.T) {
 		t.Fatalf("First revoke failed: %v", err)
 	}
 
-	err = client.AccessTokens.Revoke(ctx, s2.RevokeAccessTokenArgs{ID: tokenID})
-
-	var s2Err *s2.S2Error
-	if !errors.As(err, &s2Err) || s2Err.Status != 404 {
-		t.Errorf("Expected 404 error for already revoked token, got: %v", err)
+	if err := client.AccessTokens.Revoke(ctx, s2.RevokeAccessTokenArgs{ID: tokenID}); err != nil {
+		t.Errorf("Expected revoking an already revoked token to succeed, got: %v", err)
 	}
-	t.Logf("Got expected 404 error for already revoked token: %v", err)
 }
 
 func TestRevokeAccessToken_InvalidID_Empty(t *testing.T) {

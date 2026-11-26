@@ -140,5 +140,5 @@ func (n *NetworkPoliciesClient) Delete(ctx context.Context, id string) error {
 		}
 		return &struct{}{}, nil
 	})
-	return err
+	return deleteResult(err, "network_policy_not_found")
 }
