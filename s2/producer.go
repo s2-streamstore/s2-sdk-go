@@ -514,26 +514,27 @@ func (f *RecordSubmitFuture) Wait(ctx context.Context) (*RecordSubmitTicket, err
 // Returned after a record is accepted by the [Producer].
 // Use [RecordSubmitTicket.Ack] to wait for the record to become durable.
 type RecordSubmitTicket struct {
-	ackCh <-chan *producerOutcome
+	ackCh   <-chan *producerOutcome
+	outcome ticketOutcome[producerOutcome]
 }
 
 // Blocks until the record is durable and returns the [IndexedAppendAck].
+// Every call returns the same outcome.
 func (t *RecordSubmitTicket) Ack(ctx context.Context) (*IndexedAppendAck, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	select {
-	case outcome, ok := <-t.ackCh:
-		if !ok || outcome == nil {
-			return nil, fmt.Errorf("record submit ticket resolved without a payload")
-		}
-		if outcome.err != nil {
-			return nil, outcome.err
-		}
-		return outcome.indexedAck, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	outcome, err := t.outcome.await(ctx, t.ackCh)
+	if err != nil {
+		return nil, err
 	}
+	if outcome == nil {
+		return nil, fmt.Errorf("record submit ticket resolved without a payload")
+	}
+	if outcome.err != nil {
+		return nil, outcome.err
+	}
+	return outcome.indexedAck, nil
 }
 
 // Represents the acknowledgment for a single record within a batch.

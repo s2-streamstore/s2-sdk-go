@@ -683,3 +683,36 @@ func TestAppendSession_AdviceCleanEndDuringMarshalDoesNotFailQueuedBatch(t *test
 		t.Fatalf("advised clean end failed or retried the session (closed=%v attempt=%d)", session.closed, session.currentAttempt)
 	}
 }
+
+func TestTicketsReturnTheSameOutcomeToEveryAwait(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ack := &AppendAck{End: StreamPosition{SeqNum: 1}}
+	batchCh := make(chan *inflightResult, 1)
+	batchCh <- &inflightResult{ack: ack}
+	close(batchCh)
+	batch := &BatchSubmitTicket{ackCh: batchCh}
+	recordCh := make(chan *producerOutcome, 1)
+	recordCh <- &producerOutcome{indexedAck: &IndexedAppendAck{batchAck: ack}}
+	close(recordCh)
+	record := &RecordSubmitTicket{ackCh: recordCh}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if got, err := batch.Ack(ctx); err != nil || got != ack {
+				t.Errorf("batch ticket: got ack=%v err=%v", got, err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if got, err := record.Ack(ctx); err != nil || got.BatchAppendAck() != ack {
+				t.Errorf("record ticket: got ack=%v err=%v", got, err)
+			}
+		}()
+	}
+	wg.Wait()
+}
