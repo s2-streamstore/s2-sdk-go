@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	pb "github.com/s2-streamstore/s2-sdk-go/generated"
@@ -186,6 +187,9 @@ type streamReader struct {
 	recordsCh chan readDelivery
 	errorCh   chan error
 	caughtUp  caughtUpState
+	// stoppedCleanly is set before recordsCh closes if the reader ended on a
+	// stop condition rather than an error or cancellation.
+	stoppedCleanly atomic.Bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -249,7 +253,9 @@ func (s *StreamClient) newStreamReader(ctx context.Context, opts *ReadOptions) (
 
 func (r *streamReader) run() {
 	var terminalErr error
+	canceled := false
 	defer func() {
+		r.stoppedCleanly.Store(terminalErr == nil && !canceled)
 		r.caughtUp.end(terminalErr)
 		if terminalErr != nil {
 			logError(r.logger, "s2 read session error forwarded", "stream", string(r.streamClient.name), "error", terminalErr)
@@ -304,6 +310,7 @@ func (r *streamReader) run() {
 			return
 		}
 		if ctxErr := r.ctx.Err(); ctxErr != nil {
+			canceled = true
 			return
 		}
 
@@ -369,6 +376,7 @@ func (r *streamReader) run() {
 						"error", err)
 				}
 			}
+			canceled = terminalErr == nil
 			return
 		}
 
@@ -387,13 +395,14 @@ func (r *streamReader) run() {
 			"error", err)
 
 		if err := waitForRetryBackoff(r.ctx, delay); err != nil {
+			canceled = true
 			return
 		}
 	}
 }
 
 func (r *streamReader) Close() error {
-	r.caughtUp.end(nil)
+	r.caughtUp.finish()
 	if r.cancel != nil {
 		r.cancel()
 	}

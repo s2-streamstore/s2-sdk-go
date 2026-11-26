@@ -69,6 +69,23 @@ func (c *caughtUpState) end(err error) {
 	c.pending = nil
 }
 
+// finish ends the caught-up state once iteration ends (spec R7c): the session
+// is no longer caught up, and later futures fail with the session's failure
+// or ErrSessionClosed.
+func (c *caughtUpState) finish() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tail = nil
+	if c.terminalErr == nil {
+		c.terminalErr = ErrSessionClosed
+	}
+	for _, result := range c.pending {
+		result.err = c.terminalErr
+		close(result.done)
+	}
+	c.pending = nil
+}
+
 func (c *caughtUpState) newFuture() *CaughtUpFuture {
 	result := &caughtUpResult{done: make(chan struct{})}
 	future := &CaughtUpFuture{result: result}
@@ -100,6 +117,8 @@ type ReadSession struct {
 	position atomic.Pointer[StreamPosition]
 	err      error
 	closed   atomic.Bool
+	// finished is set once Next has returned false on its own.
+	finished bool
 	// readerDone is set once errorCh yields; readerErr is surfaced after
 	// buffered records are drained.
 	readerDone bool
@@ -123,7 +142,11 @@ func (s *StreamClient) ReadSession(ctx context.Context, opts *ReadOptions) (*Rea
 // session encounters a fatal error. When it returns true, Record() yields
 // the fetched record. When it returns false, call Err().
 func (s *ReadSession) Next() bool {
-	if s == nil || s.reader == nil || s.err != nil || s.closed.Load() {
+	if s == nil || s.reader == nil || s.err != nil {
+		return false
+	}
+	if s.closed.Load() {
+		s.failIfClosedEarly()
 		return false
 	}
 
@@ -143,16 +166,12 @@ func (s *ReadSession) Next() bool {
 		select {
 		case delivery, ok := <-s.reader.recordsCh:
 			if !ok {
-				if !s.readerDone {
-					// Records closed - drain any pending error before exiting
-					select {
-					case err := <-s.reader.errorCh:
-						s.readerErr = err
-					default:
-					}
-				}
-				s.err = s.readerErr
-				s.Close()
+				s.end()
+				return false
+			}
+			if s.closed.Load() {
+				// Fetched but undelivered records are dropped (spec R9b).
+				s.err = ErrSessionClosed
 				return false
 			}
 			s.stashDelivery(delivery)
@@ -165,6 +184,45 @@ func (s *ReadSession) Next() bool {
 			s.readerErr = err
 		}
 	}
+}
+
+// end finishes iteration once the reader has delivered everything it fetched.
+func (s *ReadSession) end() {
+	if !s.readerDone {
+		select {
+		case err := <-s.reader.errorCh:
+			s.readerErr = err
+		default:
+		}
+	}
+	s.err = s.readerErr
+	// The reader ended because the caller closed the session.
+	if s.err == nil && s.closed.Load() && !s.reader.stoppedCleanly.Load() {
+		s.err = ErrSessionClosed
+	}
+	s.finished = true
+	s.Close()
+}
+
+// failIfClosedEarly fails iteration after a caller close and drops undelivered
+// records (spec R9b), unless every fetched record was already delivered, in
+// which case the reader's own end has locked in (spec R9).
+func (s *ReadSession) failIfClosedEarly() {
+	if s.finished || s.err != nil {
+		return
+	}
+	if len(s.pending) == 0 {
+		select {
+		case _, ok := <-s.reader.recordsCh:
+			if !ok {
+				s.end()
+				return
+			}
+		default:
+		}
+	}
+	s.err = ErrSessionClosed
+	s.pending = nil
 }
 
 func (s *ReadSession) stashDelivery(delivery readDelivery) {
@@ -216,7 +274,9 @@ func (s *ReadSession) Err() error {
 	return s.err
 }
 
-// Stops the session.
+// Stops the session. Unless iteration already ended on a stop condition or
+// error, a pending or later Next returns false and Err returns
+// ErrSessionClosed; records fetched but not yet returned are dropped.
 func (s *ReadSession) Close() error {
 	if s == nil || s.reader == nil {
 		return nil
@@ -228,7 +288,8 @@ func (s *ReadSession) Close() error {
 }
 
 // IsCaughtUp reports whether the session has fetched through its latest reported tail.
-// It becomes false after a gap, a batch without a tail, or a reconnect.
+// It becomes false after a gap, a batch without a tail, a reconnect, or once
+// iteration ends.
 // Ignored command records count toward progress.
 // Use [StreamClient.CheckTail] for the current stream tail.
 func (s *ReadSession) IsCaughtUp() bool {

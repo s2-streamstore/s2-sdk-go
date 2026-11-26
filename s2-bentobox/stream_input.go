@@ -255,7 +255,8 @@ func (si *streamInput) ReadBatch(ctx context.Context) ([]s2.SequencedRecord, Ack
 	case record := <-si.records:
 		return si.handleBatch(ctx, []s2.SequencedRecord{record})
 	case <-si.sessionDone:
-		if si.sessionErr != nil {
+		// Only Close closes the session, so ErrSessionClosed means this input closed.
+		if si.sessionErr != nil && !errors.Is(si.sessionErr, s2.ErrSessionClosed) {
 			return nil, nil, si.sessionErr
 		}
 		return nil, nil, ErrInputClosed
