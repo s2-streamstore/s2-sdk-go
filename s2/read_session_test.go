@@ -1290,3 +1290,32 @@ func TestReadSessionCloseAfterStopConditionKeepsCleanEnd(t *testing.T) {
 		t.Fatalf("expected a clean end after the stop condition, got %v", err)
 	}
 }
+
+func TestReadSessionCloseDuringReaderShutdownKeepsCleanEnd(t *testing.T) {
+	// The reader has stopped on a stop condition but has not yet closed
+	// recordsCh when the caller closes the session and asks for the next record.
+	_, cancel := context.WithCancel(context.Background())
+	reader := &streamReader{recordsCh: make(chan readDelivery, 1), errorCh: make(chan error, 1), cancel: cancel}
+	reader.stoppedCleanly.Store(true)
+	session := &ReadSession{reader: reader}
+	session.closed.Store(true)
+
+	done := make(chan bool, 1)
+	go func() { done <- session.Next() }()
+	time.AfterFunc(20*time.Millisecond, func() {
+		close(reader.recordsCh)
+		close(reader.errorCh)
+	})
+
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("expected end of stream")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Next did not return after the reader finished")
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("expected the locked-in clean end, got %v", err)
+	}
+}

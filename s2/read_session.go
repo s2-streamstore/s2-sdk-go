@@ -171,7 +171,11 @@ func (s *ReadSession) Next() bool {
 			}
 			if s.closed.Load() {
 				// Fetched but undelivered records are dropped (spec R9b).
-				s.err = ErrSessionClosed
+				if len(delivery.records) > 0 {
+					s.err = ErrSessionClosed
+				} else {
+					s.failIfClosedEarly()
+				}
 				return false
 			}
 			s.stashDelivery(delivery)
@@ -206,23 +210,23 @@ func (s *ReadSession) end() {
 
 // failIfClosedEarly fails iteration after a caller close and drops undelivered
 // records (spec R9b), unless every fetched record was already delivered, in
-// which case the reader's own end has locked in (spec R9).
+// which case the reader's own end has locked in (spec R9). Close stops the
+// reader, so recordsCh closes promptly; deciding only after it has keeps this
+// check and the reader's outcome consistent.
 func (s *ReadSession) failIfClosedEarly() {
 	if s.finished || s.err != nil {
 		return
 	}
-	if len(s.pending) == 0 {
-		select {
-		case _, ok := <-s.reader.recordsCh:
-			if !ok {
-				s.end()
-				return
-			}
-		default:
-		}
+	undelivered := len(s.pending) > 0
+	for delivery := range s.reader.recordsCh {
+		undelivered = undelivered || len(delivery.records) > 0
 	}
-	s.err = ErrSessionClosed
-	s.pending = nil
+	if undelivered {
+		s.err = ErrSessionClosed
+		s.pending = nil
+		return
+	}
+	s.end()
 }
 
 func (s *ReadSession) stashDelivery(delivery readDelivery) {
