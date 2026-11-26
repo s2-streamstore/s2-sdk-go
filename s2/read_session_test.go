@@ -300,8 +300,9 @@ func TestCaughtUpFutureReturnsSessionClosedOnClose(t *testing.T) {
 	if session.Next() {
 		t.Fatal("closed session returned a record")
 	}
-	if err := session.Err(); err != nil {
-		t.Fatalf("close returned a read error: %v", err)
+	// Only a stop condition ends iteration cleanly (spec R9b).
+	if err := session.Err(); !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("expected ErrSessionClosed after close, got %v", err)
 	}
 	select {
 	case _, ok := <-session.reader.recordsCh:
@@ -534,8 +535,12 @@ func TestReadSessionHeartbeatMarksCaughtUpWithoutRecords(t *testing.T) {
 		t.Fatalf("unexpected session error: %v", err)
 	}
 
-	if !session.IsCaughtUp() {
-		t.Error("expected session to remain caught up after a clean end at the tail")
+	// Once iteration ends, the session is no longer caught up (spec R7c).
+	if session.IsCaughtUp() {
+		t.Error("expected session not to be caught up once iteration ended")
+	}
+	if _, err := session.CaughtUp().Wait(context.Background()); !errors.Is(err, ErrSessionClosed) {
+		t.Errorf("expected a new CaughtUp after the end to fail with ErrSessionClosed, got %v", err)
 	}
 	last := session.LastObservedTail()
 	if last == nil || last.SeqNum != 5 || last.Timestamp != 99 {
@@ -1252,5 +1257,65 @@ func TestReadSessionTruncatedFrameIsConnectionLost(t *testing.T) {
 	var s2Err *S2Error
 	if err := session.Err(); !errors.As(err, &s2Err) || s2Err.Code != "CONNECTION_LOST" {
 		t.Fatalf("expected a connection-lost error, got %v", err)
+	}
+}
+
+func TestReadSessionCloseAfterStopConditionKeepsCleanEnd(t *testing.T) {
+	frame := buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("a")}})
+	streamClient := newFrameServedStreamClient(&staticStatusRoundTripper{status: http.StatusOK, body: frame})
+	session, err := streamClient.ReadSession(context.Background(), &ReadOptions{Count: Uint64(1)})
+	if err != nil {
+		t.Fatalf("open read session: %v", err)
+	}
+	if !session.Next() {
+		t.Fatalf("expected the only record, got err %v", session.Err())
+	}
+
+	// Once the reader has ended on the stop condition and every fetched
+	// record is delivered, the clean end is locked in (spec R9).
+	deadline := time.Now().Add(2 * time.Second)
+	for !session.reader.stoppedCleanly.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("reader did not stop on the stop condition")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if session.Next() {
+		t.Fatal("expected end of stream")
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("expected a clean end after the stop condition, got %v", err)
+	}
+}
+
+func TestReadSessionCloseDuringReaderShutdownKeepsCleanEnd(t *testing.T) {
+	// The reader has stopped on a stop condition but has not yet closed
+	// recordsCh when the caller closes the session and asks for the next record.
+	_, cancel := context.WithCancel(context.Background())
+	reader := &streamReader{recordsCh: make(chan readDelivery, 1), errorCh: make(chan error, 1), cancel: cancel}
+	reader.stoppedCleanly.Store(true)
+	session := &ReadSession{reader: reader}
+	session.closed.Store(true)
+
+	done := make(chan bool, 1)
+	go func() { done <- session.Next() }()
+	time.AfterFunc(20*time.Millisecond, func() {
+		close(reader.recordsCh)
+		close(reader.errorCh)
+	})
+
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("expected end of stream")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Next did not return after the reader finished")
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("expected the locked-in clean end, got %v", err)
 	}
 }
