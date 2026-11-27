@@ -345,6 +345,12 @@ func TestErrorVectors(t *testing.T) {
 			if HasNoSideEffects(gotErr) != want.HasNoSideEffects {
 				t.Errorf("HasNoSideEffects()=%v, want %v", HasNoSideEffects(gotErr), want.HasNoSideEffects)
 			}
+			if s2Err.Code != want.Code {
+				t.Errorf("code=%q, want %q", s2Err.Code, want.Code)
+			}
+			if s2Err.Message != want.Message {
+				t.Errorf("message=%q, want %q", s2Err.Message, want.Message)
+			}
 			switch want.Type {
 			case "SeqNumMismatchError":
 				var seqErr *SeqNumMismatchError
@@ -372,13 +378,6 @@ func TestErrorVectors(t *testing.T) {
 				wantTS, _ := strconv.ParseUint(want.Tail.Timestamp, 10, 64)
 				if rangeErr.Tail.SeqNum != wantSeq || rangeErr.Tail.Timestamp != wantTS {
 					t.Errorf("Tail=%+v, want seq=%d ts=%d", rangeErr.Tail, wantSeq, wantTS)
-				}
-			default:
-				if s2Err.Code != want.Code {
-					t.Errorf("code=%q, want %q", s2Err.Code, want.Code)
-				}
-				if s2Err.Message != want.Message {
-					t.Errorf("message=%q, want %q", s2Err.Message, want.Message)
 				}
 			}
 		})
