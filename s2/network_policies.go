@@ -37,7 +37,7 @@ func (n *NetworkPoliciesClient) List(ctx context.Context, args *ListNetworkPolic
 
 	path := "/network-policies" + buildQuery(args.Prefix, args.StartAfter, args.Limit)
 
-	return withRetries(ctx, n.client.retryConfig, n.client.logger, func() (*ListNetworkPoliciesResponse, error) {
+	return withRetries(ctx, n.client.retryConfig, n.client.logger, func(ctx context.Context) (*ListNetworkPoliciesResponse, error) {
 		var result ListNetworkPoliciesResponse
 		if err := n.http().request(ctx, "GET", path, nil, &result); err != nil {
 			return nil, err
@@ -104,7 +104,7 @@ func (n *NetworkPoliciesClient) Create(ctx context.Context, args CreateNetworkPo
 	if err != nil {
 		return nil, err
 	}
-	return withDefiniteRetries(ctx, n.client.retryConfig, n.client.logger, func() (*NetworkPolicyInfo, error) {
+	return withDefiniteRetries(ctx, n.client.retryConfig, n.client.logger, func(ctx context.Context) (*NetworkPolicyInfo, error) {
 		var result NetworkPolicyInfo
 		if err := n.http().request(ctx, "POST", "/network-policies", reqBody, &result); err != nil {
 			return nil, err
@@ -121,7 +121,7 @@ func (n *NetworkPoliciesClient) Get(ctx context.Context, id string) (*NetworkPol
 
 	path := fmt.Sprintf("/network-policies/%s", url.PathEscape(id))
 
-	return withRetries(ctx, n.client.retryConfig, n.client.logger, func() (*NetworkPolicyInfo, error) {
+	return withRetries(ctx, n.client.retryConfig, n.client.logger, func(ctx context.Context) (*NetworkPolicyInfo, error) {
 		var result NetworkPolicyInfo
 		if err := n.http().request(ctx, "GET", path, nil, &result); err != nil {
 			return nil, err
@@ -138,7 +138,7 @@ func (n *NetworkPoliciesClient) Delete(ctx context.Context, id string) error {
 
 	path := fmt.Sprintf("/network-policies/%s", url.PathEscape(id))
 
-	_, err := withRetries(ctx, n.client.retryConfig, n.client.logger, func() (*struct{}, error) {
+	_, err := withRetries(ctx, n.client.retryConfig, n.client.logger, func(ctx context.Context) (*struct{}, error) {
 		if err := n.http().request(ctx, "DELETE", path, nil, nil); err != nil {
 			return nil, err
 		}

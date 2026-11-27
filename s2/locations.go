@@ -15,7 +15,7 @@ func (l *LocationsClient) List(ctx context.Context) ([]LocationInfo, error) {
 		ctx = context.Background()
 	}
 
-	return withRetries(ctx, l.client.retryConfig, l.client.logger, func() ([]LocationInfo, error) {
+	return withRetries(ctx, l.client.retryConfig, l.client.logger, func(ctx context.Context) ([]LocationInfo, error) {
 		httpClient := &httpClient{
 			client:      l.client.httpClient,
 			baseURL:     l.client.baseURL,
@@ -38,7 +38,7 @@ func (l *LocationsClient) GetDefault(ctx context.Context) (*LocationInfo, error)
 		ctx = context.Background()
 	}
 
-	return withRetries(ctx, l.client.retryConfig, l.client.logger, func() (*LocationInfo, error) {
+	return withRetries(ctx, l.client.retryConfig, l.client.logger, func(ctx context.Context) (*LocationInfo, error) {
 		httpClient := &httpClient{
 			client:      l.client.httpClient,
 			baseURL:     l.client.baseURL,
@@ -64,7 +64,7 @@ func (l *LocationsClient) SetDefault(ctx context.Context, location LocationName)
 		return nil, fmt.Errorf("location name cannot be empty")
 	}
 
-	return withRetries(ctx, l.client.retryConfig, l.client.logger, func() (*LocationInfo, error) {
+	return withRetries(ctx, l.client.retryConfig, l.client.logger, func(ctx context.Context) (*LocationInfo, error) {
 		httpClient := &httpClient{
 			client:      l.client.httpClient,
 			baseURL:     l.client.baseURL,

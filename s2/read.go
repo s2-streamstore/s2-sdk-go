@@ -129,7 +129,7 @@ func (s *StreamClient) Read(ctx context.Context, opts *ReadOptions) (*ReadBatch,
 		client = &extended
 	}
 
-	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*ReadBatch, error) {
+	batch, err := withRetries(ctx, s.basinClient.retryConfig, s.logger, func(ctx context.Context) (*ReadBatch, error) {
 		httpClient := &httpClient{
 			client:      client,
 			baseURL:     s.basinClient.baseURL,
@@ -292,7 +292,7 @@ func (r *streamReader) run() {
 		recordsBefore := r.recordsRead
 
 		tailCtx, tailCancel := context.WithCancel(r.ctx)
-		err := r.runOnce(tailCtx, opts)
+		err := r.runOnce(withAttempt(tailCtx, consecutiveFailures+1), opts)
 		tailCancel()
 
 		if err == nil {

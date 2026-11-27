@@ -39,20 +39,20 @@ var DefaultRetryConfig = &RetryConfig{
 	AppendRetryPolicy: AppendRetryPolicyAll,
 }
 
-func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, operation func() (T, error)) (T, error) {
+func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, operation func(context.Context) (T, error)) (T, error) {
 	return retryOperation(ctx, config, logger, nil, operation)
 }
 
 // withDefiniteRetries is for non-idempotent calls without a request token,
 // such as issuing an access token: an attempt that may have taken effect is
 // never repeated, or a lost success would come back as a conflict (spec T2d).
-func withDefiniteRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, operation func() (T, error)) (T, error) {
+func withDefiniteRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, operation func(context.Context) (T, error)) (T, error) {
 	return retryOperation(ctx, config, logger, HasNoSideEffects, operation)
 }
 
 // retryOperation retries operation per config; a non-nil safeToRepeat must
 // also approve each error before it is retried.
-func retryOperation[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, safeToRepeat func(error) bool, operation func() (T, error)) (T, error) {
+func retryOperation[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, safeToRepeat func(error) bool, operation func(context.Context) (T, error)) (T, error) {
 	var zero T
 
 	if config == nil {
@@ -71,7 +71,7 @@ func retryOperation[T any](ctx context.Context, config *RetryConfig, logger *slo
 			return zero, ctxErr
 		}
 
-		result, err := operation()
+		result, err := operation(withAttempt(ctx, attemptNo))
 		if err == nil {
 			return result, nil
 		}
@@ -137,6 +137,23 @@ func retryOperation[T any](ctx context.Context, config *RetryConfig, logger *slo
 	}
 
 	return zero, lastError
+}
+
+type attemptKey struct{}
+
+// withAttempt records the s2-attempt header value for requests made with ctx:
+// one more than the retries consumed from the current budget (spec T4).
+func withAttempt(ctx context.Context, attempt int) context.Context {
+	return context.WithValue(ctx, attemptKey{}, attempt)
+}
+
+// attemptFromContext returns the attempt recorded by withAttempt, or 1 for a
+// request made outside a retry loop.
+func attemptFromContext(ctx context.Context) int {
+	if attempt, ok := ctx.Value(attemptKey{}).(int); ok {
+		return attempt
+	}
+	return 1
 }
 
 func waitForRetryBackoff(ctx context.Context, delay time.Duration) error {
@@ -232,7 +249,7 @@ func isNetworkError(ctx context.Context, err error) bool {
 	return false
 }
 
-func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Logger, _ *AppendInput, operation func() (*AppendAck, error)) (*AppendAck, error) {
+func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Logger, _ *AppendInput, operation func(context.Context) (*AppendAck, error)) (*AppendAck, error) {
 	if config == nil {
 		config = DefaultRetryConfig
 	}
@@ -250,7 +267,7 @@ func withAppendRetries(ctx context.Context, config *RetryConfig, logger *slog.Lo
 			return nil, ctxErr
 		}
 
-		result, err := operation()
+		result, err := operation(withAttempt(ctx, attemptNo))
 		if err == nil {
 			return result, nil
 		}

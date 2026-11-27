@@ -58,7 +58,7 @@ func (s *StreamClient) Append(ctx context.Context, input *AppendInput) (*AppendA
 		compression: s.basinClient.compression,
 	}
 
-	ack, err := withAppendRetries(ctx, s.basinClient.retryConfig, s.logger, prepared, func() (*AppendAck, error) {
+	ack, err := withAppendRetries(ctx, s.basinClient.retryConfig, s.logger, prepared, func(ctx context.Context) (*AppendAck, error) {
 		var pbAck pb.AppendAck
 		if err := httpClient.requestProto(
 			ctx,
