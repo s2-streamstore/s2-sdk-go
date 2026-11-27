@@ -390,9 +390,23 @@ func TestListBasins_Iterator(t *testing.T) {
 	t.Log("Testing: Iterate over basins")
 
 	client := testClient(t)
-	limit := 3
+
+	// Scope to basins owned by this test so pagination does not walk the whole account.
+	prefix := string(uniqueBasinName("test-iter"))
+	const expectedCount = 5
+	for i := range expectedCount {
+		name := s2.BasinName(fmt.Sprintf("%s-%d", prefix, i))
+		if _, err := client.Basins.Create(ctx, s2.CreateBasinArgs{Basin: name}); err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+		defer deleteBasin(ctx, client, name)
+		waitForBasinActive(ctx, t, client, name)
+	}
+
+	limit := 2
 	iter := client.Basins.Iter(ctx, &s2.ListBasinsArgs{
-		Limit: &limit,
+		Prefix: prefix,
+		Limit:  &limit,
 	})
 
 	count := 0
@@ -406,6 +420,9 @@ func TestListBasins_Iterator(t *testing.T) {
 
 	if err := iter.Err(); err != nil {
 		t.Fatalf("Iterator error: %v", err)
+	}
+	if count != expectedCount {
+		t.Errorf("Iter returned %d basins; expected %d", count, expectedCount)
 	}
 	t.Logf("Iterated over %d basins", count)
 }
