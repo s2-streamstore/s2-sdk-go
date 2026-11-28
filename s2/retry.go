@@ -116,7 +116,7 @@ func retryOperation[T any](ctx context.Context, config *RetryConfig, logger *slo
 		}
 
 		if !s2Err.IsRetryable() {
-			return zero, s2Err
+			return zero, err
 		}
 
 		delay := retryDelay(config, attemptNo, err)
