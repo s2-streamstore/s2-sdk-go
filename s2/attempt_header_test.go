@@ -21,28 +21,42 @@ func TestAttemptHeaderCountsRetriesInBudget(t *testing.T) {
 		return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header), Request: req}
 	}
 
-	t.Run("unary", func(t *testing.T) {
-		var got []string
-		rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			got = append(got, req.Header.Get("s2-attempt"))
-			if len(got) < 3 {
-				return jsonResponse(http.StatusServiceUnavailable, "", `{"code":"unavailable","message":"retry"}`), nil
+	unaryCalls := []struct {
+		name string
+		call func(context.Context, *Client) error
+	}{
+		{"unary", func(ctx context.Context, c *Client) error {
+			return c.Basins.Delete(ctx, "my-basin")
+		}},
+		{"unary append", func(ctx context.Context, c *Client) error {
+			_, err := c.Basin("my-basin").Stream("s").Append(ctx, &AppendInput{Records: []AppendRecord{{Body: []byte("x")}}})
+			return err
+		}},
+	}
+	for _, tc := range unaryCalls {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				got = append(got, req.Header.Get("s2-attempt"))
+				if len(got) < 3 {
+					return jsonResponse(http.StatusServiceUnavailable, "", `{"code":"unavailable","message":"retry"}`), nil
+				}
+				return respond(req, http.StatusOK, nil), nil
+			})
+			client := New("token", &ClientOptions{
+				BaseURL:          "http://account.test",
+				MakeBasinBaseURL: testBasinBaseURL,
+				HTTPClient:       &http.Client{Transport: rt, Timeout: time.Second},
+				RetryConfig:      retryCfg,
+			})
+			if err := tc.call(context.Background(), client); err != nil {
+				t.Fatalf("call: %v", err)
 			}
-			return jsonResponse(http.StatusOK, "", `{}`), nil
+			if want := []string{"1", "2", "3"}; !slices.Equal(got, want) {
+				t.Fatalf("s2-attempt=%v, want %v", got, want)
+			}
 		})
-		client := New("token", &ClientOptions{
-			BaseURL:          "http://account.test",
-			MakeBasinBaseURL: testBasinBaseURL,
-			HTTPClient:       &http.Client{Transport: rt, Timeout: time.Second},
-			RetryConfig:      retryCfg,
-		})
-		if err := client.Basins.Delete(context.Background(), "my-basin"); err != nil {
-			t.Fatalf("delete: %v", err)
-		}
-		if want := []string{"1", "2", "3"}; !slices.Equal(got, want) {
-			t.Fatalf("s2-attempt=%v, want %v", got, want)
-		}
-	})
+	}
 
 	t.Run("read session resets after progress", func(t *testing.T) {
 		frame := buildReadBatchFrame(t, []*pb.SequencedRecord{{SeqNum: 0, Body: []byte("a")}})
