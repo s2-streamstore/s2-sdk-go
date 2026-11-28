@@ -45,13 +45,16 @@ func TestWithRetries_NonRetryableStatusStops(t *testing.T) {
 	ctx := context.Background()
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
 
+	// A typed error must come back as is, so callers keep its type and
+	// payload (spec T1: the final error is the last attempt's own error).
+	want := newRangeNotSatisfiableError(416, "", &StreamPosition{SeqNum: 5})
 	attempts := 0
 	_, err := withRetries(ctx, cfg, nil, func(ctx context.Context) (int, error) {
 		attempts++
-		return 0, &S2Error{Status: 400}
+		return 0, want
 	})
-	if err == nil {
-		t.Fatalf("expected error")
+	if err != want {
+		t.Fatalf("expected the attempt's own error %v, got %T %v", want, err, err)
 	}
 	if attempts != 1 {
 		t.Fatalf("expected 1 attempt, got %d", attempts)
