@@ -12,7 +12,7 @@ import (
 
 // Retry configuration.
 type RetryConfig struct {
-	// Total number of attempts, including the initial try. Must be >= 1. A value of 1 means no retries.
+	// Total number of attempts, including the initial try. A value of 1 means no retries. Defaults to 3.
 	MaxAttempts int
 	// Minimum base delay for exponential backoff. Defaults to 100ms.
 	MinBaseDelay time.Duration
@@ -37,6 +37,29 @@ var DefaultRetryConfig = &RetryConfig{
 	MinBaseDelay:      defaultMinBaseDelay,
 	MaxBaseDelay:      defaultMaxBaseDelay,
 	AppendRetryPolicy: AppendRetryPolicyAll,
+}
+
+// withRetryDefaults returns a copy of cfg with each unset field at its default,
+// so a partial config such as {MinBaseDelay: 10ms} still makes 3 attempts
+// (spec C2).
+func withRetryDefaults(cfg *RetryConfig) *RetryConfig {
+	var out RetryConfig
+	if cfg != nil {
+		out = *cfg
+	}
+	if out.MaxAttempts <= 0 {
+		out.MaxAttempts = defaultMaxAttempts
+	}
+	if out.MinBaseDelay <= 0 {
+		out.MinBaseDelay = defaultMinBaseDelay
+	}
+	if out.MaxBaseDelay <= 0 {
+		out.MaxBaseDelay = defaultMaxBaseDelay
+	}
+	if out.AppendRetryPolicy == "" {
+		out.AppendRetryPolicy = AppendRetryPolicyAll
+	}
+	return &out
 }
 
 func withRetries[T any](ctx context.Context, config *RetryConfig, logger *slog.Logger, operation func(context.Context) (T, error)) (T, error) {

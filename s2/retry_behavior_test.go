@@ -523,3 +523,25 @@ func TestRetryHonorsRetryAfterMs(t *testing.T) {
 		t.Fatalf("list locations: %v", err)
 	}
 }
+
+func TestPartialRetryConfigKeepsDefaultMaxAttempts(t *testing.T) {
+	var attempts int
+	rt := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		if attempts < defaultMaxAttempts {
+			return jsonResponse(http.StatusServiceUnavailable, "", `{"code":"unavailable","message":"retry"}`), nil
+		}
+		return jsonResponse(http.StatusOK, "", `[]`), nil
+	})
+
+	client := New("token", &ClientOptions{
+		BaseURL:          "http://account.test",
+		MakeBasinBaseURL: testBasinBaseURL,
+		HTTPClient:       &http.Client{Transport: rt, Timeout: time.Second},
+		RetryConfig:      &RetryConfig{MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond},
+	})
+
+	if _, err := client.Locations.List(context.Background()); err != nil {
+		t.Fatalf("expected success on attempt %d, got %v after %d attempts", defaultMaxAttempts, err, attempts)
+	}
+}

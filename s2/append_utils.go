@@ -230,21 +230,7 @@ func applyAppendSessionDefaults(opts *AppendSessionOptions, baseRetry *RetryConf
 		}
 	}
 
-	if effective.MaxAttempts <= 0 {
-		effective.MaxAttempts = defaultMaxAttempts
-	}
-	if effective.MinBaseDelay <= 0 {
-		effective.MinBaseDelay = defaultMinBaseDelay
-	}
-	if effective.MaxBaseDelay <= 0 {
-		effective.MaxBaseDelay = defaultMaxBaseDelay
-	}
-	if effective.AppendRetryPolicy == "" {
-		effective.AppendRetryPolicy = AppendRetryPolicyAll
-	}
-
-	cfgCopy := effective
-	opts.RetryConfig = &cfgCopy
+	opts.RetryConfig = withRetryDefaults(&effective)
 
 	return opts, nil
 }
