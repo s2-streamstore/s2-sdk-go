@@ -95,7 +95,7 @@ func (s *StreamClient) CheckTail(ctx context.Context) (*TailResponse, error) {
 
 	path := fmt.Sprintf("/streams/%s/records/tail", url.PathEscape(string(s.name)))
 
-	return withRetries(ctx, s.basinClient.retryConfig, s.logger, func() (*TailResponse, error) {
+	return withRetries(ctx, s.basinClient.retryConfig, s.logger, func(ctx context.Context) (*TailResponse, error) {
 		httpClient := &httpClient{
 			client:      s.basinClient.httpClient,
 			baseURL:     s.basinClient.baseURL,

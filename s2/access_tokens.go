@@ -28,7 +28,7 @@ func (a *AccessTokensClient) List(ctx context.Context, args *ListAccessTokensArg
 
 	path := "/access-tokens" + buildQuery(args.Prefix, args.StartAfter, args.Limit)
 
-	return withRetries(ctx, a.client.retryConfig, a.client.logger, func() (*ListAccessTokensResponse, error) {
+	return withRetries(ctx, a.client.retryConfig, a.client.logger, func(ctx context.Context) (*ListAccessTokensResponse, error) {
 		httpClient := &httpClient{
 			client:      a.client.httpClient,
 			baseURL:     a.client.baseURL,
@@ -112,7 +112,7 @@ func (a *AccessTokensClient) Issue(ctx context.Context, args IssueAccessTokenArg
 	if err != nil {
 		return nil, err
 	}
-	return withDefiniteRetries(ctx, a.client.retryConfig, a.client.logger, func() (*IssueAccessTokenResponse, error) {
+	return withDefiniteRetries(ctx, a.client.retryConfig, a.client.logger, func(ctx context.Context) (*IssueAccessTokenResponse, error) {
 		httpClient := &httpClient{
 			client:      a.client.httpClient,
 			baseURL:     a.client.baseURL,
@@ -142,7 +142,7 @@ func (a *AccessTokensClient) Revoke(ctx context.Context, args RevokeAccessTokenA
 
 	path := fmt.Sprintf("/access-tokens/%s", url.PathEscape(string(args.ID)))
 
-	_, err := withRetries(ctx, a.client.retryConfig, a.client.logger, func() (*struct{}, error) {
+	_, err := withRetries(ctx, a.client.retryConfig, a.client.logger, func(ctx context.Context) (*struct{}, error) {
 		httpClient := &httpClient{
 			client:      a.client.httpClient,
 			baseURL:     a.client.baseURL,
