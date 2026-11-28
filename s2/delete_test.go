@@ -57,4 +57,11 @@ func TestDeleteSucceedsOnOwnNotFoundAfterRetry(t *testing.T) {
 			t.Fatal("expected basin_not_found on a stream delete to fail")
 		}
 	})
+
+	t.Run("own not-found code with another status fails", func(t *testing.T) {
+		client := newClient(jsonResponse(http.StatusConflict, "", `{"code":"basin_not_found","message":"gone"}`))
+		if err := client.Basins.Delete(ctx, "my-basin"); err == nil {
+			t.Fatal("expected basin_not_found with a 409 to fail")
+		}
+	})
 }
