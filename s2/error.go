@@ -118,10 +118,8 @@ func (e *S2Error) IsRetryable() bool {
 		return false
 	}
 
-	if e.Origin == "server" {
-		if info, ok := errorCodes[e.Code]; ok && info.status == e.Status {
-			return info.retryable
-		}
+	if info, ok := e.serverCode(); ok {
+		return info.retryable
 	}
 
 	return isRetryableStatus(e.Status)
@@ -148,8 +146,18 @@ func (e *S2Error) HasNoSideEffects() bool {
 		return true
 	}
 
+	info, ok := e.serverCode()
+	return ok && info.noSideEffects
+}
+
+// serverCode returns the table entry for a server error's code. A code that
+// arrives without its listed status does not apply (spec E4b).
+func (e *S2Error) serverCode() (errorCodeInfo, bool) {
+	if e.Origin != "server" {
+		return errorCodeInfo{}, false
+	}
 	info, ok := errorCodes[e.Code]
-	return ok && info.status == e.Status && info.noSideEffects
+	return info, ok && info.status == e.Status
 }
 
 func (e *S2Error) IsNetworkError() bool {
@@ -196,11 +204,14 @@ func HasNoSideEffects(err error) bool {
 // have taken effect. Already indefinite errors are returned unchanged.
 // deleteResult treats the deleted resource's own not-found code as success:
 // after a retry, the SDK cannot tell whether an earlier attempt deleted it
-// (spec M4). Any other error, including another 404, fails as usual.
+// (spec M4). Any other error, including another 404 or the code with another
+// status, fails as usual.
 func deleteResult(err error, notFoundCode string) error {
 	var s2Err *S2Error
 	if errors.As(err, &s2Err) && s2Err.Code == notFoundCode {
-		return nil
+		if _, ok := s2Err.serverCode(); ok {
+			return nil
+		}
 	}
 	return err
 }
