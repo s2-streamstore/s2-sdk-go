@@ -23,7 +23,7 @@ func TestWithRetries_RetryableStatusRetries(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
 
 	attempts := 0
-	result, err := withRetries(ctx, cfg, nil, func() (int, error) {
+	result, err := withRetries(ctx, cfg, nil, func(ctx context.Context) (int, error) {
 		attempts++
 		if attempts < 3 {
 			return 0, &S2Error{Status: 503}
@@ -46,7 +46,7 @@ func TestWithRetries_NonRetryableStatusStops(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
 
 	attempts := 0
-	_, err := withRetries(ctx, cfg, nil, func() (int, error) {
+	_, err := withRetries(ctx, cfg, nil, func(ctx context.Context) (int, error) {
 		attempts++
 		return 0, &S2Error{Status: 400}
 	})
@@ -63,7 +63,7 @@ func TestWithRetries_MaxAttemptsRespected(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
 
 	attempts := 0
-	_, err := withRetries(ctx, cfg, nil, func() (int, error) {
+	_, err := withRetries(ctx, cfg, nil, func(ctx context.Context) (int, error) {
 		attempts++
 		return 0, &S2Error{Status: 503}
 	})
@@ -80,7 +80,7 @@ func TestWithRetries_NetworkErrorRetries(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
 
 	attempts := 0
-	_, err := withRetries(ctx, cfg, nil, func() (int, error) {
+	_, err := withRetries(ctx, cfg, nil, func(ctx context.Context) (int, error) {
 		attempts++
 		if attempts < 2 {
 			return 0, fakeNetErr{}
@@ -127,7 +127,7 @@ func TestWithAppendRetries_PreservesUncertaintyAcrossAttempts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyAll}
 			attempts := 0
-			_, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+			_, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func(ctx context.Context) (*AppendAck, error) {
 				resp := tc.responses[attempts]
 				attempts++
 				return nil, resp
@@ -157,7 +157,7 @@ func TestWithAppendRetries_PreservesUncertaintyAcrossAttempts(t *testing.T) {
 func TestWithAppendRetries_SuccessAfterIndefiniteFailure(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyAll}
 	attempts := 0
-	ack, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+	ack, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func(ctx context.Context) (*AppendAck, error) {
 		attempts++
 		if attempts == 1 {
 			return nil, serverError(503, "unavailable")
@@ -178,7 +178,7 @@ func TestWithAppendRetries_NoSideEffectsWithoutMatchSeqNum(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
 
 	attempts := 0
-	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func(ctx context.Context) (*AppendAck, error) {
 		attempts++
 		return nil, &S2Error{Status: 503}
 	})
@@ -195,7 +195,7 @@ func TestWithAppendRetries_NoSideEffectsWithMatchSeqNumDoesNotRetry(t *testing.T
 	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
 
 	attempts := 0
-	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{MatchSeqNum: Uint64(0)}, func() (*AppendAck, error) {
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{MatchSeqNum: Uint64(0)}, func(ctx context.Context) (*AppendAck, error) {
 		attempts++
 		return nil, &S2Error{Status: 503, Origin: "server"}
 	})
@@ -212,7 +212,7 @@ func TestWithAppendRetries_NoSideEffectsRetriesNoSideEffectServerError(t *testin
 	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
 
 	attempts := 0
-	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func(ctx context.Context) (*AppendAck, error) {
 		attempts++
 		if attempts < 2 {
 			return nil, &S2Error{Status: 429, Code: "rate_limited", Origin: "server"}
@@ -232,7 +232,7 @@ func TestWithAppendRetries_NoSideEffectsRetriesTransactionConflict(t *testing.T)
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
 
 	attempts := 0
-	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func(ctx context.Context) (*AppendAck, error) {
 		attempts++
 		if attempts < 2 {
 			return nil, &S2Error{Status: 409, Code: "transaction_conflict", Origin: "server"}
@@ -252,7 +252,7 @@ func TestWithAppendRetries_NoSideEffectsDoesNotRetryUnavailable(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
 
 	attempts := 0
-	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func(ctx context.Context) (*AppendAck, error) {
 		attempts++
 		return nil, &S2Error{Status: 503, Code: "unavailable", Origin: "server"}
 	})
@@ -269,7 +269,7 @@ func TestWithAppendRetries_NoSideEffectsNetworkError(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 3, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
 
 	attempts := 0
-	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{}, func(ctx context.Context) (*AppendAck, error) {
 		attempts++
 		return nil, fakeNetErr{}
 	})
@@ -289,7 +289,7 @@ func TestWithAppendRetries_NoSideEffectsRetriesDialError(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond, AppendRetryPolicy: AppendRetryPolicyNoSideEffects}
 
 	attempts := 0
-	_, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+	_, err := withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func(ctx context.Context) (*AppendAck, error) {
 		attempts++
 		if attempts == 1 {
 			return nil, dialRefusedError()
@@ -304,7 +304,7 @@ func TestWithAppendRetries_NoSideEffectsRetriesDialError(t *testing.T) {
 		t.Fatalf("expected a definite final error, got %v", err)
 	}
 
-	_, err = withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func() (*AppendAck, error) {
+	_, err = withAppendRetries(context.Background(), cfg, nil, &AppendInput{}, func(ctx context.Context) (*AppendAck, error) {
 		return nil, dialRefusedError()
 	})
 	if !HasNoSideEffects(err) {
@@ -321,7 +321,7 @@ func TestWithRetries_ContextCancellationStopsRetryLoop(t *testing.T) {
 
 	attempts := 0
 	start := time.Now()
-	_, err := withRetries(ctx, cfg, nil, func() (int, error) {
+	_, err := withRetries(ctx, cfg, nil, func(ctx context.Context) (int, error) {
 		attempts++
 		return 0, &S2Error{Status: 503, Message: "Service Unavailable"}
 	})
@@ -352,7 +352,7 @@ func TestWithAppendRetries_ContextCancellationStopsRetryLoop(t *testing.T) {
 
 	attempts := 0
 	start := time.Now()
-	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{MatchSeqNum: Uint64(0)}, func() (*AppendAck, error) {
+	_, err := withAppendRetries(ctx, cfg, nil, &AppendInput{MatchSeqNum: Uint64(0)}, func(ctx context.Context) (*AppendAck, error) {
 		attempts++
 		return nil, &S2Error{Status: 503, Message: "Service Unavailable"}
 	})
@@ -374,7 +374,7 @@ func TestWithRetries_NonS2ErrorPropagates(t *testing.T) {
 	cfg := &RetryConfig{MaxAttempts: 2, MinBaseDelay: time.Millisecond, MaxBaseDelay: time.Millisecond}
 
 	sentinel := errors.New("boom")
-	_, err := withRetries(ctx, cfg, nil, func() (int, error) {
+	_, err := withRetries(ctx, cfg, nil, func(ctx context.Context) (int, error) {
 		return 0, sentinel
 	})
 	if !errors.Is(err, sentinel) {

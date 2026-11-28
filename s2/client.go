@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -453,6 +454,7 @@ type userAgentRoundTripper struct {
 func (rt userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	reqCtx := req.Clone(req.Context())
 	reqCtx.Header.Set("User-Agent", rt.userAgent)
+	reqCtx.Header.Set("s2-attempt", strconv.Itoa(attemptFromContext(req.Context())))
 	resp, err := rt.base.RoundTrip(reqCtx)
 	if err == nil && resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		// S2 never redirects. Fail here, below http.Client's redirect policy

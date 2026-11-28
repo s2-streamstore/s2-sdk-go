@@ -28,7 +28,7 @@ func (s *StreamsClient) List(ctx context.Context, args *ListStreamsArgs) (*ListS
 
 	path := "/streams" + buildQuery(args.Prefix, args.StartAfter, args.Limit)
 
-	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*ListStreamsResponse, error) {
+	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func(ctx context.Context) (*ListStreamsResponse, error) {
 		httpClient := &httpClient{
 			client:      s.basin.httpClient,
 			baseURL:     s.basin.baseURL,
@@ -121,7 +121,7 @@ func (s *StreamsClient) Create(ctx context.Context, args CreateStreamArgs) (*Str
 	if err != nil {
 		return nil, err
 	}
-	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*StreamInfo, error) {
+	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func(ctx context.Context) (*StreamInfo, error) {
 		httpClient := &httpClient{
 			client:      s.basin.httpClient,
 			baseURL:     s.basin.baseURL,
@@ -170,7 +170,7 @@ func (s *StreamsClient) Ensure(ctx context.Context, args EnsureStreamArgs) (*Ens
 	if err != nil {
 		return nil, err
 	}
-	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*EnsureStreamResponse, error) {
+	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func(ctx context.Context) (*EnsureStreamResponse, error) {
 		httpClient := &httpClient{
 			client:      s.basin.httpClient,
 			baseURL:     s.basin.baseURL,
@@ -204,7 +204,7 @@ func (s *StreamsClient) Delete(ctx context.Context, streamName StreamName) error
 
 	path := fmt.Sprintf("/streams/%s", url.PathEscape(string(streamName)))
 
-	_, err := withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*struct{}, error) {
+	_, err := withRetries(ctx, s.basin.retryConfig, s.basin.logger, func(ctx context.Context) (*struct{}, error) {
 		httpClient := &httpClient{
 			client:      s.basin.httpClient,
 			baseURL:     s.basin.baseURL,
@@ -234,7 +234,7 @@ func (s *StreamsClient) GetConfig(ctx context.Context, streamName StreamName) (*
 
 	path := fmt.Sprintf("/streams/%s", url.PathEscape(string(streamName)))
 
-	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*StreamConfig, error) {
+	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func(ctx context.Context) (*StreamConfig, error) {
 		httpClient := &httpClient{
 			client:      s.basin.httpClient,
 			baseURL:     s.basin.baseURL,
@@ -269,7 +269,7 @@ func (s *StreamsClient) Reconfigure(ctx context.Context, args ReconfigureStreamA
 	if err != nil {
 		return nil, err
 	}
-	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func() (*StreamConfig, error) {
+	return withRetries(ctx, s.basin.retryConfig, s.basin.logger, func(ctx context.Context) (*StreamConfig, error) {
 		httpClient := &httpClient{
 			client:      s.basin.httpClient,
 			baseURL:     s.basin.baseURL,
