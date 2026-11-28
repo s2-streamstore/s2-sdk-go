@@ -170,14 +170,11 @@ func New(accessToken string, opts *ClientOptions) *Client {
 		}
 	}
 
-	var retryConfig *RetryConfig
-	if opts.RetryConfig != nil {
-		cfgCopy := *opts.RetryConfig
-		retryConfig = &cfgCopy
-	} else if DefaultRetryConfig != nil {
-		cfgCopy := *DefaultRetryConfig
-		retryConfig = &cfgCopy
+	retryConfig := opts.RetryConfig
+	if retryConfig == nil {
+		retryConfig = DefaultRetryConfig
 	}
+	retryConfig = withRetryDefaults(retryConfig)
 
 	connectionTimeout := opts.ConnectionTimeout
 	if connectionTimeout <= 0 {
